@@ -20,6 +20,7 @@ target_compile_options(winemu_core PRIVATE
 
 add_executable(cpuemu src/main.cpp)
 target_link_libraries(cpuemu PRIVATE winemu_core)
+target_compile_definitions(cpuemu PRIVATE CPUEMU_VERSION="${PROJECT_VERSION}")
 target_link_options(cpuemu PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wl,/base:0x10000000000,/dynamicbase:no>)
 
 enable_testing()

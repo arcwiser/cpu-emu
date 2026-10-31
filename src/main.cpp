@@ -14,6 +14,10 @@ namespace {
 
 namespace logging = winemu::log;
 
+#ifndef CPUEMU_VERSION
+#define CPUEMU_VERSION "development"
+#endif
+
 void print_usage() {
     std::cerr << "usage: cpuemu <program.exe> [options] [-- <guest arguments>]\n"
                  "\n"
@@ -22,6 +26,7 @@ void print_usage() {
                  "  -v, --verbose        log every guest API call and notable window message\n"
                  "  --log-level <level>  error, warn, info (default), api, or trace\n"
                  "  --log-file <path>    also write all log lines to <path>\n"
+                 "  --version            show the CPUEmu version\n"
                  "  -h, --help           show this help\n"
                  "\n"
                  "Everything after -- is passed to the guest program as its command line.\n";
@@ -65,6 +70,9 @@ int main(int argc, char **argv) {
             guest_arguments_mode = true;
         } else if (argument == "-h" || argument == "--help") {
             print_usage();
+            return 0;
+        } else if (argument == "--version") {
+            std::cout << "CPUEmu " << CPUEMU_VERSION << '\n';
             return 0;
         } else if (argument == "--limit") {
             if (!parse_limit(value(), limit)) {
