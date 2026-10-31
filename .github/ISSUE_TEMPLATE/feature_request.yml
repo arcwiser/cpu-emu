@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose an instruction family, runtime adapter, tool, or architectural improvement.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What guest behavior or development workflow does this unlock?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Explain the CPU, ABI, memory, or Win32 semantics involved.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and limitations
+      description: Describe other approaches and any safety or compatibility tradeoffs.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: This is a general emulator improvement, not an application-address special case.
+          required: true
+        - label: I searched existing issues and pull requests.
+          required: true

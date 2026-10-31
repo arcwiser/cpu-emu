@@ -15,6 +15,12 @@ The Notepad path additionally exercises PE resources, delay imports, TEB/PEB sta
 Win32 window creation, re-entrant guest window procedures, a native message loop, selected SSE2
 instructions, and guest-side proxies for APIs that cannot safely expose host pointers.
 
+## Contributing
+
+Pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for the build workflow, emulator
+safety rules, testing expectations, commit style, and the official pull-request process. Bug reports
+and feature proposals can use the repository's GitHub issue templates.
+
 ## Build
 
 The project requires CMake, Ninja, and a C++20 compiler. On Windows with LLVM:
@@ -55,7 +61,8 @@ Additional options:
 ```powershell
 build\cpuemu.exe program.exe --log-level api      # pick any level by name
 build\cpuemu.exe program.exe --log-file run.log   # mirror all log lines into a file
-build\cpuemu.exe program.exe --help               # full usage
+build\cpuemu.exe --version                        # print the installed version
+build\cpuemu.exe --help                           # full usage
 ```
 
 When the guest faults, the emulator logs the full CPU register state plus a history of the
