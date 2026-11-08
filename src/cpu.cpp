@@ -1418,6 +1418,96 @@ void Cpu::step() {
                 xmm_[decoded.reg] = result;
                 return;
             }
+            if (third == 0x17 && operand16) { // PTEST
+                const auto decoded = decode_rm(rex);
+                const auto source =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                const auto destination = xmm_[decoded.reg];
+                flags_ &= ~(flag_cf | flag_pf | flag_af | flag_zf | flag_sf | flag_of);
+                if (((source[0] & destination[0]) | (source[1] & destination[1])) == 0) {
+                    flags_ |= flag_zf;
+                }
+                if (((source[0] & ~destination[0]) | (source[1] & ~destination[1])) == 0) {
+                    flags_ |= flag_cf;
+                }
+                return;
+            }
+            if (third == 0x2b && operand16) { // PACKUSDW
+                const auto decoded = decode_rm(rex);
+                const auto source =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                const auto destination = xmm_[decoded.reg];
+                std::array<std::uint64_t, 2> result{};
+                for (unsigned input = 0; input < 2; ++input) {
+                    const auto &value = input == 0 ? destination : source;
+                    for (unsigned lane = 0; lane < 4; ++lane) {
+                        const auto signed_value =
+                            static_cast<std::int32_t>(value[lane / 2] >> ((lane % 2) * 32));
+                        const auto saturated = std::clamp<std::int64_t>(signed_value, 0, 65535);
+                        const auto output_lane = input * 4 + lane;
+                        result[output_lane / 4] |= static_cast<std::uint64_t>(saturated)
+                                                   << ((output_lane % 4) * 16);
+                    }
+                }
+                xmm_[decoded.reg] = result;
+                return;
+            }
+            if (third >= 0x38 && third <= 0x3f && operand16) { // Packed integer min/max
+                const auto decoded = decode_rm(rex);
+                const auto source =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                const auto destination = xmm_[decoded.reg];
+                const bool maximum = third >= 0x3c;
+                const auto operation = static_cast<std::uint8_t>(third - (maximum ? 0x3c : 0x38));
+                const unsigned lane_bits = operation == 0 ? 8U : (operation == 2 ? 16U : 32U);
+                const bool signed_lanes = operation <= 1;
+                const auto lane_mask = (1ULL << lane_bits) - 1;
+                std::array<std::uint64_t, 2> result{};
+                for (unsigned lane = 0; lane < 128 / lane_bits; ++lane) {
+                    const auto shift = (lane * lane_bits) % 64;
+                    const auto half = (lane * lane_bits) / 64;
+                    const auto left = (destination[half] >> shift) & lane_mask;
+                    const auto right = (source[half] >> shift) & lane_mask;
+                    const bool choose_right =
+                        signed_lanes
+                            ? (maximum
+                                   ? sign_extend(right, lane_bits) > sign_extend(left, lane_bits)
+                                   : sign_extend(right, lane_bits) < sign_extend(left, lane_bits))
+                            : (maximum ? right > left : right < left);
+                    result[half] |= (choose_right ? right : left) << shift;
+                }
+                xmm_[decoded.reg] = result;
+                return;
+            }
+            if (third == 0x40 && operand16) { // PMULLD
+                const auto decoded = decode_rm(rex);
+                const auto source =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                const auto destination = xmm_[decoded.reg];
+                std::array<std::uint64_t, 2> result{};
+                for (unsigned lane = 0; lane < 4; ++lane) {
+                    const auto shift = (lane % 2) * 32;
+                    const auto left = static_cast<std::int32_t>(destination[lane / 2] >> shift);
+                    const auto right = static_cast<std::int32_t>(source[lane / 2] >> shift);
+                    const auto product = static_cast<std::uint32_t>(
+                        static_cast<std::int64_t>(left) * static_cast<std::int64_t>(right));
+                    result[lane / 2] |= static_cast<std::uint64_t>(product) << shift;
+                }
+                xmm_[decoded.reg] = result;
+                return;
+            }
             if (third >= 0x1c && third <= 0x1e && operand16) { // PABSB/PABSW/PABSD
                 const auto decoded = decode_rm(rex);
                 const auto source =

@@ -4,6 +4,7 @@
 #include "winemu/memory.hpp"
 #include "winemu/runtime.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cstdint>
 #include <filesystem>
@@ -362,6 +363,68 @@ void test_extended_ssse3() {
                     rounded_expected[lane],
                 "PMULHRSW result");
     }
+
+    const std::int8_t minimum_left[] = {5,  -2, 100, -128, 7,  8,  -9, 10,
+                                        11, 12, 13,  14,   -1, -2, -3, -4};
+    const std::int8_t minimum_right[] = {4,  3,  101, 127, -7, 9,  -10, 9,
+                                         12, 11, 14,  13,  0,  -3, -2,  -5};
+    for (std::size_t lane = 0; lane < 16; ++lane) {
+        memory.write8(data_address + lane, static_cast<std::uint8_t>(minimum_left[lane]));
+        memory.write8(source_address + lane, static_cast<std::uint8_t>(minimum_right[lane]));
+    }
+    run_opcode(0x38); // PMINSB
+    for (std::size_t lane = 0; lane < 16; ++lane) {
+        require(static_cast<std::int8_t>(memory.read8(output_address + lane)) ==
+                    std::min(minimum_left[lane], minimum_right[lane]),
+                "PMINSB result");
+    }
+
+    const std::uint32_t maximum_left[] = {1, 0xffffffffU, 20, 40};
+    const std::uint32_t maximum_right[] = {2, 3, 30, 10};
+    for (std::size_t lane = 0; lane < 4; ++lane) {
+        memory.write32(data_address + lane * 4, maximum_left[lane]);
+        memory.write32(source_address + lane * 4, maximum_right[lane]);
+    }
+    run_opcode(0x3f); // PMAXUD
+    for (std::size_t lane = 0; lane < 4; ++lane) {
+        require(memory.read32(output_address + lane * 4) ==
+                    std::max(maximum_left[lane], maximum_right[lane]),
+                "PMAXUD result");
+    }
+
+    const std::int32_t product_left[] = {2, -3, 0x40000000, -7};
+    const std::int32_t product_right[] = {4, 5, 4, -9};
+    const std::uint32_t product_expected[] = {8, static_cast<std::uint32_t>(-15), 0, 63};
+    for (std::size_t lane = 0; lane < 4; ++lane) {
+        memory.write32(data_address + lane * 4, static_cast<std::uint32_t>(product_left[lane]));
+        memory.write32(source_address + lane * 4, static_cast<std::uint32_t>(product_right[lane]));
+    }
+    run_opcode(0x40); // PMULLD
+    for (std::size_t lane = 0; lane < 4; ++lane) {
+        require(memory.read32(output_address + lane * 4) == product_expected[lane],
+                "PMULLD low product");
+    }
+
+    const std::int32_t pack_left[] = {-1, 0, 65535, 70000};
+    const std::int32_t pack_right[] = {1, 32768, -500, 90000};
+    const std::uint16_t pack_expected[] = {0, 0, 65535, 65535, 1, 32768, 0, 65535};
+    for (std::size_t lane = 0; lane < 4; ++lane) {
+        memory.write32(data_address + lane * 4, static_cast<std::uint32_t>(pack_left[lane]));
+        memory.write32(source_address + lane * 4, static_cast<std::uint32_t>(pack_right[lane]));
+    }
+    run_opcode(0x2b); // PACKUSDW
+    for (std::size_t lane = 0; lane < 8; ++lane) {
+        require(memory.read16(output_address + lane * 2) == pack_expected[lane],
+                "PACKUSDW saturation result");
+    }
+
+    memory.write64(data_address, 0x0f);
+    memory.write64(data_address + 8, 0);
+    memory.write64(source_address, 0xf0);
+    memory.write64(source_address + 8, 0);
+    run_opcode(0x17); // PTEST
+    require((cpu.flags() & (1ULL << 6)) != 0, "PTEST zero intersection flag");
+    require((cpu.flags() & 1) == 0, "PTEST masked-source carry flag");
 }
 
 void test_sse3_float_operations() {

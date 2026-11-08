@@ -4,6 +4,21 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-08 — SSE4.1 packed-integer foundation
+
+### Added
+
+- Added `PTEST`, `PACKUSDW`, `PMINSB`, `PMINSD`, `PMINUW`, `PMINUD`, `PMAXSB`, `PMAXSD`,
+  `PMAXUW`, `PMAXUD`, and `PMULLD` with register/memory operands, packed signedness, saturation,
+  low-product wrapping, and architectural flag behavior.
+- Kept SSE4.1 hidden from `CPUID` until broader family coverage prevents software from selecting
+  unsupported operations.
+
+### Verified
+
+- Added machine-code regressions for signed and unsigned comparisons, saturation boundaries,
+  multiplication overflow, and both `PTEST` flag results.
+
 ## 2026-11-08 — Undertale target groundwork
 
 ### Added

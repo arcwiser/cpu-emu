@@ -16,6 +16,8 @@ without those semantics would be misleading.
   add/subtract, and alternating packed add/subtract.
 - Selected SSSE3 operations: `PSHUFB`, horizontal packed add/subtract variants, `PMADDUBSW`,
   `PSIGNB/W/D`, `PMULHRSW`, `PALIGNR`, and `PABSB/W/D`.
+- Initial SSE4.1 packed-integer coverage: `PTEST`, `PACKUSDW`, signed/unsigned packed min/max, and
+  `PMULLD`. SSE4.1 remains hidden from `CPUID` until the family is sufficiently complete.
 - System-query operations needed in user mode, including filtered `CPUID` and `RDTSC`.
 
 ## Feature-advertising rule
