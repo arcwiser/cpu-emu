@@ -4,6 +4,15 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-08 — Undertale PE32 window creation
+
+- Added PE32-safe `WNDCLASSEXW`, `CREATESTRUCTW`, `WINDOWPOS`, rectangle, resource, and window-text
+  marshaling without exposing host-owned pointers to the guest.
+- Added x86 callback-stack re-entry so native window messages execute the interpreted GameMaker
+  procedure, plus controlled `DefWindowProc`, `SendMessage`, cursor, metric, and rectangle adapters.
+- Undertale now creates a native `YYGameMakerYY` window, handles `WM_NCCREATE` and `WM_CREATE`, sets
+  its title and icons, and advances to `DirectInput8Create` after 15,129,726 instructions.
+
 ## 2026-11-08 — Undertale game-data and offline Steam startup
 
 - Corrected guest file-type reporting so the CRT accepts mapped disk handles instead of rejecting

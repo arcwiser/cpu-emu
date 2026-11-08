@@ -63,6 +63,13 @@ class Runtime {
         InterlockedOperation,
         GetProcessWindowStation,
         UserObjectInformation,
+        SystemMetrics,
+        WindowRectAdjustment,
+        WindowRectQuery,
+        GuestDefWindowProc,
+        GuestWindowText,
+        GuestSendMessage,
+        GuestCursor,
         GuestMessageBox,
         GuestMessageLoop,
         GuestFileDialog,
@@ -202,6 +209,7 @@ class Runtime {
     std::uint64_t creating_window_procedure_ = 0;
     bool quit_message_pending_ = false;
     std::uint32_t quit_message_code_ = 0;
+    std::unordered_map<std::uint64_t, std::int64_t> callback_long_parameters_;
     std::uint32_t callback_depth_ = 0;
     std::uint64_t protection_policy_proxy_ = 0;
     std::unordered_map<std::uint64_t, std::uint32_t> protection_policy_methods_;

@@ -33,6 +33,7 @@ namespace {
 constexpr std::uint64_t return_thunk64 = 0xffff'0000'0000'0000ULL;
 constexpr std::uint64_t return_thunk32 = 0x7ff0'0000ULL;
 constexpr std::uint64_t callback_return = 0xffff'0000'0000'0080ULL;
+constexpr std::uint64_t callback_return32 = 0x7ff0'0080ULL;
 constexpr std::uint64_t stack_top = 0x0000'0000'7000'0000ULL;
 constexpr std::uint64_t minimum_stack_size = 1024 * 1024;
 constexpr std::uint64_t environment_base = 0x7fc0'0000ULL;
@@ -433,6 +434,22 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GetProcessWindowStation;
     } else if (name == "GetUserObjectInformationA" || name == "GetUserObjectInformationW") {
         api = Api::UserObjectInformation;
+    } else if (name == "GetSystemMetrics") {
+        api = Api::SystemMetrics;
+    } else if (name == "AdjustWindowRect" || name == "AdjustWindowRectEx") {
+        api = Api::WindowRectAdjustment;
+    } else if (name == "GetClientRect" || name == "GetWindowRect") {
+        api = Api::WindowRectQuery;
+    } else if (name == "DefWindowProcA" || name == "DefWindowProcW") {
+        api = Api::GuestDefWindowProc;
+    } else if (name == "SetWindowTextA" || name == "SetWindowTextW" || name == "GetWindowTextA" ||
+               name == "GetWindowTextW" || name == "GetWindowTextLengthA" ||
+               name == "GetWindowTextLengthW") {
+        api = Api::GuestWindowText;
+    } else if (name == "SendMessageA" || name == "SendMessageW") {
+        api = Api::GuestSendMessage;
+    } else if (name == "SetCursor" || name == "ShowCursor") {
+        api = Api::GuestCursor;
     } else if (name == "MessageBoxA" || name == "MessageBoxW") {
         api = Api::GuestMessageBox;
     } else if (name == "PeekMessageA" || name == "PeekMessageW" || name == "GetMessageA" ||
@@ -1260,6 +1277,227 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(5);
         break;
     }
+    case Api::SystemMetrics:
+        cpu.set_reg(Rax,
+                    static_cast<std::uint32_t>(::GetSystemMetrics(static_cast<int>(argument(0)))));
+        finish_call(1);
+        break;
+    case Api::WindowRectAdjustment: {
+        const auto destination = argument(0);
+        RECT rectangle{static_cast<LONG>(cpu.memory().read32(destination)),
+                       static_cast<LONG>(cpu.memory().read32(destination + 4)),
+                       static_cast<LONG>(cpu.memory().read32(destination + 8)),
+                       static_cast<LONG>(cpu.memory().read32(destination + 12))};
+        const auto extended = thunk_name.ends_with("!AdjustWindowRectEx");
+        const auto result =
+            extended
+                ? ::AdjustWindowRectEx(&rectangle, static_cast<DWORD>(argument(1)),
+                                       argument(2) != 0, static_cast<DWORD>(argument(3)))
+                : ::AdjustWindowRect(&rectangle, static_cast<DWORD>(argument(1)), argument(2) != 0);
+        if (result != FALSE) {
+            cpu.memory().write32(destination, static_cast<std::uint32_t>(rectangle.left));
+            cpu.memory().write32(destination + 4, static_cast<std::uint32_t>(rectangle.top));
+            cpu.memory().write32(destination + 8, static_cast<std::uint32_t>(rectangle.right));
+            cpu.memory().write32(destination + 12, static_cast<std::uint32_t>(rectangle.bottom));
+        } else {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+        finish_call(extended ? 4 : 3);
+        break;
+    }
+    case Api::WindowRectQuery: {
+        RECT rectangle{};
+        const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(0)));
+        const auto result = thunk_name.ends_with("!GetClientRect")
+                                ? ::GetClientRect(window, &rectangle)
+                                : ::GetWindowRect(window, &rectangle);
+        if (result != FALSE) {
+            const auto destination = argument(1);
+            cpu.memory().write32(destination, static_cast<std::uint32_t>(rectangle.left));
+            cpu.memory().write32(destination + 4, static_cast<std::uint32_t>(rectangle.top));
+            cpu.memory().write32(destination + 8, static_cast<std::uint32_t>(rectangle.right));
+            cpu.memory().write32(destination + 12, static_cast<std::uint32_t>(rectangle.bottom));
+        } else {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+        finish_call(2);
+        break;
+    }
+    case Api::GuestDefWindowProc: {
+        auto native_long_parameter = static_cast<std::int64_t>(argument(3));
+        if (const auto translated = callback_long_parameters_.find(argument(3));
+            translated != callback_long_parameters_.end()) {
+            native_long_parameter = translated->second;
+        }
+        const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(0)));
+        const auto result = thunk_name.ends_with("W")
+                                ? ::DefWindowProcW(window, static_cast<UINT>(argument(1)),
+                                                   static_cast<WPARAM>(argument(2)),
+                                                   static_cast<LPARAM>(native_long_parameter))
+                                : ::DefWindowProcA(window, static_cast<UINT>(argument(1)),
+                                                   static_cast<WPARAM>(argument(2)),
+                                                   static_cast<LPARAM>(native_long_parameter));
+        if (argument(1) == WM_GETTEXT && native_long_parameter != 0 && argument(3) != 0) {
+            const auto byte_count = static_cast<std::size_t>(argument(2)) * sizeof(wchar_t);
+            cpu.memory().write(
+                argument(3),
+                std::span<const std::uint8_t>(
+                    reinterpret_cast<const std::uint8_t *>(native_long_parameter), byte_count));
+        }
+        cpu.set_reg(Rax, static_cast<std::uint64_t>(result));
+        finish_call(4);
+        break;
+    }
+    case Api::GuestWindowText: {
+        const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(0)));
+        const bool wide = thunk_name.ends_with("W");
+        if (thunk_name.find("!SetWindowText") != std::string::npos) {
+            const auto result =
+                wide ? ::SetWindowTextW(window, cpu.memory().read_wide_string(argument(1)).c_str())
+                     : ::SetWindowTextA(window, cpu.memory().read_c_string(argument(1)).c_str());
+            if (result == FALSE) {
+                last_error_ = ::GetLastError();
+            }
+            cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+            finish_call(2);
+            break;
+        }
+        if (thunk_name.find("!GetWindowTextLength") != std::string::npos) {
+            const auto result =
+                wide ? ::GetWindowTextLengthW(window) : ::GetWindowTextLengthA(window);
+            cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+            finish_call(1);
+            break;
+        }
+        const auto capacity = static_cast<int>(argument(2));
+        int result = 0;
+        if (wide) {
+            std::vector<wchar_t> buffer(std::max(capacity, 1));
+            result = ::GetWindowTextW(window, buffer.data(), capacity);
+            if (result >= 0 && capacity > 0) {
+                cpu.memory().write(argument(1),
+                                   std::span<const std::uint8_t>(
+                                       reinterpret_cast<const std::uint8_t *>(buffer.data()),
+                                       (static_cast<std::size_t>(result) + 1) * sizeof(wchar_t)));
+            }
+        } else {
+            std::vector<char> buffer(std::max(capacity, 1));
+            result = ::GetWindowTextA(window, buffer.data(), capacity);
+            if (result >= 0 && capacity > 0) {
+                cpu.memory().write(
+                    argument(1),
+                    std::span<const std::uint8_t>(
+                        reinterpret_cast<const std::uint8_t *>(buffer.data()), result + 1));
+            }
+        }
+        cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+        finish_call(3);
+        break;
+    }
+    case Api::GuestSendMessage: {
+        const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(0)));
+        const auto message = static_cast<UINT>(argument(1));
+        const auto word_parameter = static_cast<WPARAM>(argument(2));
+        const auto guest_long_parameter = argument(3);
+        const bool wide = thunk_name.ends_with("W");
+        LRESULT result = 0;
+        bool supported = true;
+        if (message == WM_SETTEXT) {
+            if (wide) {
+                const auto text = guest_long_parameter == 0
+                                      ? std::wstring{}
+                                      : cpu.memory().read_wide_string(guest_long_parameter);
+                result = ::SendMessageW(window, message, word_parameter,
+                                        reinterpret_cast<LPARAM>(text.c_str()));
+            } else {
+                const auto text = guest_long_parameter == 0
+                                      ? std::string{}
+                                      : cpu.memory().read_c_string(guest_long_parameter);
+                result = ::SendMessageA(window, message, word_parameter,
+                                        reinterpret_cast<LPARAM>(text.c_str()));
+            }
+        } else if (message == WM_GETTEXT) {
+            const auto capacity = static_cast<std::size_t>(word_parameter);
+            if (capacity > 0x100000) {
+                supported = false;
+            } else if (wide) {
+                std::vector<wchar_t> buffer(std::max<std::size_t>(capacity, 1));
+                result = ::SendMessageW(window, message, word_parameter,
+                                        reinterpret_cast<LPARAM>(buffer.data()));
+                if (guest_long_parameter != 0 && capacity != 0) {
+                    const auto characters = std::min<std::size_t>(
+                        static_cast<std::size_t>(std::max<LRESULT>(result, 0)) + 1, capacity);
+                    cpu.memory().write(guest_long_parameter,
+                                       std::span<const std::uint8_t>(
+                                           reinterpret_cast<const std::uint8_t *>(buffer.data()),
+                                           characters * sizeof(wchar_t)));
+                }
+            } else {
+                std::vector<char> buffer(std::max<std::size_t>(capacity, 1));
+                result = ::SendMessageA(window, message, word_parameter,
+                                        reinterpret_cast<LPARAM>(buffer.data()));
+                if (guest_long_parameter != 0 && capacity != 0) {
+                    const auto characters = std::min<std::size_t>(
+                        static_cast<std::size_t>(std::max<LRESULT>(result, 0)) + 1, capacity);
+                    cpu.memory().write(
+                        guest_long_parameter,
+                        std::span<const std::uint8_t>(
+                            reinterpret_cast<const std::uint8_t *>(buffer.data()), characters));
+                }
+            }
+        } else {
+            switch (message) {
+            case WM_CREATE:
+            case WM_NCCREATE:
+            case WM_GETMINMAXINFO:
+            case WM_NCCALCSIZE:
+            case WM_WINDOWPOSCHANGING:
+            case WM_WINDOWPOSCHANGED:
+            case WM_STYLECHANGING:
+            case WM_STYLECHANGED:
+            case WM_SIZING:
+            case WM_MOVING:
+            case WM_DPICHANGED:
+            case WM_COPYDATA:
+            case WM_NOTIFY:
+            case WM_HELP:
+            case WM_DEVICECHANGE:
+                supported = false;
+                break;
+            default:
+                result = wide ? ::SendMessageW(window, message, word_parameter,
+                                               static_cast<LPARAM>(guest_long_parameter))
+                              : ::SendMessageA(window, message, word_parameter,
+                                               static_cast<LPARAM>(guest_long_parameter));
+                break;
+            }
+        }
+        if (!supported) {
+            last_error_ = ERROR_NOT_SUPPORTED;
+            log::warn("window",
+                      thunk_name + " refused pointer-bearing " + window_message_name(message));
+        }
+        if (callback_exception != nullptr) {
+            auto exception = callback_exception;
+            callback_exception = nullptr;
+            std::rethrow_exception(exception);
+        }
+        cpu.set_reg(Rax, static_cast<std::uint64_t>(result));
+        finish_call(4);
+        break;
+    }
+    case Api::GuestCursor:
+        if (thunk_name.ends_with("!SetCursor")) {
+            const auto result =
+                ::SetCursor(reinterpret_cast<HCURSOR>(static_cast<std::uintptr_t>(argument(0))));
+            cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(result));
+        } else {
+            cpu.set_reg(Rax, static_cast<std::uint32_t>(::ShowCursor(argument(0) != 0)));
+        }
+        finish_call(1);
+        break;
     case Api::GuestMessageBox: {
         const auto text_pointer = argument(1);
         const auto caption_pointer = argument(2);
@@ -2703,70 +2941,136 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     }
     case Api::LoadStringW: {
+        const auto capacity = static_cast<int>(argument(3));
+        std::vector<wchar_t> buffer(std::max(capacity, 1));
+        const auto module =
+            argument(0) == guest_image_base_ ? static_cast<HMODULE>(resource_module_) : nullptr;
         const auto result =
-            ::LoadStringW(static_cast<HMODULE>(resource_module_), static_cast<UINT>(cpu.reg(Rdx)),
-                          reinterpret_cast<wchar_t *>(static_cast<std::uintptr_t>(cpu.reg(R8))),
-                          static_cast<int>(cpu.reg(R9)));
+            module == nullptr || capacity <= 0
+                ? 0
+                : ::LoadStringW(module, static_cast<UINT>(argument(1)), buffer.data(), capacity);
+        if (result > 0 && argument(2) != 0) {
+            cpu.memory().write(argument(2),
+                               std::span<const std::uint8_t>(
+                                   reinterpret_cast<const std::uint8_t *>(buffer.data()),
+                                   (static_cast<std::size_t>(result) + 1) * sizeof(wchar_t)));
+        }
         cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
-        finish_call();
+        finish_call(4);
         break;
     }
     case Api::LoadCursorW: {
-        const auto module = cpu.reg(Rcx) == guest_image_base_
+        const auto module = argument(0) == guest_image_base_
                                 ? static_cast<HINSTANCE>(resource_module_)
-                                : reinterpret_cast<HINSTANCE>(cpu.reg(Rcx));
-        cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(
-                             ::LoadCursorW(module, reinterpret_cast<LPCWSTR>(cpu.reg(Rdx)))));
-        finish_call();
+                                : static_cast<HINSTANCE>(nullptr);
+        const auto name_value = argument(1);
+        const auto name_storage =
+            name_value > 0xffff ? cpu.memory().read_wide_string(name_value) : std::wstring{};
+        const auto name =
+            name_value <= 0xffff ? MAKEINTRESOURCEW(name_value) : name_storage.c_str();
+        const auto result = ::LoadCursorW(module, name);
+        if (result == nullptr) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(result));
+        finish_call(2);
         break;
     }
     case Api::LoadIconW: {
-        const auto module = cpu.reg(Rcx) == guest_image_base_
+        const auto module = argument(0) == guest_image_base_
                                 ? static_cast<HINSTANCE>(resource_module_)
-                                : reinterpret_cast<HINSTANCE>(cpu.reg(Rcx));
-        cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(
-                             ::LoadIconW(module, reinterpret_cast<LPCWSTR>(cpu.reg(Rdx)))));
-        finish_call();
+                                : static_cast<HINSTANCE>(nullptr);
+        const auto name_value = argument(1);
+        const auto name_storage =
+            name_value > 0xffff ? cpu.memory().read_wide_string(name_value) : std::wstring{};
+        const auto name =
+            name_value <= 0xffff ? MAKEINTRESOURCEW(name_value) : name_storage.c_str();
+        const auto result = ::LoadIconW(module, name);
+        if (result == nullptr) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(result));
+        finish_call(2);
         break;
     }
     case Api::LoadImageW: {
-        const auto module = cpu.reg(Rcx) == guest_image_base_
+        const auto module = argument(0) == guest_image_base_
                                 ? static_cast<HINSTANCE>(resource_module_)
-                                : reinterpret_cast<HINSTANCE>(cpu.reg(Rcx));
-        const auto result =
-            ::LoadImageW(module, reinterpret_cast<LPCWSTR>(cpu.reg(Rdx)),
-                         static_cast<UINT>(cpu.reg(R8)), static_cast<int>(cpu.reg(R9)),
-                         static_cast<int>(cpu.memory().read64(cpu.reg(Rsp) + 0x28)),
-                         static_cast<UINT>(cpu.memory().read64(cpu.reg(Rsp) + 0x30)));
+                                : static_cast<HINSTANCE>(nullptr);
+        const auto name_value = argument(1);
+        const auto name_storage =
+            name_value > 0xffff ? cpu.memory().read_wide_string(name_value) : std::wstring{};
+        const auto name =
+            name_value <= 0xffff ? MAKEINTRESOURCEW(name_value) : name_storage.c_str();
+        const auto result = ::LoadImageW(
+            module, name, static_cast<UINT>(argument(2)), static_cast<int>(argument(3)),
+            static_cast<int>(argument(4)), static_cast<UINT>(argument(5)));
+        if (result == nullptr) {
+            last_error_ = ::GetLastError();
+        }
         cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(result));
-        finish_call();
+        finish_call(6);
         break;
     }
     case Api::LoadAcceleratorsW: {
-        const auto module = cpu.reg(Rcx) == guest_image_base_
+        const auto module = argument(0) == guest_image_base_
                                 ? static_cast<HINSTANCE>(resource_module_)
-                                : reinterpret_cast<HINSTANCE>(cpu.reg(Rcx));
-        cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(
-                             ::LoadAcceleratorsW(module, reinterpret_cast<LPCWSTR>(cpu.reg(Rdx)))));
-        finish_call();
+                                : static_cast<HINSTANCE>(nullptr);
+        const auto name_value = argument(1);
+        const auto name_storage =
+            name_value > 0xffff ? cpu.memory().read_wide_string(name_value) : std::wstring{};
+        const auto name =
+            name_value <= 0xffff ? MAKEINTRESOURCEW(name_value) : name_storage.c_str();
+        const auto result = module == nullptr ? nullptr : ::LoadAcceleratorsW(module, name);
+        if (result == nullptr) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(result));
+        finish_call(2);
         break;
     }
     case Api::RegisterClassExW: {
-        const auto *guest_class =
-            reinterpret_cast<const WNDCLASSEXW *>(static_cast<std::uintptr_t>(cpu.reg(Rcx)));
-        if (guest_class == nullptr || guest_class->cbSize != sizeof(WNDCLASSEXW) ||
-            guest_class->lpszClassName == nullptr || guest_class->lpfnWndProc == nullptr) {
+        const auto structure = argument(0);
+        const auto guest_size = guest_is_64_bit_ ? 80U : 48U;
+        if (structure == 0 || cpu.memory().read32(structure) != guest_size) {
             cpu.set_reg(Rax, 0);
-            finish_call();
+            finish_call(1);
             break;
         }
-        WNDCLASSEXW host_class = *guest_class;
-        const auto guest_procedure = reinterpret_cast<std::uint64_t>(guest_class->lpfnWndProc);
-        const std::wstring class_name(guest_class->lpszClassName);
-        class_window_procedures_[class_name] = guest_procedure;
+        const auto read_pointer = [&](std::uint32_t offset32, std::uint32_t offset64) {
+            return guest_is_64_bit_
+                       ? cpu.memory().read64(structure + offset64)
+                       : static_cast<std::uint64_t>(cpu.memory().read32(structure + offset32));
+        };
+        const auto guest_procedure = read_pointer(8, 8);
+        const auto class_pointer = read_pointer(40, 64);
+        if (class_pointer == 0 || guest_procedure == 0) {
+            cpu.set_reg(Rax, 0);
+            finish_call(1);
+            break;
+        }
+        const auto class_name = cpu.memory().read_wide_string(class_pointer);
+        const auto menu_pointer = read_pointer(36, 56);
+        const auto menu_name =
+            menu_pointer > 0xffff ? cpu.memory().read_wide_string(menu_pointer) : std::wstring{};
+        WNDCLASSEXW host_class{};
+        host_class.cbSize = sizeof(host_class);
+        host_class.style = cpu.memory().read32(structure + 4);
         host_class.lpfnWndProc = window_proc_bridge;
+        host_class.cbClsExtra =
+            static_cast<int>(cpu.memory().read32(structure + (guest_is_64_bit_ ? 16 : 12)));
+        host_class.cbWndExtra =
+            static_cast<int>(cpu.memory().read32(structure + (guest_is_64_bit_ ? 20 : 16)));
         host_class.hInstance = GetModuleHandleW(nullptr);
-        host_class.lpszMenuName = nullptr;
+        host_class.hIcon = reinterpret_cast<HICON>(read_pointer(24, 32));
+        host_class.hCursor = reinterpret_cast<HCURSOR>(read_pointer(28, 40));
+        host_class.hbrBackground = reinterpret_cast<HBRUSH>(read_pointer(32, 48));
+        host_class.lpszMenuName = menu_pointer == 0        ? nullptr
+                                  : menu_pointer <= 0xffff ? MAKEINTRESOURCEW(menu_pointer)
+                                                           : menu_name.c_str();
+        host_class.lpszClassName = class_name.c_str();
+        host_class.hIconSm = reinterpret_cast<HICON>(read_pointer(44, 72));
+        class_window_procedures_[class_name] = guest_procedure;
         const auto atom = ::RegisterClassExW(&host_class);
         log::api("window", "RegisterClassExW class='" + narrow_string(class_name) + "' proc=" +
                                log::hex(guest_procedure) + " atom=" + std::to_string(atom));
@@ -2774,21 +3078,22 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             atom_window_procedures_[atom] = guest_procedure;
         }
         cpu.set_reg(Rax, atom);
-        finish_call();
+        finish_call(1);
         break;
     }
     case Api::CreateWindowExW: {
-        const auto class_value = cpu.reg(Rdx);
+        const auto class_value = argument(1);
+        const auto class_name =
+            class_value > 0xffff ? cpu.memory().read_wide_string(class_value) : std::wstring{};
+        const auto native_class =
+            class_value <= 0xffff ? MAKEINTRESOURCEW(class_value) : class_name.c_str();
+        const auto title_pointer = argument(2);
+        const auto title =
+            title_pointer == 0 ? std::wstring{} : cpu.memory().read_wide_string(title_pointer);
         if (log::enabled(log::Level::Api)) {
-            std::string class_description;
-            if (class_value <= 0xffff) {
-                class_description = "atom " + std::to_string(class_value);
-            } else {
-                const auto *name =
-                    reinterpret_cast<const wchar_t *>(static_cast<std::uintptr_t>(class_value));
-                class_description =
-                    name == nullptr ? "<null>" : "'" + narrow_string(std::wstring(name)) + "'";
-            }
+            const auto class_description = class_value <= 0xffff
+                                               ? "atom " + std::to_string(class_value)
+                                               : "'" + narrow_string(class_name) + "'";
             log::api("window", "CreateWindowExW class=" + class_description);
         }
         if (class_value <= 0xffff) {
@@ -2796,25 +3101,19 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 atom_window_procedures_.find(static_cast<std::uint16_t>(class_value));
             creating_window_procedure_ = found == atom_window_procedures_.end() ? 0 : found->second;
         } else {
-            const auto class_name =
-                reinterpret_cast<const wchar_t *>(static_cast<std::uintptr_t>(class_value));
-            const auto found = class_name == nullptr ? class_window_procedures_.end()
-                                                     : class_window_procedures_.find(class_name);
+            const auto found = class_window_procedures_.find(class_name);
             creating_window_procedure_ =
                 found == class_window_procedures_.end() ? 0 : found->second;
         }
-        const auto stack = cpu.reg(Rsp);
         const auto result = ::CreateWindowExW(
-            static_cast<DWORD>(cpu.reg(Rcx)),
-            reinterpret_cast<LPCWSTR>(static_cast<std::uintptr_t>(class_value)),
-            reinterpret_cast<LPCWSTR>(static_cast<std::uintptr_t>(cpu.reg(R8))),
-            static_cast<DWORD>(cpu.reg(R9)), static_cast<int>(cpu.memory().read64(stack + 0x28)),
-            static_cast<int>(cpu.memory().read64(stack + 0x30)),
-            static_cast<int>(cpu.memory().read64(stack + 0x38)),
-            static_cast<int>(cpu.memory().read64(stack + 0x40)),
-            reinterpret_cast<HWND>(cpu.memory().read64(stack + 0x48)),
-            reinterpret_cast<HMENU>(cpu.memory().read64(stack + 0x50)), GetModuleHandleW(nullptr),
-            reinterpret_cast<void *>(cpu.memory().read64(stack + 0x60)));
+            static_cast<DWORD>(argument(0)), native_class,
+            title_pointer == 0 ? nullptr : title.c_str(), static_cast<DWORD>(argument(3)),
+            static_cast<int>(argument(4)), static_cast<int>(argument(5)),
+            static_cast<int>(argument(6)), static_cast<int>(argument(7)),
+            reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(8))),
+            reinterpret_cast<HMENU>(static_cast<std::uintptr_t>(argument(9))),
+            GetModuleHandleW(nullptr),
+            reinterpret_cast<void *>(static_cast<std::uintptr_t>(argument(11))));
         if (callback_exception != nullptr) {
             auto exception = callback_exception;
             callback_exception = nullptr;
@@ -2822,9 +3121,12 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         log::api("window",
                  "CreateWindowExW -> hwnd=" + log::hex(reinterpret_cast<std::uint64_t>(result)));
+        if (result == nullptr) {
+            last_error_ = ::GetLastError();
+        }
         creating_window_procedure_ = 0;
         cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(result));
-        finish_call();
+        finish_call(12);
         break;
     }
     case Api::ResolveDelayLoadedAPI: {
@@ -3072,18 +3374,27 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
 std::uint64_t Runtime::invoke_guest(Cpu &cpu, std::uint64_t target,
                                     const std::array<std::uint64_t, 4> &arguments,
                                     std::uint32_t &exit_code, bool &exited) {
-    cpu.set_reg(Rcx, arguments[0]);
-    cpu.set_reg(Rdx, arguments[1]);
-    cpu.set_reg(R8, arguments[2]);
-    cpu.set_reg(R9, arguments[3]);
     const auto outer_stack = cpu.reg(Rsp);
     const auto outer_rip = cpu.rip();
-    const auto callback_stack = outer_stack - 0x30;
+    const auto callback_stack = outer_stack - (guest_is_64_bit_ ? 0x30 : 0x20);
+    const auto return_address = guest_is_64_bit_ ? callback_return : callback_return32;
+    if (guest_is_64_bit_) {
+        cpu.set_reg(Rcx, arguments[0]);
+        cpu.set_reg(Rdx, arguments[1]);
+        cpu.set_reg(R8, arguments[2]);
+        cpu.set_reg(R9, arguments[3]);
+        cpu.memory().write64(callback_stack, return_address);
+    } else {
+        cpu.memory().write32(callback_stack, static_cast<std::uint32_t>(return_address));
+        for (std::size_t index = 0; index < arguments.size(); ++index) {
+            cpu.memory().write32(callback_stack + 4 + index * 4,
+                                 static_cast<std::uint32_t>(arguments[index]));
+        }
+    }
     cpu.set_reg(Rsp, callback_stack);
-    cpu.memory().write64(callback_stack, callback_return);
     cpu.set_rip(target);
     try {
-        while (!exited && cpu.rip() != callback_return) {
+        while (!exited && cpu.rip() != return_address) {
             if (!dispatch(cpu, exit_code, exited)) {
                 cpu.step();
             }
@@ -3123,6 +3434,15 @@ std::intptr_t Runtime::invoke_window_proc(Cpu &cpu, std::uint64_t window, std::u
     }
     std::size_t pointer_size = 0;
     switch (message) {
+    case WM_SETTEXT:
+        if (long_parameter != 0) {
+            pointer_size = (std::wcslen(reinterpret_cast<const wchar_t *>(long_parameter)) + 1) *
+                           sizeof(wchar_t);
+        }
+        break;
+    case WM_GETTEXT:
+        pointer_size = static_cast<std::size_t>(word_parameter) * sizeof(wchar_t);
+        break;
     case WM_GETMINMAXINFO:
         pointer_size = sizeof(MINMAXINFO);
         break;
@@ -3151,14 +3471,74 @@ std::intptr_t Runtime::invoke_window_proc(Cpu &cpu, std::uint64_t window, std::u
     }
     auto guest_long_parameter = static_cast<std::uint64_t>(long_parameter);
     std::uint64_t scratch = 0;
+    bool copy_back_raw = false;
     if (pointer_size != 0 && long_parameter != 0) {
         if (callback_depth_ >= 16 || pointer_size > 0x1000) {
             throw Error("window callback scratch space exhausted");
         }
         scratch = environment_base + 0x10000 + callback_depth_ * 0x1000;
-        std::memcpy(reinterpret_cast<void *>(scratch),
-                    reinterpret_cast<const void *>(long_parameter), pointer_size);
         guest_long_parameter = scratch;
+        if (message == WM_CREATE || message == WM_NCCREATE) {
+            const auto *native = reinterpret_cast<const CREATESTRUCTW *>(long_parameter);
+            const auto write_pointer = [&](std::uint32_t offset32, std::uint32_t offset64,
+                                           std::uint64_t value) {
+                if (guest_is_64_bit_) {
+                    cpu.memory().write64(scratch + offset64, value);
+                } else {
+                    cpu.memory().write32(scratch + offset32, static_cast<std::uint32_t>(value));
+                }
+            };
+            const auto marshal_string = [&](const wchar_t *value, std::uint64_t address) {
+                if (value == nullptr || reinterpret_cast<std::uintptr_t>(value) <= 0xffff) {
+                    return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(value));
+                }
+                const std::wstring text(value);
+                if ((text.size() + 1) * 2 > 0x300) {
+                    throw Error("window callback string exceeds scratch space");
+                }
+                for (std::size_t index = 0; index <= text.size(); ++index) {
+                    cpu.memory().write16(address + index * 2,
+                                         static_cast<std::uint16_t>(text[index]));
+                }
+                return address;
+            };
+            cpu.memory().write(scratch, std::vector<std::uint8_t>(guest_is_64_bit_ ? 80U : 48U));
+            write_pointer(0, 0, reinterpret_cast<std::uint64_t>(native->lpCreateParams));
+            write_pointer(4, 8, guest_image_base_);
+            write_pointer(8, 16, reinterpret_cast<std::uint64_t>(native->hMenu));
+            write_pointer(12, 24, reinterpret_cast<std::uint64_t>(native->hwndParent));
+            const auto integer_offset = guest_is_64_bit_ ? 32U : 16U;
+            cpu.memory().write32(scratch + integer_offset, static_cast<std::uint32_t>(native->cy));
+            cpu.memory().write32(scratch + integer_offset + 4,
+                                 static_cast<std::uint32_t>(native->cx));
+            cpu.memory().write32(scratch + integer_offset + 8,
+                                 static_cast<std::uint32_t>(native->y));
+            cpu.memory().write32(scratch + integer_offset + 12,
+                                 static_cast<std::uint32_t>(native->x));
+            cpu.memory().write32(scratch + integer_offset + 16, native->style);
+            write_pointer(36, 56, marshal_string(native->lpszName, scratch + 0x200));
+            write_pointer(40, 64, marshal_string(native->lpszClass, scratch + 0x600));
+            cpu.memory().write32(scratch + (guest_is_64_bit_ ? 72U : 44U), native->dwExStyle);
+        } else if (!guest_is_64_bit_ &&
+                   (message == WM_WINDOWPOSCHANGING || message == WM_WINDOWPOSCHANGED)) {
+            const auto *native = reinterpret_cast<const WINDOWPOS *>(long_parameter);
+            cpu.memory().write32(scratch, static_cast<std::uint32_t>(
+                                              reinterpret_cast<std::uintptr_t>(native->hwnd)));
+            cpu.memory().write32(scratch + 4,
+                                 static_cast<std::uint32_t>(
+                                     reinterpret_cast<std::uintptr_t>(native->hwndInsertAfter)));
+            cpu.memory().write32(scratch + 8, static_cast<std::uint32_t>(native->x));
+            cpu.memory().write32(scratch + 12, static_cast<std::uint32_t>(native->y));
+            cpu.memory().write32(scratch + 16, static_cast<std::uint32_t>(native->cx));
+            cpu.memory().write32(scratch + 20, static_cast<std::uint32_t>(native->cy));
+            cpu.memory().write32(scratch + 24, native->flags);
+        } else {
+            cpu.memory().write(
+                scratch, std::span<const std::uint8_t>(
+                             reinterpret_cast<const std::uint8_t *>(long_parameter), pointer_size));
+            copy_back_raw = message != WM_SETTEXT;
+        }
+        callback_long_parameters_[scratch] = long_parameter;
     }
     ++callback_depth_;
     std::uint64_t result = 0;
@@ -3167,13 +3547,29 @@ std::intptr_t Runtime::invoke_window_proc(Cpu &cpu, std::uint64_t window, std::u
                               {window, message, word_parameter, guest_long_parameter}, exit_code,
                               exited);
     } catch (...) {
+        if (scratch != 0) {
+            callback_long_parameters_.erase(scratch);
+        }
         --callback_depth_;
         throw;
     }
     --callback_depth_;
     if (scratch != 0) {
-        std::memcpy(reinterpret_cast<void *>(long_parameter),
-                    reinterpret_cast<const void *>(scratch), pointer_size);
+        callback_long_parameters_.erase(scratch);
+    }
+    if (scratch != 0 && !guest_is_64_bit_ &&
+        (message == WM_WINDOWPOSCHANGING || message == WM_WINDOWPOSCHANGED)) {
+        auto *native = reinterpret_cast<WINDOWPOS *>(long_parameter);
+        native->hwnd = reinterpret_cast<HWND>(cpu.memory().read32(scratch));
+        native->hwndInsertAfter = reinterpret_cast<HWND>(cpu.memory().read32(scratch + 4));
+        native->x = static_cast<int>(cpu.memory().read32(scratch + 8));
+        native->y = static_cast<int>(cpu.memory().read32(scratch + 12));
+        native->cx = static_cast<int>(cpu.memory().read32(scratch + 16));
+        native->cy = static_cast<int>(cpu.memory().read32(scratch + 20));
+        native->flags = cpu.memory().read32(scratch + 24);
+    } else if (scratch != 0 && copy_back_raw) {
+        const auto bytes = cpu.memory().read(scratch, pointer_size);
+        std::memcpy(reinterpret_cast<void *>(long_parameter), bytes.data(), bytes.size());
     }
     if (message == WM_NCDESTROY) {
         window_procedures_.erase(found);
@@ -3226,6 +3622,8 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     creating_window_procedure_ = 0;
     quit_message_pending_ = false;
     quit_message_code_ = 0;
+    callback_long_parameters_.clear();
+    callback_depth_ = 0;
     protection_policy_proxy_ = 0;
     protection_policy_methods_.clear();
     next_tls_index_ = 1;
