@@ -450,6 +450,9 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GuestSendMessage;
     } else if (name == "SetCursor" || name == "ShowCursor") {
         api = Api::GuestCursor;
+    } else if (name == "EnumDisplaySettingsA" || name == "EnumDisplaySettingsW" ||
+               name == "EnumDisplaySettingsExA" || name == "EnumDisplaySettingsExW") {
+        api = Api::GuestDisplaySettings;
     } else if (name == "MessageBoxA" || name == "MessageBoxW") {
         api = Api::GuestMessageBox;
     } else if (name == "PeekMessageA" || name == "PeekMessageW" || name == "GetMessageA" ||
@@ -564,6 +567,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
     } else if (name == "EventUnregister" || name == "EventWriteTransfer" ||
                name == "EventSetInformation") {
         api = Api::ReturnZero;
+    } else if (name == "DwmEnableMMCSS") {
+        api = Api::ReturnZero;
     } else if (name == "VirtualAlloc") {
         api = Api::VirtualAlloc;
     } else if (name == "VirtualFree") {
@@ -658,6 +663,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::RegisterClassExW;
     } else if (name == "CreateWindowExW") {
         api = Api::CreateWindowExW;
+    } else if (name == "DirectInput8Create") {
+        api = Api::DirectInputCreate;
     } else if (name == "ResolveDelayLoadedAPI") {
         api = Api::ResolveDelayLoadedAPI;
     } else if (name == "SHGetKnownFolderPath") {
@@ -1498,6 +1505,57 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         finish_call(1);
         break;
+    case Api::GuestDisplaySettings: {
+        const bool wide = thunk_name.ends_with("W");
+        const bool extended = thunk_name.find("SettingsEx") != std::string::npos;
+        const auto device_pointer = argument(0);
+        const auto output = argument(2);
+        BOOL result = FALSE;
+        if (output != 0) {
+            if (wide) {
+                const auto device = device_pointer == 0
+                                        ? std::wstring{}
+                                        : cpu.memory().read_wide_string(device_pointer);
+                DEVMODEW mode{};
+                mode.dmSize = sizeof(mode);
+                result =
+                    extended
+                        ? ::EnumDisplaySettingsExW(device_pointer == 0 ? nullptr : device.c_str(),
+                                                   static_cast<DWORD>(argument(1)), &mode,
+                                                   static_cast<DWORD>(argument(3)))
+                        : ::EnumDisplaySettingsW(device_pointer == 0 ? nullptr : device.c_str(),
+                                                 static_cast<DWORD>(argument(1)), &mode);
+                if (result != FALSE) {
+                    cpu.memory().write(
+                        output, std::span<const std::uint8_t>(
+                                    reinterpret_cast<const std::uint8_t *>(&mode), sizeof(mode)));
+                }
+            } else {
+                const auto device = device_pointer == 0
+                                        ? std::string{}
+                                        : cpu.memory().read_c_string(device_pointer);
+                DEVMODEA mode{};
+                mode.dmSize = sizeof(mode);
+                result =
+                    extended
+                        ? ::EnumDisplaySettingsExA(device_pointer == 0 ? nullptr : device.c_str(),
+                                                   static_cast<DWORD>(argument(1)), &mode,
+                                                   static_cast<DWORD>(argument(3)))
+                        : ::EnumDisplaySettingsA(device_pointer == 0 ? nullptr : device.c_str(),
+                                                 static_cast<DWORD>(argument(1)), &mode);
+                if (result != FALSE) {
+                    cpu.memory().write(
+                        output, std::span<const std::uint8_t>(
+                                    reinterpret_cast<const std::uint8_t *>(&mode), sizeof(mode)));
+                }
+            }
+        } else {
+            last_error_ = ERROR_INVALID_PARAMETER;
+        }
+        cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+        finish_call(extended ? 4 : 3);
+        break;
+    }
     case Api::GuestMessageBox: {
         const auto text_pointer = argument(1);
         const auto caption_pointer = argument(2);
@@ -3129,6 +3187,122 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(12);
         break;
     }
+    case Api::DirectInputCreate: {
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        const auto write_pointer = [&](std::uint64_t address, std::uint64_t value) {
+            if (guest_is_64_bit_) {
+                cpu.memory().write64(address, value);
+            } else {
+                cpu.memory().write32(address, static_cast<std::uint32_t>(value));
+            }
+        };
+        const auto make_proxy = [&](std::uint32_t method_count, std::uint32_t interface_tag) {
+            const auto vtable = allocate(method_count * pointer_size);
+            const auto object = allocate(pointer_size);
+            write_pointer(object, vtable);
+            for (std::uint32_t index = 0; index < method_count; ++index) {
+                const auto thunk = next_thunk_;
+                next_thunk_ += 0x100;
+                thunks_.emplace(thunk, Api::DirectInputMethod);
+                thunk_names_.emplace(
+                    thunk, (interface_tag == 0 ? "IDirectInput8#" : "IDirectInputDevice8#") +
+                               std::to_string(index));
+                direct_input_methods_.emplace(thunk, interface_tag | index);
+                write_pointer(vtable + index * pointer_size, thunk);
+            }
+            return object;
+        };
+        if (direct_input_device_proxy_ == 0) {
+            direct_input_device_proxy_ = make_proxy(32, 0x100U);
+        }
+        if (direct_input_proxy_ == 0) {
+            direct_input_proxy_ = make_proxy(11, 0);
+        }
+        const auto output = argument(3);
+        if (output == 0 || argument(4) != 0) {
+            cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+        } else {
+            write_pointer(output, direct_input_proxy_);
+            cpu.set_reg(Rax, 0); // DI_OK
+        }
+        finish_call(5);
+        break;
+    }
+    case Api::DirectInputMethod: {
+        constexpr std::uint32_t device_tag = 0x100U;
+        constexpr std::uint32_t not_implemented = 0x80004001U;
+        const auto tagged_method = direct_input_methods_.at(cpu.rip());
+        const auto device = (tagged_method & device_tag) != 0;
+        const auto method = tagged_method & 0xffU;
+        const auto write_pointer = [&](std::uint64_t address, std::uint64_t value) {
+            if (guest_is_64_bit_) {
+                cpu.memory().write64(address, value);
+            } else {
+                cpu.memory().write32(address, static_cast<std::uint32_t>(value));
+            }
+        };
+        static constexpr unsigned input_arguments[] = {3, 1, 1, 4, 5, 2, 3, 4, 4, 7, 6};
+        static constexpr unsigned device_arguments[] = {
+            3, 1, 1, 2, 4, 3, 3, 1, 1, 3, 5, 2, 2, 3, 4, 2,
+            3, 4, 4, 4, 3, 2, 2, 3, 2, 1, 5, 5, 4, 4, 4, 2,
+        };
+        if ((!device && method >= std::size(input_arguments)) ||
+            (device && method >= std::size(device_arguments))) {
+            throw Error("invalid DirectInput proxy method");
+        }
+        std::uint32_t result = 0;
+        if (method == 0) { // QueryInterface
+            if (argument(2) == 0) {
+                result = 0x80070057U;
+            } else {
+                write_pointer(argument(2),
+                              device ? direct_input_device_proxy_ : direct_input_proxy_);
+            }
+        } else if (method == 1) { // AddRef
+            result = 2;
+        } else if (method == 2) { // Release
+            result = 1;
+        } else if (!device && method == 3) { // IDirectInput8::CreateDevice
+            if (argument(2) == 0 || argument(3) != 0) {
+                result = 0x80070057U;
+            } else {
+                write_pointer(argument(2), direct_input_device_proxy_);
+            }
+        } else if (device && method == 3) { // GetCapabilities
+            const auto capabilities = argument(1);
+            if (capabilities == 0) {
+                result = 0x80070057U;
+            } else {
+                const auto size = cpu.memory().read32(capabilities);
+                if (size >= 24 && size <= 0x1000) {
+                    cpu.memory().write(capabilities + 4, std::vector<std::uint8_t>(size - 4));
+                }
+            }
+        } else if (device && method == 9) { // GetDeviceState
+            const auto size = static_cast<std::size_t>(argument(1));
+            if (argument(2) == 0 || size > 0x100000) {
+                result = 0x80070057U;
+            } else {
+                cpu.memory().write(argument(2), std::vector<std::uint8_t>(size));
+            }
+        } else if (device && method == 10) { // GetDeviceData
+            if (argument(3) == 0) {
+                result = 0x80070057U;
+            } else {
+                cpu.memory().write32(argument(3), 0);
+            }
+        } else if (device && (method == 7 || method == 8 || method == 11 || method == 12 ||
+                              method == 13 || method == 25)) {
+            result = 0;
+        } else if (!device && (method == 5 || method == 6 || method == 7)) {
+            result = 0;
+        } else {
+            result = not_implemented;
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(device ? device_arguments[method] : input_arguments[method]);
+        break;
+    }
     case Api::ResolveDelayLoadedAPI: {
         const auto descriptor = cpu.reg(Rdx);
         const auto thunk_address = cpu.memory().read64(cpu.reg(Rsp) + 0x28);
@@ -3624,6 +3798,9 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     quit_message_code_ = 0;
     callback_long_parameters_.clear();
     callback_depth_ = 0;
+    direct_input_proxy_ = 0;
+    direct_input_device_proxy_ = 0;
+    direct_input_methods_.clear();
     protection_policy_proxy_ = 0;
     protection_policy_methods_.clear();
     next_tls_index_ = 1;

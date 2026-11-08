@@ -4,6 +4,15 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-08 — Undertale input and display discovery
+
+- Added guest-memory `IDirectInput8` and `IDirectInputDevice8` vtables so x86 guest code never
+  receives or executes a native COM pointer. The initial backend safely exposes no devices and
+  provides zeroed state/event polling for future keyboard and mouse activation.
+- Added guest-safe ANSI/Unicode display-mode enumeration and optional DWM multimedia scheduling.
+- Undertale now completes optional input discovery, reads the desktop modes, and reaches
+  `Direct3DCreate9Ex` after 15,130,126 interpreted instructions.
+
 ## 2026-11-08 — Undertale PE32 window creation
 
 - Added PE32-safe `WNDCLASSEXW`, `CREATESTRUCTW`, `WINDOWPOS`, rectangle, resource, and window-text

@@ -70,6 +70,7 @@ class Runtime {
         GuestWindowText,
         GuestSendMessage,
         GuestCursor,
+        GuestDisplaySettings,
         GuestMessageBox,
         GuestMessageLoop,
         GuestFileDialog,
@@ -162,6 +163,8 @@ class Runtime {
         LoadAcceleratorsW,
         RegisterClassExW,
         CreateWindowExW,
+        DirectInputCreate,
+        DirectInputMethod,
         ResolveDelayLoadedAPI,
         SHGetKnownFolderPath,
         CoCreateInstance,
@@ -211,6 +214,9 @@ class Runtime {
     std::uint32_t quit_message_code_ = 0;
     std::unordered_map<std::uint64_t, std::int64_t> callback_long_parameters_;
     std::uint32_t callback_depth_ = 0;
+    std::uint64_t direct_input_proxy_ = 0;
+    std::uint64_t direct_input_device_proxy_ = 0;
+    std::unordered_map<std::uint64_t, std::uint32_t> direct_input_methods_;
     std::uint64_t protection_policy_proxy_ = 0;
     std::unordered_map<std::uint64_t, std::uint32_t> protection_policy_methods_;
     std::uint32_t next_tls_index_ = 1;

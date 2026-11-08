@@ -45,16 +45,18 @@ DLLs into this repository.
   periods.
 - PE32 window-class registration, native window creation, callback re-entry, resource loading,
   text, geometry, cursor, and synchronous scalar/text messages are implemented.
+- A guest-owned DirectInput 8 COM proxy provides safe device creation and zeroed state polling;
+  display-mode enumeration is marshaled without exposing host structures.
 - Basic synchronous WinMM playback exists, but streaming/game audio is not complete.
 - Direct3D 9 and Steamworks have not been validated against Undertale yet.
 - The installed Steam executable loads at `0x00400000`, resolves all 313 imports, opens and parses
   `data.win`, probes `options.ini` and save/config paths, and passes the safe offline Steam startup
   path. It creates the native `YYGameMakerYY` window, executes its interpreted `WM_NCCREATE` and
-  `WM_CREATE` callbacks, sets the title and icons, and reaches `DirectInput8Create` after 15,129,726
-  instructions.
+  `WM_CREATE` callbacks, sets the title and icons, completes optional input/display discovery, and
+  reaches `Direct3DCreate9Ex` after 15,130,126 instructions.
 - A page-indexed guest-memory lookup cache makes large heap-backed parsing practical; the same
   six-million-instruction state runs about 48 times faster than the previous linear region scan.
 
-The next engineering step is a guest-owned DirectInput COM proxy, followed by Direct3D 9 device
-creation and presentation. Streaming audio work follows once the selected GameMaker backend is
-observed.
+The next engineering step is a guest-owned Direct3D 9Ex COM proxy, beginning with adapter queries,
+device creation, and presentation. Streaming audio work follows once the selected GameMaker
+backend is observed.
