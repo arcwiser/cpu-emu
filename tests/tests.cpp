@@ -67,23 +67,39 @@ void test_cpu_32bit_mode() {
     memory.map(stack_address, 0x1000, winemu::Read | winemu::Write, "x86 stack");
     memory.map(fs_base, 0x1000, winemu::Read | winemu::Write, "x86 fs");
     const std::uint8_t code[] = {
-        0x8b, 0x05, 0x00, 0x01, 0x00, 0x10,    // mov eax, [10000100h]
-        0x40,                                  // inc eax (not a REX prefix in x86 mode)
-        0x50,                                  // push eax
-        0x59,                                  // pop ecx
-        0x94,                                  // xchg eax, esp
-        0x94,                                  // xchg eax, esp (restore both registers)
-        0x9b,                                  // wait/fwait with no pending x87 exception
-        0xa3, 0x04, 0x01, 0x00, 0x10,          // mov [10000104h], eax
-        0x64, 0x8b, 0x15, 0x10, 0,    0,    0, // mov edx, fs:[10h]
-        0xd9, 0x3d, 0x08, 0x01, 0x00, 0x10,    // fnstcw [10000108h]
-        0xd9, 0x2d, 0x0c, 0x01, 0x00, 0x10,    // fldcw [1000010ch]
-        0xd9, 0x3d, 0x10, 0x01, 0x00, 0x10,    // fnstcw [10000110h]
-        0xdb, 0xe2,                            // fnclex
-        0x9c, 0x5b, 0x53, 0x9d,                // pushfd; pop ebx; push ebx; popfd
-        0xdb, 0x05, 0x20, 0x01, 0x00, 0x10,    // fild dword ptr [10000120h]
-        0xdc, 0x0d, 0x28, 0x01, 0x00, 0x10,    // fmul qword ptr [10000128h]
-        0xdd, 0x1d, 0x30, 0x01, 0x00, 0x10,    // fstp qword ptr [10000130h]
+        0x8b, 0x05, 0x00, 0x01, 0x00, 0x10,       // mov eax, [10000100h]
+        0x40,                                     // inc eax (not a REX prefix in x86 mode)
+        0x50,                                     // push eax
+        0x59,                                     // pop ecx
+        0x94,                                     // xchg eax, esp
+        0x94,                                     // xchg eax, esp (restore both registers)
+        0x9b,                                     // wait/fwait with no pending x87 exception
+        0xa3, 0x04, 0x01, 0x00, 0x10,             // mov [10000104h], eax
+        0x64, 0x8b, 0x15, 0x10, 0,    0,    0,    // mov edx, fs:[10h]
+        0xd9, 0x3d, 0x08, 0x01, 0x00, 0x10,       // fnstcw [10000108h]
+        0xd9, 0x2d, 0x0c, 0x01, 0x00, 0x10,       // fldcw [1000010ch]
+        0xd9, 0x3d, 0x10, 0x01, 0x00, 0x10,       // fnstcw [10000110h]
+        0xdb, 0xe2,                               // fnclex
+        0x9c, 0x5b, 0x53, 0x9d,                   // pushfd; pop ebx; push ebx; popfd
+        0xdb, 0x05, 0x20, 0x01, 0x00, 0x10,       // fild dword ptr [10000120h]
+        0xdc, 0x0d, 0x28, 0x01, 0x00, 0x10,       // fmul qword ptr [10000128h]
+        0xdd, 0x1d, 0x30, 0x01, 0x00, 0x10,       // fstp qword ptr [10000130h]
+        0xdb, 0x05, 0x20, 0x01, 0x00, 0x10,       // fild dword ptr [10000120h]
+        0xd8, 0x35, 0x38, 0x01, 0x00, 0x10,       // fdiv dword ptr [10000138h]
+        0xdd, 0x1d, 0x40, 0x01, 0x00, 0x10,       // fstp qword ptr [10000140h]
+        0x0f, 0xae, 0x1d, 0x48, 0x01, 0x00, 0x10, // stmxcsr [10000148h]
+        0xd9, 0x05, 0x50, 0x01, 0x00, 0x10,       // fld dword ptr [10000150h]
+        0xd9, 0xff,                               // fcos
+        0xdd, 0x1d, 0x58, 0x01, 0x00, 0x10,       // fstp qword ptr [10000158h]
+        0xd9, 0x05, 0x50, 0x01, 0x00, 0x10,       // fld dword ptr [10000150h]
+        0xd9, 0xfe,                               // fsin
+        0xdd, 0x1d, 0x60, 0x01, 0x00, 0x10,       // fstp qword ptr [10000160h]
+        0xd9, 0xee,                               // fldz
+        0xdd, 0x1d, 0x68, 0x01, 0x00, 0x10,       // fstp qword ptr [10000168h]
+        0xd9, 0xe8,                               // fld1
+        0xdd, 0x1d, 0x70, 0x01, 0x00, 0x10,       // fstp qword ptr [10000170h]
+        0xdf, 0xe0, 0x9f, 0x9e,                   // fnstsw ax; lahf; sahf
+        0xb8, 0x2a, 0x00, 0x00, 0x00,             // restore eax result
         0xc3,
     };
     memory.write(code_address, code);
@@ -92,6 +108,8 @@ void test_cpu_32bit_mode() {
     memory.write16(code_address + 0x10c, 0x027f);
     memory.write32(code_address + 0x120, 3);
     memory.write64(code_address + 0x128, std::bit_cast<std::uint64_t>(2.5));
+    memory.write32(code_address + 0x138, std::bit_cast<std::uint32_t>(1.5f));
+    memory.write32(code_address + 0x150, 0);
     memory.write32(stack_address + 0xffc, 0xdeadbeef);
     winemu::Cpu cpu(memory);
     cpu.reset(code_address, stack_address + 0xffc, false);
@@ -108,6 +126,13 @@ void test_cpu_32bit_mode() {
     require(memory.read16(code_address + 0x110) == 0x027f, "x87 FLDCW/FNSTCW round trip");
     require(memory.read64(code_address + 0x130) == std::bit_cast<std::uint64_t>(7.5),
             "x87 integer load, multiply, and store");
+    require(memory.read64(code_address + 0x140) == std::bit_cast<std::uint64_t>(2.0),
+            "x87 single-precision memory division");
+    require(memory.read32(code_address + 0x148) == 0x1f80, "default MXCSR state");
+    require(memory.read64(code_address + 0x158) == std::bit_cast<std::uint64_t>(1.0), "x87 FCOS");
+    require(memory.read64(code_address + 0x160) == 0, "x87 FSIN");
+    require(memory.read64(code_address + 0x168) == 0, "x87 FLDZ");
+    require(memory.read64(code_address + 0x170) == std::bit_cast<std::uint64_t>(1.0), "x87 FLD1");
 }
 
 void test_pshufd() {

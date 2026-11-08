@@ -7,6 +7,7 @@
 #include <cmath>
 #include <iomanip>
 #include <limits>
+#include <numbers>
 #include <sstream>
 
 #include <intrin.h>
@@ -66,6 +67,7 @@ void Cpu::reset(std::uint64_t entry, std::uint64_t stack_pointer, bool long_mode
     rip_ = entry;
     flags_ = 2;
     x87_control_ = 0x037f;
+    mxcsr_ = 0x1f80;
     instructions_ = 0;
     long_mode_ = long_mode;
 }
@@ -872,11 +874,92 @@ void Cpu::step() {
             flags_ = pop64() | 2;
         }
         return;
+    case 0x9e: { // SAHF
+        const auto ah = static_cast<std::uint8_t>(registers_[Rax] >> 8);
+        flags_ &= ~(flag_sf | flag_zf | flag_af | flag_pf | flag_cf);
+        flags_ |= (ah & 0x80 ? flag_sf : 0) | (ah & 0x40 ? flag_zf : 0) |
+                  (ah & 0x10 ? flag_af : 0) | (ah & 0x04 ? flag_pf : 0) | (ah & 0x01 ? flag_cf : 0);
+        return;
+    }
+    case 0x9f: { // LAHF
+        const auto ah = static_cast<std::uint8_t>(
+            ((flags_ & flag_sf) ? 0x80 : 0) | ((flags_ & flag_zf) ? 0x40 : 0) |
+            ((flags_ & flag_af) ? 0x10 : 0) | ((flags_ & flag_pf) ? 0x04 : 0) | 0x02 |
+            ((flags_ & flag_cf) ? 0x01 : 0));
+        registers_[Rax] = (registers_[Rax] & ~0xff00ULL) | (static_cast<std::uint64_t>(ah) << 8);
+        return;
+    }
+    case 0xd8: {
+        const auto decoded = decode_rm(rex);
+        if (decoded.rm.is_register || x87_depth_ == 0) {
+            throw Error("unsupported x87 D8 instruction");
+        }
+        const auto operand =
+            static_cast<long double>(std::bit_cast<float>(memory_.read32(decoded.rm.address)));
+        switch (decoded.reg & 7) {
+        case 0:
+            x87_[0] += operand;
+            return;
+        case 1:
+            x87_[0] *= operand;
+            return;
+        case 4:
+            x87_[0] -= operand;
+            return;
+        case 5:
+            x87_[0] = operand - x87_[0];
+            return;
+        case 6:
+            x87_[0] /= operand;
+            return;
+        case 7:
+            x87_[0] = operand / x87_[0];
+            return;
+        default:
+            throw Error("unsupported x87 D8 comparison instruction");
+        }
+    }
     case 0xd9: {
         const auto decoded = decode_rm(rex);
         if (decoded.rm.is_register) {
             if ((decoded.reg & 7) == 0 && decoded.rm.register_index < x87_depth_) { // FLD ST(i)
                 x87_push(x87_[decoded.rm.register_index]);
+                return;
+            }
+            if ((decoded.reg & 7) == 5) {
+                switch (decoded.rm.register_index) {
+                case Rax: // FLD1
+                    x87_push(1.0L);
+                    return;
+                case Rcx: // FLDL2T
+                    x87_push(std::numbers::log2e_v<long double> *
+                             std::numbers::ln10_v<long double>);
+                    return;
+                case Rdx: // FLDL2E
+                    x87_push(std::numbers::log2e_v<long double>);
+                    return;
+                case Rbx: // FLDPI
+                    x87_push(std::numbers::pi_v<long double>);
+                    return;
+                case Rsp: // FLDLG2
+                    x87_push(std::numbers::ln2_v<long double> / std::numbers::ln10_v<long double>);
+                    return;
+                case Rbp: // FLDLN2
+                    x87_push(std::numbers::ln2_v<long double>);
+                    return;
+                case Rsi: // FLDZ
+                    x87_push(0.0L);
+                    return;
+                default:
+                    break;
+                }
+            }
+            if ((decoded.reg & 7) == 7 && decoded.rm.register_index == Rdi && x87_depth_ != 0) {
+                x87_[0] = std::cos(x87_[0]); // FCOS
+                return;
+            }
+            if ((decoded.reg & 7) == 7 && decoded.rm.register_index == Rsi && x87_depth_ != 0) {
+                x87_[0] = std::sin(x87_[0]); // FSIN
                 return;
             }
             throw Error("unsupported x87 D9 register instruction");
@@ -967,6 +1050,11 @@ void Cpu::step() {
     }
     case 0xdf: {
         const auto decoded = decode_rm(rex);
+        if (decoded.rm.is_register && (decoded.reg & 7) == 4 &&
+            decoded.rm.register_index == Rax) { // FNSTSW AX
+            write_register(Rax, 16, 0);
+            return;
+        }
         if (!decoded.rm.is_register && (decoded.reg & 7) == 5) { // FILD m64int
             x87_push(static_cast<long double>(
                 static_cast<std::int64_t>(memory_.read64(decoded.rm.address))));
@@ -1739,6 +1827,21 @@ void Cpu::step() {
             stream << "unsupported 0F 38 instruction 0x" << std::hex << static_cast<unsigned>(third)
                    << " at 0x" << instruction_address;
             throw Error(stream.str());
+        }
+        if (second == 0xae) {
+            const auto decoded = decode_rm(rex);
+            if (decoded.rm.is_register) {
+                throw Error("unsupported 0F AE register instruction");
+            }
+            if ((decoded.reg & 7) == 2) { // LDMXCSR
+                mxcsr_ = memory_.read32(decoded.rm.address);
+                return;
+            }
+            if ((decoded.reg & 7) == 3) { // STMXCSR
+                memory_.write32(decoded.rm.address, mxcsr_);
+                return;
+            }
+            throw Error("unsupported 0F AE memory instruction");
         }
         if (second == 0x3a) {
             const auto third = fetch8();

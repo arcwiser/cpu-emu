@@ -4,6 +4,20 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-08 — Undertale runner and message-loop bring-up
+
+- Corrected x86 stdcall argument handling for module filenames and generic return adapters, then
+  added guest-safe file enumeration, file reading/writing, environment variables, time conversion,
+  timezone, common-controls, and GDI+ startup adapters.
+- Added `LDMXCSR`/`STMXCSR`, x87 memory arithmetic, sine/cosine and constant loads, `FNSTSW AX`,
+  `LAHF`, and `SAHF`, with focused machine-code regressions.
+- Added isolated 32/64-bit `MSG` marshaling for peek/get/translate/dispatch and guest-owned
+  `PostQuitMessage` state. Host-thread messages are not exposed before a guest window exists.
+- Undertale now discovers its files, initializes GDI+, enters the message-pump path, and executes
+  2,957,604 instructions before cleanly exiting with code 1 after the safe file-dialog cancellation
+  path. This replaces the previous 507,053-instruction early exit and leaves no unsupported opcode
+  or import at the current probe point.
+
 ## 2026-11-08 — Undertale CRT and x87 bring-up
 
 - Corrected the x86 TEB, static TLS pointer array, process-environment addresses, guest data-import

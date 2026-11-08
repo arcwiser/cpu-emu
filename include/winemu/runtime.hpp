@@ -44,10 +44,15 @@ class Runtime {
         CurrentPseudoHandle,
         ProcessorFeature,
         SimpleHandleSuccess,
+        GuestCreateFile,
+        GuestReadFile,
+        GuestCloseHandle,
         WriteFile,
         GetLastError,
         SetLastError,
         GetSystemTimeAsFileTime,
+        TimeConversion,
+        TimeZoneInformation,
         GetCurrentProcessId,
         GetCurrentThreadId,
         StartupInfo,
@@ -58,6 +63,11 @@ class Runtime {
         GetProcessWindowStation,
         UserObjectInformation,
         GuestMessageBox,
+        GuestMessageLoop,
+        GuestFileDialog,
+        CommonControlsInitialize,
+        GdiplusStartup,
+        GdiplusShutdown,
         OutputDebugStringA,
         Beep,
         MessageBeep,
@@ -94,6 +104,7 @@ class Runtime {
         WinMainCommandLine,
         EnvironmentStringsW,
         EnvironmentStringsA,
+        EnvironmentVariable,
         EventRegister,
         CreateThreadpoolTimer,
         VirtualAlloc,
@@ -122,6 +133,9 @@ class Runtime {
         ReturnOne,
         GuestModuleHandle,
         ModuleLoad,
+        GuestFindFirstFile,
+        GuestFindNextFile,
+        GuestFindClose,
         GetModuleHandleExW,
         GetModuleFileNameW,
         GetModuleFileNameA,
@@ -167,12 +181,19 @@ class Runtime {
     std::uint64_t guest_image_base_ = 0;
     std::uint64_t next_module_handle_ = 0x7fe0'0000ULL;
     std::unordered_map<std::uint64_t, std::string> guest_modules_;
+    std::uint64_t next_find_handle_ = 0x300;
+    std::unordered_map<std::uint64_t, void *> find_handles_;
+    std::uint64_t next_file_handle_ = 0x400;
+    std::unordered_map<std::uint64_t, void *> file_handles_;
+    std::uint64_t host_gdiplus_token_ = 0;
     std::filesystem::path guest_executable_;
     void *resource_module_ = nullptr;
     std::unordered_map<std::wstring, std::uint64_t> class_window_procedures_;
     std::unordered_map<std::uint16_t, std::uint64_t> atom_window_procedures_;
     std::unordered_map<std::uint64_t, std::uint64_t> window_procedures_;
     std::uint64_t creating_window_procedure_ = 0;
+    bool quit_message_pending_ = false;
+    std::uint32_t quit_message_code_ = 0;
     std::uint32_t callback_depth_ = 0;
     std::uint64_t protection_policy_proxy_ = 0;
     std::unordered_map<std::uint64_t, std::uint32_t> protection_policy_methods_;

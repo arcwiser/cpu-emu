@@ -46,11 +46,11 @@ DLLs into this repository.
 - Window callback re-entry exists and is exercised by the Paint and Notepad paths.
 - Basic synchronous WinMM playback exists, but streaming/game audio is not complete.
 - Direct3D 9 and Steamworks have not been validated against Undertale yet.
-- The installed Steam executable loads at `0x00400000`, resolves all 313 imports, and now executes
-  507,053 instructions through CRT initialization, locale conversion, heap/TLS management, SIMD,
-  and x87 setup without an unsupported-operation stop. It currently returns exit code 255 before
-  window creation, so the next task is tracing the compatibility result that selects that path.
+- The installed Steam executable loads at `0x00400000`, resolves all 313 imports, enumerates files,
+  initializes GDI+, reaches `PeekMessageW`, and executes 2,957,604 instructions without an
+  unsupported-operation stop. The safe headless `GetOpenFileNameW` cancellation path currently
+  leads it to exit through `CorExitProcess` with code 1 before window creation.
 
-The next engineering step is to trace the early-return decision and correct the responsible general
-Win32, ABI, or CPU behavior with a regression. Guessing later Direct3D or audio interfaces before
-that trace risks building the wrong compatibility layer.
+The next engineering step is to determine why this runner requests an open-file dialog and either
+marshal the dialog structure safely or correct the earlier general Win32/ABI behavior that selected
+that path. Direct3D and streaming audio work follows once the runner reaches window creation.

@@ -301,6 +301,24 @@ Runtime::Runtime(std::ostream &output) : output_(output) {
 }
 
 Runtime::~Runtime() {
+    for (const auto &[guest_handle, host_handle] : find_handles_) {
+        static_cast<void>(guest_handle);
+        ::FindClose(static_cast<HANDLE>(host_handle));
+    }
+    for (const auto &[guest_handle, host_handle] : file_handles_) {
+        static_cast<void>(guest_handle);
+        ::CloseHandle(static_cast<HANDLE>(host_handle));
+    }
+    if (host_gdiplus_token_ != 0) {
+        if (const auto library = ::LoadLibraryW(L"gdiplus.dll"); library != nullptr) {
+            using Shutdown = void(WINAPI *)(std::uint64_t);
+            if (const auto shutdown =
+                    reinterpret_cast<Shutdown>(::GetProcAddress(library, "GdiplusShutdown"));
+                shutdown != nullptr) {
+                shutdown(host_gdiplus_token_);
+            }
+        }
+    }
     if (resource_module_ != nullptr) {
         FreeLibrary(static_cast<HMODULE>(resource_module_));
     }
@@ -360,17 +378,28 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::CurrentPseudoHandle;
     } else if (name == "IsProcessorFeaturePresent") {
         api = Api::ProcessorFeature;
-    } else if (kernel_module && (name == "SetConsoleCtrlHandler" || name == "SetStdHandle" ||
-                                 name == "CloseHandle")) {
+    } else if (kernel_module && (name == "SetConsoleCtrlHandler" || name == "SetStdHandle")) {
         api = Api::SimpleHandleSuccess;
+    } else if (kernel_module && (name == "CreateFileA" || name == "CreateFileW")) {
+        api = Api::GuestCreateFile;
+    } else if (kernel_module && name == "ReadFile") {
+        api = Api::GuestReadFile;
     } else if (kernel_module && name == "WriteFile") {
         api = Api::WriteFile;
+    } else if (kernel_module && name == "CloseHandle") {
+        api = Api::GuestCloseHandle;
     } else if (kernel_module && name == "GetLastError") {
         api = Api::GetLastError;
     } else if (kernel_module && name == "SetLastError") {
         api = Api::SetLastError;
     } else if (kernel_module && name == "GetSystemTimeAsFileTime") {
         api = Api::GetSystemTimeAsFileTime;
+    } else if (kernel_module &&
+               (name == "FileTimeToLocalFileTime" || name == "LocalFileTimeToFileTime" ||
+                name == "FileTimeToSystemTime" || name == "SystemTimeToFileTime")) {
+        api = Api::TimeConversion;
+    } else if (kernel_module && name == "GetTimeZoneInformation") {
+        api = Api::TimeZoneInformation;
     } else if (kernel_module && name == "GetCurrentProcessId") {
         api = Api::GetCurrentProcessId;
     } else if (kernel_module && name == "GetCurrentThreadId") {
@@ -403,6 +432,20 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::UserObjectInformation;
     } else if (name == "MessageBoxA" || name == "MessageBoxW") {
         api = Api::GuestMessageBox;
+    } else if (name == "PeekMessageA" || name == "PeekMessageW" || name == "GetMessageA" ||
+               name == "GetMessageW" || name == "TranslateMessage" || name == "DispatchMessageA" ||
+               name == "DispatchMessageW" || name == "PostQuitMessage") {
+        api = Api::GuestMessageLoop;
+    } else if (name == "GetOpenFileNameA" || name == "GetOpenFileNameW" ||
+               name == "GetSaveFileNameA" || name == "GetSaveFileNameW" ||
+               name == "CommDlgExtendedError") {
+        api = Api::GuestFileDialog;
+    } else if (name == "InitCommonControlsEx") {
+        api = Api::CommonControlsInitialize;
+    } else if (name == "GdiplusStartup") {
+        api = Api::GdiplusStartup;
+    } else if (name == "GdiplusShutdown") {
+        api = Api::GdiplusShutdown;
     } else if (kernel_module && name == "OutputDebugStringA") {
         api = Api::OutputDebugStringA;
     } else if (kernel_module && name == "Beep") {
@@ -476,6 +519,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::EnvironmentStringsW;
     } else if (name == "GetEnvironmentStringsA" || name == "GetEnvironmentStrings") {
         api = Api::EnvironmentStringsA;
+    } else if (name == "GetEnvironmentVariableA" || name == "GetEnvironmentVariableW") {
+        api = Api::EnvironmentVariable;
     } else if (name == "FreeEnvironmentStringsW" || name == "FreeEnvironmentStringsA") {
         api = Api::ReturnOne;
     } else if (name == "_o__get_wide_winmain_command_line") {
@@ -549,6 +594,12 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GuestModuleHandle;
     } else if (name == "LoadLibraryA" || name == "LoadLibraryW") {
         api = Api::ModuleLoad;
+    } else if (name == "FindFirstFileA" || name == "FindFirstFileW") {
+        api = Api::GuestFindFirstFile;
+    } else if (name == "FindNextFileA" || name == "FindNextFileW") {
+        api = Api::GuestFindNextFile;
+    } else if (name == "FindClose") {
+        api = Api::GuestFindClose;
     } else if (name == "GetModuleHandleExW") {
         api = Api::GetModuleHandleExW;
     } else if (name == "GetModuleFileNameW") {
@@ -797,27 +848,88 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     case Api::SimpleHandleSuccess:
         // Console handlers are intentionally not retained: they are guest code addresses.
         cpu.set_reg(Rax, 1);
-        finish_call(thunk_name.ends_with("CloseHandle") ? 1 : 2);
+        finish_call(2);
         break;
-    case Api::WriteFile: {
-        const auto handle = cpu.reg(Rcx);
-        const auto buffer = cpu.reg(Rdx);
-        const auto size = static_cast<std::uint32_t>(cpu.reg(R8));
-        const auto written_pointer = cpu.reg(R9);
-        const auto overlapped = cpu.memory().read64(cpu.reg(Rsp) + 0x28);
-        if ((handle != 0x101 && handle != 0x102) || overlapped != 0) {
-            last_error_ = handle != 0x101 && handle != 0x102 ? 6 : 87;
-            cpu.set_reg(Rax, 0);
+    case Api::GuestCreateFile: {
+        const bool ansi = thunk_name.ends_with("CreateFileA");
+        const auto path = ansi ? std::filesystem::path(cpu.memory().read_c_string(argument(0)))
+                               : std::filesystem::path(cpu.memory().read_wide_string(argument(0)));
+        HANDLE template_handle = nullptr;
+        if (const auto found = file_handles_.find(argument(6)); found != file_handles_.end()) {
+            template_handle = static_cast<HANDLE>(found->second);
+        }
+        const auto host_handle = ::CreateFileW(
+            path.c_str(), static_cast<DWORD>(argument(1)), static_cast<DWORD>(argument(2)), nullptr,
+            static_cast<DWORD>(argument(4)), static_cast<DWORD>(argument(5)), template_handle);
+        if (host_handle == INVALID_HANDLE_VALUE) {
+            last_error_ = ::GetLastError();
+            cpu.set_reg(Rax, guest_is_64_bit_ ? UINT64_MAX : UINT32_MAX);
         } else {
-            const auto bytes = cpu.memory().read(buffer, size);
+            const auto guest_handle = next_file_handle_++;
+            file_handles_.emplace(guest_handle, host_handle);
+            cpu.set_reg(Rax, guest_handle);
+        }
+        finish_call(7);
+        break;
+    }
+    case Api::GuestReadFile: {
+        const auto found = file_handles_.find(argument(0));
+        const auto requested = static_cast<DWORD>(argument(2));
+        std::vector<std::uint8_t> bytes(requested);
+        DWORD transferred = 0;
+        const bool valid = found != file_handles_.end() && argument(4) == 0;
+        const auto result = valid && ::ReadFile(static_cast<HANDLE>(found->second), bytes.data(),
+                                                requested, &transferred, nullptr) != FALSE;
+        if (result) {
+            cpu.memory().write(argument(1),
+                               std::span<const std::uint8_t>(bytes.data(), transferred));
+            if (argument(3) != 0) {
+                cpu.memory().write32(argument(3), transferred);
+            }
+        } else {
+            last_error_ = valid ? ::GetLastError() : ERROR_INVALID_HANDLE;
+        }
+        cpu.set_reg(Rax, result ? 1 : 0);
+        finish_call(5);
+        break;
+    }
+    case Api::GuestCloseHandle: {
+        const auto found = file_handles_.find(argument(0));
+        bool result = argument(0) >= 0x100 && argument(0) <= 0x102;
+        if (found != file_handles_.end()) {
+            result = ::CloseHandle(static_cast<HANDLE>(found->second)) != FALSE;
+            file_handles_.erase(found);
+        }
+        if (!result) {
+            last_error_ = ERROR_INVALID_HANDLE;
+        }
+        cpu.set_reg(Rax, result ? 1 : 0);
+        finish_call(1);
+        break;
+    }
+    case Api::WriteFile: {
+        const auto handle = argument(0);
+        const auto size = static_cast<std::uint32_t>(argument(2));
+        const auto bytes = cpu.memory().read(argument(1), size);
+        DWORD transferred = 0;
+        bool result = false;
+        if ((handle == 0x101 || handle == 0x102) && argument(4) == 0) {
             output_.write(reinterpret_cast<const char *>(bytes.data()),
                           static_cast<std::streamsize>(bytes.size()));
             output_.flush();
-            if (written_pointer != 0) {
-                cpu.memory().write32(written_pointer, size);
-            }
-            cpu.set_reg(Rax, 1);
+            transferred = size;
+            result = true;
+        } else if (const auto found = file_handles_.find(handle);
+                   found != file_handles_.end() && argument(4) == 0) {
+            result = ::WriteFile(static_cast<HANDLE>(found->second), bytes.data(), size,
+                                 &transferred, nullptr) != FALSE;
         }
+        if (result && argument(3) != 0) {
+            cpu.memory().write32(argument(3), transferred);
+        } else if (!result) {
+            last_error_ = ERROR_INVALID_HANDLE;
+        }
+        cpu.set_reg(Rax, result ? 1 : 0);
         finish_call(5);
         break;
     }
@@ -834,6 +946,63 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         ::GetSystemTimeAsFileTime(&time);
         cpu.memory().write32(argument(0), time.dwLowDateTime);
         cpu.memory().write32(argument(0) + 4, time.dwHighDateTime);
+        finish_call(1);
+        break;
+    }
+    case Api::TimeConversion: {
+        const auto source = argument(0);
+        const auto destination = argument(1);
+        BOOL result = FALSE;
+        if (thunk_name.ends_with("FileTimeToLocalFileTime") ||
+            thunk_name.ends_with("LocalFileTimeToFileTime")) {
+            FILETIME input{cpu.memory().read32(source), cpu.memory().read32(source + 4)};
+            FILETIME output{};
+            result = thunk_name.ends_with("FileTimeToLocalFileTime")
+                         ? ::FileTimeToLocalFileTime(&input, &output)
+                         : ::LocalFileTimeToFileTime(&input, &output);
+            if (result != FALSE) {
+                cpu.memory().write32(destination, output.dwLowDateTime);
+                cpu.memory().write32(destination + 4, output.dwHighDateTime);
+            }
+        } else if (thunk_name.ends_with("FileTimeToSystemTime")) {
+            FILETIME input{cpu.memory().read32(source), cpu.memory().read32(source + 4)};
+            SYSTEMTIME output{};
+            result = ::FileTimeToSystemTime(&input, &output);
+            if (result != FALSE) {
+                cpu.memory().write(destination, std::span<const std::uint8_t>(
+                                                    reinterpret_cast<const std::uint8_t *>(&output),
+                                                    sizeof(output)));
+            }
+        } else {
+            SYSTEMTIME input{};
+            const auto bytes = cpu.memory().read(source, sizeof(input));
+            std::memcpy(&input, bytes.data(), sizeof(input));
+            FILETIME output{};
+            result = ::SystemTimeToFileTime(&input, &output);
+            if (result != FALSE) {
+                cpu.memory().write32(destination, output.dwLowDateTime);
+                cpu.memory().write32(destination + 4, output.dwHighDateTime);
+            }
+        }
+        if (result == FALSE) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result != FALSE);
+        finish_call(2);
+        break;
+    }
+    case Api::TimeZoneInformation: {
+        TIME_ZONE_INFORMATION information{};
+        const auto result = ::GetTimeZoneInformation(&information);
+        if (result == TIME_ZONE_ID_INVALID) {
+            last_error_ = ::GetLastError();
+        } else {
+            cpu.memory().write(
+                argument(0),
+                std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(&information),
+                                              sizeof(information)));
+        }
+        cpu.set_reg(Rax, result);
         finish_call(1);
         break;
     }
@@ -1020,6 +1189,199 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(4);
         break;
     }
+    case Api::GuestMessageLoop: {
+        const auto read_message = [&](std::uint64_t address) {
+            MSG message{};
+            if (guest_is_64_bit_) {
+                message.hwnd = reinterpret_cast<HWND>(cpu.memory().read64(address));
+                message.message = cpu.memory().read32(address + 8);
+                message.wParam = cpu.memory().read64(address + 16);
+                message.lParam = static_cast<LPARAM>(cpu.memory().read64(address + 24));
+                message.time = cpu.memory().read32(address + 32);
+                message.pt.x = static_cast<LONG>(cpu.memory().read32(address + 36));
+                message.pt.y = static_cast<LONG>(cpu.memory().read32(address + 40));
+            } else {
+                message.hwnd = reinterpret_cast<HWND>(cpu.memory().read32(address));
+                message.message = cpu.memory().read32(address + 4);
+                message.wParam = cpu.memory().read32(address + 8);
+                message.lParam = static_cast<std::int32_t>(cpu.memory().read32(address + 12));
+                message.time = cpu.memory().read32(address + 16);
+                message.pt.x = static_cast<LONG>(cpu.memory().read32(address + 20));
+                message.pt.y = static_cast<LONG>(cpu.memory().read32(address + 24));
+            }
+            return message;
+        };
+        const auto write_message = [&](std::uint64_t address, const MSG &message) {
+            const auto size = guest_is_64_bit_ ? 48U : 28U;
+            cpu.memory().write(address, std::vector<std::uint8_t>(size));
+            if (guest_is_64_bit_) {
+                cpu.memory().write64(address, reinterpret_cast<std::uint64_t>(message.hwnd));
+                cpu.memory().write32(address + 8, message.message);
+                cpu.memory().write64(address + 16, message.wParam);
+                cpu.memory().write64(address + 24, static_cast<std::uint64_t>(message.lParam));
+                cpu.memory().write32(address + 32, message.time);
+                cpu.memory().write32(address + 36, static_cast<std::uint32_t>(message.pt.x));
+                cpu.memory().write32(address + 40, static_cast<std::uint32_t>(message.pt.y));
+            } else {
+                cpu.memory().write32(address, static_cast<std::uint32_t>(
+                                                  reinterpret_cast<std::uintptr_t>(message.hwnd)));
+                cpu.memory().write32(address + 4, message.message);
+                cpu.memory().write32(address + 8, static_cast<std::uint32_t>(message.wParam));
+                cpu.memory().write32(address + 12, static_cast<std::uint32_t>(message.lParam));
+                cpu.memory().write32(address + 16, message.time);
+                cpu.memory().write32(address + 20, static_cast<std::uint32_t>(message.pt.x));
+                cpu.memory().write32(address + 24, static_cast<std::uint32_t>(message.pt.y));
+            }
+        };
+        if (thunk_name.ends_with("!PostQuitMessage")) {
+            quit_message_pending_ = true;
+            quit_message_code_ = static_cast<std::uint32_t>(argument(0));
+            finish_call(1);
+            break;
+        }
+        if (thunk_name.ends_with("!TranslateMessage")) {
+            const auto message = read_message(argument(0));
+            cpu.set_reg(Rax, ::TranslateMessage(&message) != FALSE ? 1 : 0);
+            finish_call(1);
+            break;
+        }
+        if (thunk_name.ends_with("!DispatchMessageA") ||
+            thunk_name.ends_with("!DispatchMessageW")) {
+            const auto message = read_message(argument(0));
+            const auto result = thunk_name.ends_with("W") ? ::DispatchMessageW(&message)
+                                                          : ::DispatchMessageA(&message);
+            if (callback_exception != nullptr) {
+                auto exception = callback_exception;
+                callback_exception = nullptr;
+                std::rethrow_exception(exception);
+            }
+            cpu.set_reg(Rax, static_cast<std::uint64_t>(result));
+            finish_call(1);
+            break;
+        }
+        MSG message{};
+        const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(1)));
+        int result = 0;
+        if (quit_message_pending_) {
+            message.message = WM_QUIT;
+            message.wParam = quit_message_code_;
+            write_message(argument(0), message);
+            const bool get_message =
+                thunk_name.ends_with("!GetMessageA") || thunk_name.ends_with("!GetMessageW");
+            if (get_message || (static_cast<UINT>(argument(4)) & PM_REMOVE) != 0) {
+                quit_message_pending_ = false;
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call(get_message ? 4 : 5);
+            break;
+        }
+        if (thunk_name.ends_with("!PeekMessageA") || thunk_name.ends_with("!PeekMessageW")) {
+            // Keep CPUEmu's own host-thread messages out of the guest queue. Native
+            // PeekMessage can synchronously dispatch sent messages even when it returns zero.
+            if (!window_procedures_.empty()) {
+                result = thunk_name.ends_with("W")
+                             ? ::PeekMessageW(&message, window, static_cast<UINT>(argument(2)),
+                                              static_cast<UINT>(argument(3)),
+                                              static_cast<UINT>(argument(4)))
+                             : ::PeekMessageA(&message, window, static_cast<UINT>(argument(2)),
+                                              static_cast<UINT>(argument(3)),
+                                              static_cast<UINT>(argument(4)));
+            }
+            if (result != 0) {
+                write_message(argument(0), message);
+            }
+            cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+            finish_call(5);
+        } else {
+            result = thunk_name.ends_with("W")
+                         ? ::GetMessageW(&message, window, static_cast<UINT>(argument(2)),
+                                         static_cast<UINT>(argument(3)))
+                         : ::GetMessageA(&message, window, static_cast<UINT>(argument(2)),
+                                         static_cast<UINT>(argument(3)));
+            if (result >= 0) {
+                write_message(argument(0), message);
+            } else {
+                last_error_ = ::GetLastError();
+            }
+            cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+            finish_call(4);
+        }
+        break;
+    }
+    case Api::GuestFileDialog:
+        // Treat an unavailable interactive host dialog as a user cancellation. The Win32
+        // contract distinguishes this from an error by returning zero here and from
+        // CommDlgExtendedError, while keeping guest-owned pointers and hooks off the host.
+        cpu.set_reg(Rax, 0);
+        finish_call(thunk_name.ends_with("!CommDlgExtendedError") ? 0 : 1);
+        break;
+    case Api::CommonControlsInitialize: {
+        struct CommonControls {
+            DWORD size;
+            DWORD classes;
+        } controls{cpu.memory().read32(argument(0)), cpu.memory().read32(argument(0) + 4)};
+        using Initialize = BOOL(WINAPI *)(const CommonControls *);
+        const auto library = ::LoadLibraryW(L"comctl32.dll");
+        const auto initialize =
+            library == nullptr
+                ? nullptr
+                : reinterpret_cast<Initialize>(::GetProcAddress(library, "InitCommonControlsEx"));
+        const auto result = initialize != nullptr && initialize(&controls) != FALSE;
+        if (!result) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result ? 1 : 0);
+        finish_call(1);
+        break;
+    }
+    case Api::GdiplusStartup: {
+        struct StartupInput {
+            std::uint32_t version;
+            void *debug_callback;
+            BOOL suppress_background_thread;
+            BOOL suppress_external_codecs;
+        } input{cpu.memory().read32(argument(1)), nullptr, FALSE,
+                static_cast<BOOL>(cpu.memory().read32(argument(1) + (guest_is_64_bit_ ? 20 : 12)))};
+        // Guest callbacks can never be retained by native GDI+. Keep the native background thread
+        // enabled even if the guest requested callback-driven notification hooks.
+        using Startup = int(WINAPI *)(std::uint64_t *, const StartupInput *, void *);
+        const auto library = ::LoadLibraryW(L"gdiplus.dll");
+        const auto startup =
+            library == nullptr
+                ? nullptr
+                : reinterpret_cast<Startup>(::GetProcAddress(library, "GdiplusStartup"));
+        std::uint64_t token = 0;
+        const auto status = startup == nullptr ? 1 : startup(&token, &input, nullptr);
+        if (status == 0) {
+            host_gdiplus_token_ = token;
+            if (guest_is_64_bit_) {
+                cpu.memory().write64(argument(0), 0x500);
+            } else {
+                cpu.memory().write32(argument(0), 0x500);
+            }
+            if (argument(2) != 0) {
+                const auto output_size = guest_is_64_bit_ ? 16U : 8U;
+                cpu.memory().write(argument(2), std::vector<std::uint8_t>(output_size));
+            }
+        }
+        cpu.set_reg(Rax, static_cast<std::uint32_t>(status));
+        finish_call(3);
+        break;
+    }
+    case Api::GdiplusShutdown:
+        if (host_gdiplus_token_ != 0) {
+            if (const auto library = ::LoadLibraryW(L"gdiplus.dll"); library != nullptr) {
+                using Shutdown = void(WINAPI *)(std::uint64_t);
+                if (const auto shutdown =
+                        reinterpret_cast<Shutdown>(::GetProcAddress(library, "GdiplusShutdown"));
+                    shutdown != nullptr) {
+                    shutdown(host_gdiplus_token_);
+                }
+            }
+            host_gdiplus_token_ = 0;
+        }
+        finish_call(1);
+        break;
     case Api::OutputDebugStringA:
         log::info("guest", "OutputDebugStringA: " + cpu.memory().read_c_string(cpu.reg(Rcx)));
         finish_call();
@@ -1125,7 +1487,20 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     }
     case Api::ReturnZero:
         cpu.set_reg(Rax, 0);
-        finish_call();
+        finish_call(
+            thunk_name.find("_cexit") != std::string::npos ||
+                    thunk_name.find("_c_exit") != std::string::npos
+                ? 0
+            : thunk_name.ends_with("EventWriteTransfer")  ? 6
+            : thunk_name.ends_with("EventSetInformation") ? 4
+            : thunk_name.ends_with("CreateProcessAsUserW") ||
+                    thunk_name.ends_with("CreateProcessAsUserA")
+                ? 11
+            : thunk_name.ends_with("CreateProcessW") || thunk_name.ends_with("CreateProcessA") ? 10
+            : thunk_name.ends_with("AddVectoredExceptionHandler") ||
+                    thunk_name.ends_with("AddVectoredContinueHandler")
+                ? 2
+                : 1);
         break;
     case Api::InitializeOnexitTable:
         // The onexit table is {_first, _last, _end}; reset it in guest memory so later
@@ -1541,6 +1916,41 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call();
         break;
     }
+    case Api::EnvironmentVariable: {
+        const bool ansi = thunk_name.ends_with("GetEnvironmentVariableA");
+        const auto capacity = static_cast<DWORD>(argument(2));
+        DWORD result = 0;
+        ::SetLastError(ERROR_SUCCESS);
+        if (ansi) {
+            const auto name = cpu.memory().read_c_string(argument(0));
+            std::vector<char> value(capacity);
+            result = ::GetEnvironmentVariableA(name.c_str(), value.empty() ? nullptr : value.data(),
+                                               capacity);
+            if (result != 0 && result < capacity) {
+                cpu.memory().write(argument(1),
+                                   std::span<const std::uint8_t>(
+                                       reinterpret_cast<const std::uint8_t *>(value.data()),
+                                       static_cast<std::size_t>(result) + 1));
+            }
+        } else {
+            const auto name = cpu.memory().read_wide_string(argument(0));
+            std::vector<wchar_t> value(capacity);
+            result = ::GetEnvironmentVariableW(name.c_str(), value.empty() ? nullptr : value.data(),
+                                               capacity);
+            if (result != 0 && result < capacity) {
+                cpu.memory().write(argument(1),
+                                   std::span<const std::uint8_t>(
+                                       reinterpret_cast<const std::uint8_t *>(value.data()),
+                                       (static_cast<std::size_t>(result) + 1) * sizeof(wchar_t)));
+            }
+        }
+        if (result == 0) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(3);
+        break;
+    }
     case Api::EventRegister:
         if (cpu.reg(R9) != 0) {
             cpu.memory().write64(cpu.reg(R9), 1);
@@ -1808,7 +2218,9 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     case Api::ReturnOne:
         cpu.set_reg(Rax, 1);
-        finish_call();
+        finish_call(thunk_name.ends_with("HeapSetInformation") ? 4
+                    : thunk_name.ends_with("SetWinEventHook")  ? 7
+                                                               : 1);
         break;
     case Api::GuestModuleHandle:
         if (argument(0) == 0) {
@@ -1856,6 +2268,81 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(1);
         break;
     }
+    case Api::GuestFindFirstFile: {
+        const bool ansi = thunk_name.ends_with("FindFirstFileA");
+        HANDLE host_handle = INVALID_HANDLE_VALUE;
+        if (ansi) {
+            WIN32_FIND_DATAA data{};
+            host_handle = ::FindFirstFileA(cpu.memory().read_c_string(argument(0)).c_str(), &data);
+            if (host_handle != INVALID_HANDLE_VALUE) {
+                cpu.memory().write(
+                    argument(1), std::span<const std::uint8_t>(
+                                     reinterpret_cast<const std::uint8_t *>(&data), sizeof(data)));
+            }
+        } else {
+            WIN32_FIND_DATAW data{};
+            host_handle =
+                ::FindFirstFileW(cpu.memory().read_wide_string(argument(0)).c_str(), &data);
+            if (host_handle != INVALID_HANDLE_VALUE) {
+                cpu.memory().write(
+                    argument(1), std::span<const std::uint8_t>(
+                                     reinterpret_cast<const std::uint8_t *>(&data), sizeof(data)));
+            }
+        }
+        if (host_handle == INVALID_HANDLE_VALUE) {
+            last_error_ = ::GetLastError();
+            cpu.set_reg(Rax, guest_is_64_bit_ ? UINT64_MAX : UINT32_MAX);
+        } else {
+            const auto guest_handle = next_find_handle_++;
+            find_handles_.emplace(guest_handle, host_handle);
+            cpu.set_reg(Rax, guest_handle);
+        }
+        finish_call(2);
+        break;
+    }
+    case Api::GuestFindNextFile: {
+        const auto found = find_handles_.find(argument(0));
+        BOOL result = FALSE;
+        if (found == find_handles_.end()) {
+            last_error_ = ERROR_INVALID_HANDLE;
+        } else if (thunk_name.ends_with("FindNextFileA")) {
+            WIN32_FIND_DATAA data{};
+            result = ::FindNextFileA(static_cast<HANDLE>(found->second), &data);
+            if (result != FALSE) {
+                cpu.memory().write(
+                    argument(1), std::span<const std::uint8_t>(
+                                     reinterpret_cast<const std::uint8_t *>(&data), sizeof(data)));
+            }
+        } else {
+            WIN32_FIND_DATAW data{};
+            result = ::FindNextFileW(static_cast<HANDLE>(found->second), &data);
+            if (result != FALSE) {
+                cpu.memory().write(
+                    argument(1), std::span<const std::uint8_t>(
+                                     reinterpret_cast<const std::uint8_t *>(&data), sizeof(data)));
+            }
+        }
+        if (result == FALSE && found != find_handles_.end()) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result != FALSE);
+        finish_call(2);
+        break;
+    }
+    case Api::GuestFindClose: {
+        const auto found = find_handles_.find(argument(0));
+        const bool result = found != find_handles_.end() &&
+                            ::FindClose(static_cast<HANDLE>(found->second)) != FALSE;
+        if (found != find_handles_.end()) {
+            find_handles_.erase(found);
+        }
+        if (!result) {
+            last_error_ = ERROR_INVALID_HANDLE;
+        }
+        cpu.set_reg(Rax, result ? 1 : 0);
+        finish_call(1);
+        break;
+    }
     case Api::GetModuleHandleExW:
         if (cpu.reg(R8) != 0) {
             cpu.memory().write64(cpu.reg(R8), guest_image_base_);
@@ -1865,30 +2352,32 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     case Api::GetModuleFileNameW: {
         const auto path = guest_executable_.wstring();
-        const auto capacity = static_cast<std::uint32_t>(cpu.reg(R8));
+        const auto destination = argument(1);
+        const auto capacity = static_cast<std::uint32_t>(argument(2));
         const auto count = std::min<std::size_t>(path.size(), capacity == 0 ? 0 : capacity - 1);
         for (std::size_t index = 0; index < count; ++index) {
-            cpu.memory().write16(cpu.reg(Rdx) + index * 2, static_cast<std::uint16_t>(path[index]));
+            cpu.memory().write16(destination + index * 2, static_cast<std::uint16_t>(path[index]));
         }
         if (capacity != 0) {
-            cpu.memory().write16(cpu.reg(Rdx) + count * 2, 0);
+            cpu.memory().write16(destination + count * 2, 0);
         }
         cpu.set_reg(Rax, count);
-        finish_call();
+        finish_call(3);
         break;
     }
     case Api::GetModuleFileNameA: {
         const auto path = guest_executable_.string();
-        const auto capacity = static_cast<std::uint32_t>(cpu.reg(R8));
+        const auto destination = argument(1);
+        const auto capacity = static_cast<std::uint32_t>(argument(2));
         const auto count = std::min<std::size_t>(path.size(), capacity == 0 ? 0 : capacity - 1);
         for (std::size_t index = 0; index < count; ++index) {
-            cpu.memory().write8(cpu.reg(Rdx) + index, static_cast<std::uint8_t>(path[index]));
+            cpu.memory().write8(destination + index, static_cast<std::uint8_t>(path[index]));
         }
         if (capacity != 0) {
-            cpu.memory().write8(cpu.reg(Rdx) + count, 0);
+            cpu.memory().write8(destination + count, 0);
         }
         cpu.set_reg(Rax, count);
-        finish_call();
+        finish_call(3);
         break;
     }
     case Api::GetProcAddress: {
@@ -2430,6 +2919,24 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     heap_sizes_.clear();
     next_module_handle_ = 0x7fe0'0000ULL;
     guest_modules_.clear();
+    for (const auto &[guest_handle, host_handle] : find_handles_) {
+        static_cast<void>(guest_handle);
+        ::FindClose(static_cast<HANDLE>(host_handle));
+    }
+    find_handles_.clear();
+    next_find_handle_ = 0x300;
+    for (const auto &[guest_handle, host_handle] : file_handles_) {
+        static_cast<void>(guest_handle);
+        ::CloseHandle(static_cast<HANDLE>(host_handle));
+    }
+    file_handles_.clear();
+    next_file_handle_ = 0x400;
+    class_window_procedures_.clear();
+    atom_window_procedures_.clear();
+    window_procedures_.clear();
+    creating_window_procedure_ = 0;
+    quit_message_pending_ = false;
+    quit_message_code_ = 0;
     protection_policy_proxy_ = 0;
     protection_policy_methods_.clear();
     next_tls_index_ = 1;
