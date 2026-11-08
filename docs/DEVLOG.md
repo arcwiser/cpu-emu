@@ -4,6 +4,15 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-08 — Documentation and contribution standards
+
+- Consolidated compatibility, roadmap, and development-history material under `docs/`, added a
+  repository structure guide, and rebuilt the README around an honest game-support status board.
+- Added a dark green instruction-family atlas and expanded the coverage document into an auditable
+  mnemonic/family inventory with explicit partial and planned areas instead of inflated counts.
+- Strengthened agent, contributor, and pull-request requirements for exact testing, AI disclosure,
+  guest/host ownership review, legal hygiene, and precise compatibility language.
+
 ## 2026-11-08 — Undertale input and display discovery
 
 - Added guest-memory `IDirectInput8` and `IDirectInputDevice8` vtables so x86 guest code never
@@ -137,7 +146,7 @@ this file is the companion log of development decisions.
 - Added safe synchronous adapters for `Beep`, `MessageBeep`, `PlaySoundA/W`, and
   `sndPlaySoundA/W`. Retained-pointer audio modes are rejected until lifetime-aware guest objects
   exist.
-- Added checked UTF-16 string reads to `Memory` and an `APP.md` compatibility matrix covering the
+- Added checked UTF-16 string reads to `Memory` and a compatibility matrix covering the
   test fixtures, Paint, Windows 11 Notepad, and the current Discord/Chromium probe.
 
 ### Verified

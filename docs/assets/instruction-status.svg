@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540" role="img" aria-labelledby="title desc">
+  <title id="title">CPUEmu instruction family completion map</title>
+  <desc id="desc">Treemap showing six broad, six partial, two initial, and four planned x86 instruction coverage areas.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1018"/><stop offset="1" stop-color="#101827"/></linearGradient>
+    <pattern id="broad" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="11" height="11" rx="1" fill="#22c55e"/><path d="M11 0H12V12H0V11H11Z" fill="#14532d"/></pattern>
+    <pattern id="partial" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="11" height="11" rx="1" fill="#65a30d"/><path d="M11 0H12V12H0V11H11Z" fill="#365314"/></pattern>
+    <pattern id="initial" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="11" height="11" rx="1" fill="#a16207"/><path d="M11 0H12V12H0V11H11Z" fill="#422006"/></pattern>
+    <pattern id="planned" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="11" height="11" rx="1" fill="#263244"/><path d="M11 0H12V12H0V11H11Z" fill="#111827"/></pattern>
+    <style>.title{font:700 27px 'Segoe UI',Arial;fill:#f8fafc}.sub{font:14px 'Segoe UI',Arial;fill:#94a3b8}.badge{font:600 13px 'Segoe UI',Arial;fill:#fff}.label{font:700 14px 'Segoe UI',Arial;fill:#fff;paint-order:stroke;stroke:#07110b;stroke-width:3px}.small{font:600 12px 'Segoe UI',Arial;fill:#e2e8f0;paint-order:stroke;stroke:#07110b;stroke-width:3px}.legend{font:13px 'Segoe UI',Arial;fill:#cbd5e1}</style>
+  </defs>
+  <rect width="1200" height="540" rx="16" fill="url(#bg)"/>
+  <text x="28" y="43" class="title">Instruction coverage atlas</text><text x="28" y="68" class="sub">Family-level status • exact forms and caveats live in docs/INSTRUCTION_COVERAGE.md</text>
+  <g transform="translate(690 25)"><rect width="105" height="29" rx="4" fill="#15803d"/><text x="52" y="20" text-anchor="middle" class="badge">6 broad</text><rect x="113" width="105" height="29" rx="4" fill="#4d7c0f"/><text x="165" y="20" text-anchor="middle" class="badge">6 partial</text><rect x="226" width="105" height="29" rx="4" fill="#a16207"/><text x="278" y="20" text-anchor="middle" class="badge">2 initial</text><rect x="339" width="105" height="29" rx="4" fill="#334155"/><text x="391" y="20" text-anchor="middle" class="badge">4 planned</text></g>
+  <g transform="translate(28 92)">
+    <rect width="330" height="180" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="14" y="25" class="label">Core integer</text><text x="14" y="47" class="small">moves • arithmetic • logic • multiply/divide</text>
+    <rect x="338" width="250" height="180" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="352" y="25" class="label">Control flow</text><text x="352" y="47" class="small">Jcc • CALL • RET • indirect branches</text>
+    <rect x="596" width="260" height="86" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="610" y="25" class="label">Stack &amp; ABI</text><text x="610" y="47" class="small">x86 + x64 widths</text>
+    <rect x="864" width="280" height="86" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="878" y="25" class="label">Addressing</text><text x="878" y="47" class="small">ModRM • SIB • RIP-relative • FS/GS</text>
+    <rect x="596" y="94" width="260" height="86" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="610" y="119" class="label">Flags &amp; conditions</text><text x="610" y="141" class="small">CMOVcc • SETcc • PUSHF/POPF</text>
+    <rect x="864" y="94" width="280" height="86" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="878" y="119" class="label">String operations</text><text x="878" y="141" class="small">MOVS • STOS • SCAS • REP/DF</text>
+    <rect y="188" width="210" height="112" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="14" y="213" class="label">SSE</text><text x="14" y="235" class="small">scalar + packed</text>
+    <rect x="218" y="188" width="210" height="112" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="232" y="213" class="label">SSE2</text><text x="232" y="235" class="small">integer + double</text>
+    <rect x="436" y="188" width="170" height="112" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="450" y="213" class="label">SSE3</text><text x="450" y="235" class="small">selected forms</text>
+    <rect x="614" y="188" width="170" height="112" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="628" y="213" class="label">SSSE3</text><text x="628" y="235" class="small">selected forms</text>
+    <rect x="792" y="188" width="170" height="112" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="806" y="213" class="label">SSE4.1</text><text x="806" y="235" class="small">initial integer set</text>
+    <rect x="970" y="188" width="174" height="112" rx="6" fill="url(#initial)" stroke="#d97706"/><text x="984" y="213" class="label">x87</text><text x="984" y="235" class="small">startup/math subset</text>
+    <rect y="308" width="260" height="82" rx="6" fill="url(#initial)" stroke="#d97706"/><text x="14" y="333" class="label">MMX</text><text x="14" y="355" class="small">moves incomplete</text>
+    <rect x="268" y="308" width="260" height="82" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="282" y="333" class="label">System queries</text><text x="282" y="355" class="small">CPUID • RDTSC • feature gating</text>
+    <rect x="536" y="308" width="146" height="82" rx="6" fill="url(#planned)" stroke="#475569"/><text x="550" y="333" class="label">SSE4.2</text>
+    <rect x="690" y="308" width="146" height="82" rx="6" fill="url(#planned)" stroke="#475569"/><text x="704" y="333" class="label">AVX / AVX2</text>
+    <rect x="844" y="308" width="146" height="82" rx="6" fill="url(#planned)" stroke="#475569"/><text x="858" y="333" class="label">BMI1 / BMI2</text>
+    <rect x="998" y="308" width="146" height="82" rx="6" fill="url(#planned)" stroke="#475569"/><text x="1012" y="333" class="label">Exceptions</text><text x="1012" y="355" class="small">delivery model</text>
+  </g>
+  <g transform="translate(30 510)"><rect width="14" height="14" rx="2" fill="#22c55e"/><text x="22" y="12" class="legend">Broad</text><rect x="110" width="14" height="14" rx="2" fill="#65a30d"/><text x="132" y="12" class="legend">Partial</text><rect x="230" width="14" height="14" rx="2" fill="#a16207"/><text x="252" y="12" class="legend">Initial</text><rect x="340" width="14" height="14" rx="2" fill="#334155"/><text x="362" y="12" class="legend">Planned / not advertised</text></g>
+</svg>

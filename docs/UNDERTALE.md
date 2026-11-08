@@ -48,7 +48,8 @@ DLLs into this repository.
 - A guest-owned DirectInput 8 COM proxy provides safe device creation and zeroed state polling;
   display-mode enumeration is marshaled without exposing host structures.
 - Basic synchronous WinMM playback exists, but streaming/game audio is not complete.
-- Direct3D 9 and Steamworks have not been validated against Undertale yet.
+- Direct3D 9Ex creation is the current first unsupported boundary. Steam startup is validated only
+  through the safe offline failure path; authenticated Steamworks interfaces are not implemented.
 - The installed Steam executable loads at `0x00400000`, resolves all 313 imports, opens and parses
   `data.win`, probes `options.ini` and save/config paths, and passes the safe offline Steam startup
   path. It creates the native `YYGameMakerYY` window, executes its interpreted `WM_NCCREATE` and
