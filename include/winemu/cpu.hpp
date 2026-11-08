@@ -84,11 +84,14 @@ class Cpu {
     Memory &memory_;
     std::array<std::uint64_t, 16> registers_{};
     std::array<std::array<std::uint64_t, 2>, 16> xmm_{};
+    std::array<long double, 8> x87_{};
+    std::size_t x87_depth_ = 0;
     static constexpr std::size_t history_capacity = 64;
     std::array<std::uint64_t, history_capacity> history_{};
     std::size_t history_cursor_ = 0;
     std::uint64_t rip_ = 0;
     std::uint64_t flags_ = 2;
+    std::uint16_t x87_control_ = 0x037f;
     std::uint64_t instructions_ = 0;
     std::uint64_t gs_base_ = 0;
     std::uint64_t fs_base_ = 0;

@@ -35,9 +35,9 @@ constexpr std::uint64_t return_thunk32 = 0x7ff0'0000ULL;
 constexpr std::uint64_t callback_return = 0xffff'0000'0000'0080ULL;
 constexpr std::uint64_t stack_top = 0x0000'0000'7000'0000ULL;
 constexpr std::uint64_t minimum_stack_size = 1024 * 1024;
-constexpr std::uint64_t environment_base = 0x0000'0005'0000'0000ULL;
+constexpr std::uint64_t environment_base = 0x7fc0'0000ULL;
 constexpr std::uint64_t environment_size = 0x0002'0000ULL;
-constexpr std::uint64_t tls_base = 0x0000'0005'0002'0000ULL;
+constexpr std::uint64_t tls_base = 0x7fc2'0000ULL;
 constexpr std::uint64_t tls_size = 0x0002'0000ULL;
 constexpr std::uint64_t teb_base = environment_base + 0xe000;
 constexpr std::uint64_t peb_base = environment_base + 0xf000;
@@ -337,10 +337,32 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
                                normalized_module == "kernelbase.dll" ||
                                normalized_module.starts_with("api-ms-win-core-");
     Api api;
-    if (kernel_module && name == "ExitProcess") {
+    if ((kernel_module && name == "ExitProcess") || name == "CorExitProcess") {
         api = Api::ExitProcess;
     } else if (kernel_module && name == "GetStdHandle") {
         api = Api::GetStdHandle;
+    } else if (kernel_module && name == "SetHandleCount") {
+        api = Api::SetHandleCount;
+    } else if (kernel_module && name == "GetFileType") {
+        api = Api::GuestFileType;
+    } else if (kernel_module && (name == "GetConsoleCP" || name == "GetConsoleOutputCP" ||
+                                 name == "GetACP" || name == "GetOEMCP")) {
+        api = Api::ConsoleCodePage;
+    } else if (kernel_module && name == "GetCPInfo") {
+        api = Api::GuestCodePageInfo;
+    } else if (kernel_module && name == "IsValidCodePage") {
+        api = Api::ValidateCodePage;
+    } else if (kernel_module && (name == "GetConsoleMode" || name == "SetConsoleMode")) {
+        api = Api::ConsoleMode;
+    } else if (kernel_module && name == "GetConsoleWindow") {
+        api = Api::ConsoleWindow;
+    } else if (kernel_module && (name == "GetCurrentProcess" || name == "GetCurrentThread")) {
+        api = Api::CurrentPseudoHandle;
+    } else if (name == "IsProcessorFeaturePresent") {
+        api = Api::ProcessorFeature;
+    } else if (kernel_module && (name == "SetConsoleCtrlHandler" || name == "SetStdHandle" ||
+                                 name == "CloseHandle")) {
+        api = Api::SimpleHandleSuccess;
     } else if (kernel_module && name == "WriteFile") {
         api = Api::WriteFile;
     } else if (kernel_module && name == "GetLastError") {
@@ -363,6 +385,24 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::CriticalSectionOperation;
     } else if (kernel_module && name == "TryEnterCriticalSection") {
         api = Api::CriticalSectionTry;
+    } else if (kernel_module &&
+               (name == "InterlockedIncrement" || name == "InterlockedDecrement" ||
+                name == "InterlockedExchange" || name == "InterlockedExchangeAdd" ||
+                name == "InterlockedCompareExchange" || name == "InterlockedAnd" ||
+                name == "InterlockedOr" || name == "InterlockedXor" ||
+                name == "InterlockedExchangePointer" ||
+                name == "InterlockedCompareExchangePointer" || name == "InterlockedIncrement64" ||
+                name == "InterlockedDecrement64" || name == "InterlockedExchange64" ||
+                name == "InterlockedExchangeAdd64" || name == "InterlockedCompareExchange64" ||
+                name == "InterlockedAnd64" || name == "InterlockedOr64" ||
+                name == "InterlockedXor64")) {
+        api = Api::InterlockedOperation;
+    } else if (name == "GetProcessWindowStation") {
+        api = Api::GetProcessWindowStation;
+    } else if (name == "GetUserObjectInformationA" || name == "GetUserObjectInformationW") {
+        api = Api::UserObjectInformation;
+    } else if (name == "MessageBoxA" || name == "MessageBoxW") {
+        api = Api::GuestMessageBox;
     } else if (kernel_module && name == "OutputDebugStringA") {
         api = Api::OutputDebugStringA;
     } else if (kernel_module && name == "Beep") {
@@ -414,8 +454,18 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::ErrnoPointer;
     } else if (name == "SetUnhandledExceptionFilter") {
         api = Api::SetUnhandledExceptionFilter;
+    } else if (name == "GetCommandLineA") {
+        api = Api::GetCommandLineA;
     } else if (name == "GetCommandLineW") {
         api = Api::GetCommandLineW;
+    } else if (name == "WideCharToMultiByte") {
+        api = Api::WideCharConversion;
+    } else if (name == "MultiByteToWideChar") {
+        api = Api::MultiByteConversion;
+    } else if (name == "GetStringTypeA" || name == "GetStringTypeW") {
+        api = Api::GuestStringType;
+    } else if (name == "LCMapStringA" || name == "LCMapStringW") {
+        api = Api::GuestMapString;
     } else if (name == "CommandLineToArgvW") {
         api = Api::CommandLineToArgvW;
     } else if (name == "GetSecurityInfo") {
@@ -424,7 +474,7 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::MapViewOfFile;
     } else if (name == "GetEnvironmentStringsW") {
         api = Api::EnvironmentStringsW;
-    } else if (name == "GetEnvironmentStringsA") {
+    } else if (name == "GetEnvironmentStringsA" || name == "GetEnvironmentStrings") {
         api = Api::EnvironmentStringsA;
     } else if (name == "FreeEnvironmentStringsW" || name == "FreeEnvironmentStringsA") {
         api = Api::ReturnOne;
@@ -471,14 +521,14 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::ProcessHeap;
     } else if (name == "HeapDestroy") {
         api = Api::HeapDestroy;
-    } else if (name == "LocalReAlloc") {
+    } else if (name == "LocalReAlloc" || name == "HeapReAlloc") {
         api = Api::Reallocate;
     } else if (name == "_o_free" || name == "free" || name == "CoTaskMemFree" ||
                name == "LocalFree" || name == "GlobalFree") {
         api = Api::FreeRcx;
     } else if (name == "HeapFree") {
         api = Api::HeapFree;
-    } else if (name == "LocalSize") {
+    } else if (name == "LocalSize" || name == "HeapSize") {
         api = Api::AllocationSize;
     } else if (name == "LocalLock" || name == "GlobalLock") {
         api = Api::IdentityRcx;
@@ -635,7 +685,10 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 cpu.memory().read32(cpu.reg(Rsp) + 4 + static_cast<std::uint64_t>(index) * 4));
         }
         constexpr Register argument_registers[] = {Rcx, Rdx, R8, R9};
-        return cpu.reg(argument_registers[index]);
+        if (index < std::size(argument_registers)) {
+            return cpu.reg(argument_registers[index]);
+        }
+        return cpu.memory().read64(cpu.reg(Rsp) + 0x28 + (index - 4) * 8);
     };
     const auto allocate = [&](std::uint64_t requested_size) {
         const auto size = std::max<std::uint64_t>(requested_size, 1);
@@ -652,15 +705,15 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         exited = true;
         break;
     case Api::ExitProcess:
-        exit_code = static_cast<std::uint32_t>(cpu.reg(Rcx));
+        exit_code = static_cast<std::uint32_t>(argument(0));
         exited = true;
         break;
     case Api::TerminateProcess:
-        exit_code = static_cast<std::uint32_t>(cpu.reg(Rdx));
+        exit_code = static_cast<std::uint32_t>(argument(1));
         exited = true;
         break;
     case Api::GetStdHandle: {
-        const auto requested = static_cast<std::int32_t>(cpu.reg(Rcx));
+        const auto requested = static_cast<std::int32_t>(argument(0));
         std::uint64_t handle = 0;
         if (requested == -11) {
             handle = 0x101;
@@ -670,12 +723,82 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             handle = 0x100;
         } else {
             last_error_ = 6;
-            handle = std::numeric_limits<std::uint64_t>::max();
+            handle = guest_is_64_bit_ ? std::numeric_limits<std::uint64_t>::max() : UINT32_MAX;
         }
         cpu.set_reg(Rax, handle);
         finish_call(1);
         break;
     }
+    case Api::SetHandleCount:
+        cpu.set_reg(Rax, argument(0));
+        finish_call(1);
+        break;
+    case Api::GuestFileType: {
+        const auto handle = argument(0);
+        const bool known = handle >= 0x100 && handle <= 0x102;
+        if (!known) {
+            last_error_ = ERROR_INVALID_HANDLE;
+        }
+        cpu.set_reg(Rax, known ? FILE_TYPE_CHAR : FILE_TYPE_UNKNOWN);
+        finish_call(1);
+        break;
+    }
+    case Api::ConsoleCodePage:
+        cpu.set_reg(Rax, thunk_name.ends_with("GetOEMCP") ? ::GetOEMCP() : ::GetACP());
+        finish_call();
+        break;
+    case Api::GuestCodePageInfo: {
+        CPINFO information{};
+        const auto result = ::GetCPInfo(static_cast<UINT>(argument(0)), &information) != FALSE;
+        if (result) {
+            const auto destination = argument(1);
+            cpu.memory().write32(destination, information.MaxCharSize);
+            cpu.memory().write(destination + 4,
+                               std::span<const std::uint8_t>(information.DefaultChar, 2));
+            cpu.memory().write(destination + 6,
+                               std::span<const std::uint8_t>(information.LeadByte, 12));
+        } else {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result ? 1 : 0);
+        finish_call(2);
+        break;
+    }
+    case Api::ValidateCodePage:
+        cpu.set_reg(Rax, ::IsValidCodePage(static_cast<UINT>(argument(0))) != FALSE);
+        finish_call(1);
+        break;
+    case Api::ConsoleMode:
+        if (thunk_name.ends_with("GetConsoleMode")) {
+            const auto destination = argument(1);
+            if (destination != 0) {
+                cpu.memory().write32(destination,
+                                     ENABLE_PROCESSED_OUTPUT | ENABLE_WRAP_AT_EOL_OUTPUT);
+            }
+        }
+        cpu.set_reg(Rax, 1);
+        finish_call(2);
+        break;
+    case Api::ConsoleWindow:
+        cpu.set_reg(Rax, 0);
+        finish_call();
+        break;
+    case Api::CurrentPseudoHandle:
+        cpu.set_reg(Rax, thunk_name.ends_with("GetCurrentProcess")
+                             ? (guest_is_64_bit_ ? UINT64_MAX : UINT32_MAX)
+                             : (guest_is_64_bit_ ? UINT64_MAX - 1 : UINT32_MAX - 1));
+        finish_call();
+        break;
+    case Api::ProcessorFeature:
+        cpu.set_reg(Rax,
+                    ::IsProcessorFeaturePresent(static_cast<DWORD>(argument(0))) != FALSE ? 1 : 0);
+        finish_call(1);
+        break;
+    case Api::SimpleHandleSuccess:
+        // Console handlers are intentionally not retained: they are guest code addresses.
+        cpu.set_reg(Rax, 1);
+        finish_call(thunk_name.ends_with("CloseHandle") ? 1 : 2);
+        break;
     case Api::WriteFile: {
         const auto handle = cpu.reg(Rcx);
         const auto buffer = cpu.reg(Rdx);
@@ -782,6 +905,121 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         cpu.set_reg(Rax, 1);
         finish_call(1);
         break;
+    case Api::InterlockedOperation: {
+        const auto destination = argument(0);
+        const bool wide =
+            thunk_name.ends_with("64") || (guest_is_64_bit_ && thunk_name.ends_with("Pointer"));
+        const auto old_value =
+            wide ? cpu.memory().read64(destination) : cpu.memory().read32(destination);
+        std::uint64_t new_value = old_value;
+        unsigned argument_count = 1;
+        if (thunk_name.find("Increment") != std::string::npos) {
+            new_value = old_value + 1;
+        } else if (thunk_name.find("Decrement") != std::string::npos) {
+            new_value = old_value - 1;
+        } else if (thunk_name.find("CompareExchange") != std::string::npos) {
+            argument_count = 3;
+            if (old_value == argument(2)) {
+                new_value = argument(1);
+            }
+        } else {
+            argument_count = 2;
+            const auto operand = argument(1);
+            if (thunk_name.find("ExchangeAdd") != std::string::npos) {
+                new_value = old_value + operand;
+            } else if (thunk_name.find("Exchange") != std::string::npos) {
+                new_value = operand;
+            } else if (thunk_name.find("InterlockedAnd") != std::string::npos) {
+                new_value = old_value & operand;
+            } else if (thunk_name.find("InterlockedOr") != std::string::npos) {
+                new_value = old_value | operand;
+            } else {
+                new_value = old_value ^ operand;
+            }
+        }
+        if (wide) {
+            cpu.memory().write64(destination, new_value);
+        } else {
+            new_value &= UINT32_MAX;
+            cpu.memory().write32(destination, static_cast<std::uint32_t>(new_value));
+        }
+        const bool returns_new = thunk_name.find("Increment") != std::string::npos ||
+                                 thunk_name.find("Decrement") != std::string::npos;
+        cpu.set_reg(Rax, returns_new ? new_value : old_value);
+        finish_call(argument_count);
+        break;
+    }
+    case Api::GetProcessWindowStation:
+        // A stable opaque guest handle is sufficient for the single process/window-station model.
+        cpu.set_reg(Rax, 0x201);
+        finish_call();
+        break;
+    case Api::UserObjectInformation: {
+        constexpr std::uint32_t uoi_flags = 1;
+        constexpr std::uint32_t uoi_name = 2;
+        constexpr std::uint32_t uoi_type = 3;
+        constexpr std::uint32_t error_invalid_handle = 6;
+        constexpr std::uint32_t error_invalid_parameter = 87;
+        constexpr std::uint32_t error_insufficient_buffer = 122;
+        const auto handle = argument(0);
+        const auto index = static_cast<std::uint32_t>(argument(1));
+        const auto destination = argument(2);
+        const auto destination_size = static_cast<std::uint32_t>(argument(3));
+        const auto required_size_pointer = argument(4);
+        std::vector<std::uint8_t> value;
+        if (index == uoi_flags) {
+            value.resize(12);
+        } else if (index == uoi_name || index == uoi_type) {
+            const std::string text = index == uoi_name ? "WinSta0" : "WindowStation";
+            if (thunk_name.ends_with("W")) {
+                value.resize((text.size() + 1) * sizeof(char16_t));
+                for (std::size_t i = 0; i < text.size(); ++i) {
+                    value[i * 2] = static_cast<std::uint8_t>(text[i]);
+                }
+            } else {
+                value.assign(text.begin(), text.end());
+                value.push_back(0);
+            }
+        } else {
+            last_error_ = error_invalid_parameter;
+            cpu.set_reg(Rax, 0);
+            finish_call(5);
+            break;
+        }
+        if (required_size_pointer != 0) {
+            cpu.memory().write32(required_size_pointer, static_cast<std::uint32_t>(value.size()));
+        }
+        if (handle != 0x201) {
+            last_error_ = error_invalid_handle;
+            cpu.set_reg(Rax, 0);
+        } else if (destination == 0 || destination_size < value.size()) {
+            last_error_ = error_insufficient_buffer;
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.memory().write(destination, value);
+            cpu.set_reg(Rax, 1);
+        }
+        finish_call(5);
+        break;
+    }
+    case Api::GuestMessageBox: {
+        const auto text_pointer = argument(1);
+        const auto caption_pointer = argument(2);
+        const auto read_text = [&](std::uint64_t pointer) {
+            if (pointer == 0) {
+                return std::string{};
+            }
+            if (thunk_name.ends_with("W")) {
+                return narrow_string(cpu.memory().read_wide_string(pointer));
+            }
+            return cpu.memory().read_c_string(pointer);
+        };
+        log::info("guest",
+                  "MessageBox: " + read_text(caption_pointer) + ": " + read_text(text_pointer));
+        cpu.set_reg(Rax, IDOK);
+        finish_call(4);
+        break;
+    }
     case Api::OutputDebugStringA:
         log::info("guest", "OutputDebugStringA: " + cpu.memory().read_c_string(cpu.reg(Rcx)));
         finish_call();
@@ -950,15 +1188,205 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     case Api::SetUnhandledExceptionFilter: {
         const auto previous = guest_exception_filter_;
-        guest_exception_filter_ = cpu.reg(Rcx);
+        guest_exception_filter_ = argument(0);
         cpu.set_reg(Rax, previous);
-        finish_call();
+        finish_call(1);
         break;
     }
     case Api::GetCommandLineW:
         cpu.set_reg(Rax, guest_command_line_);
         finish_call();
         break;
+    case Api::GetCommandLineA:
+        cpu.set_reg(Rax, guest_command_line_a_);
+        finish_call();
+        break;
+    case Api::WideCharConversion: {
+        const auto code_page = static_cast<UINT>(argument(0));
+        const auto flags = static_cast<DWORD>(argument(1));
+        const auto source = argument(2);
+        const auto source_count = static_cast<std::int32_t>(argument(3));
+        const auto destination = argument(4);
+        const auto destination_count = static_cast<int>(argument(5));
+        const auto default_pointer = argument(6);
+        const auto used_default_pointer = argument(7);
+        std::wstring source_text;
+        if (source_count == -1) {
+            source_text = cpu.memory().read_wide_string(source);
+            source_text.push_back(L'\0');
+        } else if (source_count >= 0) {
+            const auto bytes =
+                cpu.memory().read(source, static_cast<std::size_t>(source_count) * 2);
+            source_text.resize(static_cast<std::size_t>(source_count));
+            std::memcpy(source_text.data(), bytes.data(), bytes.size());
+        }
+        char default_character = 0;
+        const char *default_character_pointer = nullptr;
+        if (default_pointer != 0) {
+            default_character = static_cast<char>(cpu.memory().read8(default_pointer));
+            default_character_pointer = &default_character;
+        }
+        BOOL used_default = FALSE;
+        std::vector<char> converted(destination_count > 0 ? destination_count : 0);
+        const auto result =
+            source_count < -1 || destination_count < 0
+                ? 0
+                : ::WideCharToMultiByte(code_page, flags, source_text.data(), source_count,
+                                        converted.empty() ? nullptr : converted.data(),
+                                        destination_count, default_character_pointer,
+                                        used_default_pointer == 0 ? nullptr : &used_default);
+        if (result == 0) {
+            last_error_ = source_count < -1 || destination_count < 0 ? ERROR_INVALID_PARAMETER
+                                                                     : ::GetLastError();
+        } else if (destination != 0) {
+            cpu.memory().write(destination,
+                               std::span<const std::uint8_t>(
+                                   reinterpret_cast<const std::uint8_t *>(converted.data()),
+                                   static_cast<std::size_t>(result)));
+        }
+        if (used_default_pointer != 0) {
+            cpu.memory().write32(used_default_pointer, used_default != FALSE);
+        }
+        cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+        finish_call(8);
+        break;
+    }
+    case Api::MultiByteConversion: {
+        const auto code_page = static_cast<UINT>(argument(0));
+        const auto flags = static_cast<DWORD>(argument(1));
+        const auto source = argument(2);
+        const auto source_count = static_cast<std::int32_t>(argument(3));
+        const auto destination = argument(4);
+        const auto destination_count = static_cast<int>(argument(5));
+        std::string source_text;
+        if (source_count == -1) {
+            source_text = cpu.memory().read_c_string(source);
+            source_text.push_back('\0');
+        } else if (source_count >= 0) {
+            const auto bytes = cpu.memory().read(source, static_cast<std::size_t>(source_count));
+            source_text.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+        }
+        std::vector<wchar_t> converted(destination_count > 0 ? destination_count : 0);
+        const auto result =
+            source_count < -1 || destination_count < 0
+                ? 0
+                : ::MultiByteToWideChar(code_page, flags, source_text.data(), source_count,
+                                        converted.empty() ? nullptr : converted.data(),
+                                        destination_count);
+        if (result == 0) {
+            last_error_ = source_count < -1 || destination_count < 0 ? ERROR_INVALID_PARAMETER
+                                                                     : ::GetLastError();
+        } else if (destination != 0) {
+            cpu.memory().write(destination,
+                               std::span<const std::uint8_t>(
+                                   reinterpret_cast<const std::uint8_t *>(converted.data()),
+                                   static_cast<std::size_t>(result) * sizeof(wchar_t)));
+        }
+        cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+        finish_call(6);
+        break;
+    }
+    case Api::GuestStringType: {
+        const bool ansi = thunk_name.ends_with("GetStringTypeA");
+        const auto information_type = static_cast<DWORD>(argument(ansi ? 1 : 0));
+        const auto source = argument(ansi ? 2 : 1);
+        const auto source_count = static_cast<std::int32_t>(argument(ansi ? 3 : 2));
+        const auto destination = argument(ansi ? 4 : 3);
+        const auto character_count = source_count == -1
+                                         ? (ansi ? cpu.memory().read_c_string(source).size() + 1
+                                                 : cpu.memory().read_wide_string(source).size() + 1)
+                                         : static_cast<std::size_t>(std::max(source_count, 0));
+        std::vector<WORD> types(character_count);
+        BOOL result = FALSE;
+        if (source_count >= -1 && destination != 0) {
+            if (ansi) {
+                auto text = cpu.memory().read_c_string(source);
+                if (source_count >= 0) {
+                    const auto bytes = cpu.memory().read(source, character_count);
+                    text.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+                }
+                result = ::GetStringTypeA(static_cast<LCID>(argument(0)), information_type,
+                                          text.c_str(), source_count, types.data());
+            } else {
+                auto text = cpu.memory().read_wide_string(source);
+                if (source_count >= 0) {
+                    const auto bytes = cpu.memory().read(source, character_count * 2);
+                    text.resize(character_count);
+                    std::memcpy(text.data(), bytes.data(), bytes.size());
+                }
+                result =
+                    ::GetStringTypeW(information_type, text.c_str(), source_count, types.data());
+            }
+        }
+        if (result != FALSE) {
+            cpu.memory().write(
+                destination,
+                std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(types.data()),
+                                              types.size() * sizeof(WORD)));
+        } else {
+            last_error_ =
+                source_count < -1 || destination == 0 ? ERROR_INVALID_PARAMETER : ::GetLastError();
+        }
+        cpu.set_reg(Rax, result != FALSE);
+        finish_call(ansi ? 5 : 4);
+        break;
+    }
+    case Api::GuestMapString: {
+        const bool ansi = thunk_name.ends_with("LCMapStringA");
+        const auto locale = static_cast<LCID>(argument(0));
+        const auto flags = static_cast<DWORD>(argument(1));
+        const auto source = argument(2);
+        const auto source_count = static_cast<std::int32_t>(argument(3));
+        const auto destination = argument(4);
+        const auto destination_count = static_cast<int>(argument(5));
+        int result = 0;
+        std::vector<std::uint8_t> output;
+        if (source_count >= -1 && destination_count >= 0) {
+            if (ansi) {
+                auto text = cpu.memory().read_c_string(source);
+                if (source_count >= 0) {
+                    const auto bytes = cpu.memory().read(source, source_count);
+                    text.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+                }
+                output.resize(static_cast<std::size_t>(destination_count));
+                result = ::LCMapStringA(locale, flags, text.c_str(), source_count,
+                                        output.empty() ? nullptr
+                                                       : reinterpret_cast<char *>(output.data()),
+                                        destination_count);
+            } else {
+                auto text = cpu.memory().read_wide_string(source);
+                if (source_count >= 0) {
+                    const auto bytes = cpu.memory().read(source, source_count * 2ULL);
+                    text.resize(static_cast<std::size_t>(source_count));
+                    std::memcpy(text.data(), bytes.data(), bytes.size());
+                }
+                const bool sort_key = (flags & LCMAP_SORTKEY) != 0;
+                output.resize(static_cast<std::size_t>(destination_count) *
+                              (sort_key ? 1U : sizeof(wchar_t)));
+                result = ::LCMapStringW(locale, flags, text.c_str(), source_count,
+                                        output.empty() ? nullptr
+                                                       : reinterpret_cast<wchar_t *>(output.data()),
+                                        destination_count);
+                if (!sort_key && result > 0) {
+                    output.resize(static_cast<std::size_t>(result) * sizeof(wchar_t));
+                } else if (result > 0) {
+                    output.resize(static_cast<std::size_t>(result));
+                }
+            }
+        }
+        if (result == 0) {
+            last_error_ = source_count < -1 || destination_count < 0 ? ERROR_INVALID_PARAMETER
+                                                                     : ::GetLastError();
+        } else if (destination != 0) {
+            if (ansi) {
+                output.resize(static_cast<std::size_t>(result));
+            }
+            cpu.memory().write(destination, output);
+        }
+        cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+        finish_call(6);
+        break;
+    }
     case Api::CommandLineToArgvW: {
         int argument_count = 0;
         auto **const native_arguments =
@@ -1336,8 +1764,9 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(3);
         break;
     case Api::Reallocate: {
-        const auto old_address = argument(0);
-        const auto new_size = argument(1);
+        const bool heap_reallocate = thunk_name.ends_with("HeapReAlloc");
+        const auto old_address = argument(heap_reallocate ? 2 : 0);
+        const auto new_size = argument(heap_reallocate ? 3 : 1);
         const auto new_address = allocate(new_size);
         if (const auto old = heap_sizes_.find(old_address); old != heap_sizes_.end()) {
             const auto copy_size = static_cast<std::size_t>(std::min(old->second, new_size));
@@ -1345,7 +1774,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             cpu.memory().write(new_address, bytes);
         }
         cpu.set_reg(Rax, new_address);
-        finish_call(3);
+        finish_call(heap_reallocate ? 4 : 3);
         break;
     }
     case Api::FreeRcx:
@@ -1361,9 +1790,12 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(1);
         break;
     case Api::AllocationSize: {
-        const auto allocation = heap_sizes_.find(argument(0));
-        cpu.set_reg(Rax, allocation == heap_sizes_.end() ? 0 : allocation->second);
-        finish_call(1);
+        const bool heap_size = thunk_name.ends_with("HeapSize");
+        const auto allocation = heap_sizes_.find(argument(heap_size ? 2 : 0));
+        const auto failure = guest_is_64_bit_ ? UINT64_MAX : UINT32_MAX;
+        cpu.set_reg(Rax, allocation == heap_sizes_.end() ? (heap_size ? failure : 0)
+                                                         : allocation->second);
+        finish_call(heap_size ? 3 : 1);
         break;
     }
     case Api::IdentityRcx:
@@ -2010,6 +2442,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
                                           return resolve_import(module, name);
                                       });
     configure_format(image.is_64_bit);
+    heap_next_ = image.is_64_bit ? 0x0000'0006'0000'0000ULL : 0x1000'0000ULL;
     guest_image_base_ = image.base;
     guest_executable_ = std::filesystem::absolute(executable);
     if (resource_module_ != nullptr) {
@@ -2042,12 +2475,21 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     } else {
         memory.write32(initial_rsp, static_cast<std::uint32_t>(return_thunk));
     }
-    memory.write64(teb_base + 0x08, stack_base + stack_size);
-    memory.write64(teb_base + 0x10, stack_base);
-    memory.write64(teb_base + 0x30, teb_base);
-    memory.write64(teb_base + 0x40, 1);
-    memory.write64(teb_base + 0x48, 1);
-    memory.write64(teb_base + 0x60, peb_base);
+    if (image.is_64_bit) {
+        memory.write64(teb_base + 0x08, stack_base + stack_size);
+        memory.write64(teb_base + 0x10, stack_base);
+        memory.write64(teb_base + 0x30, teb_base);
+        memory.write64(teb_base + 0x40, 1);
+        memory.write64(teb_base + 0x48, 1);
+        memory.write64(teb_base + 0x60, peb_base);
+    } else {
+        memory.write32(teb_base + 0x04, static_cast<std::uint32_t>(stack_base + stack_size));
+        memory.write32(teb_base + 0x08, static_cast<std::uint32_t>(stack_base));
+        memory.write32(teb_base + 0x18, static_cast<std::uint32_t>(teb_base));
+        memory.write32(teb_base + 0x20, 1);
+        memory.write32(teb_base + 0x24, 1);
+        memory.write32(teb_base + 0x30, static_cast<std::uint32_t>(peb_base));
+    }
     if (image.tls_start != 0 || image.tls_index != 0 || !image.tls_callbacks.empty()) {
         const auto template_size = image.tls_end - image.tls_start;
         if (template_size > tls_size - 0x1000) {
@@ -2055,8 +2497,13 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
         }
         memory.map(tls_base, tls_size, Read | Write, "main thread TLS");
         const auto tls_block = tls_base + 0x1000;
-        memory.write64(teb_base + 0x58, tls_base);
-        memory.write64(tls_base, tls_block);
+        if (image.is_64_bit) {
+            memory.write64(teb_base + 0x58, tls_base);
+            memory.write64(tls_base, tls_block);
+        } else {
+            memory.write32(teb_base + 0x2c, static_cast<std::uint32_t>(tls_base));
+            memory.write32(tls_base, static_cast<std::uint32_t>(tls_block));
+        }
         if (template_size != 0) {
             memory.write(tls_block,
                          memory.read(image.tls_start, static_cast<std::size_t>(template_size)));
@@ -2098,22 +2545,32 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
                       static_cast<std::uint8_t>(narrow_command_line[index]));
     }
     memory.write8(environment_base + 0x3800 + narrow_command_line.size(), 0);
+    guest_command_line_a_ = environment_base + 0x3800;
     const auto data_slot = [&](const char *name) {
         const auto found = data_import_slots_.find(name);
         return found == data_import_slots_.end() ? 0 : found->second;
     };
+    const auto write_guest_pointer = [&](std::uint64_t address, std::uint64_t value) {
+        if (image.is_64_bit) {
+            memory.write64(address, value);
+        } else {
+            memory.write32(address, static_cast<std::uint32_t>(value));
+        }
+    };
     if (const auto slot = data_slot("_wcmdln"); slot != 0) {
-        memory.write64(slot, command_line_address);
+        write_guest_pointer(slot, command_line_address);
     }
     if (const auto slot = data_slot("_acmdln"); slot != 0) {
-        memory.write64(slot, environment_base + 0x3800);
+        write_guest_pointer(slot, environment_base + 0x3800);
     }
     // An empty environment is a single NULL pointer entry.
     if (const auto slot = data_slot("_environ"); slot != 0) {
-        memory.write64(slot, slot + 8);
+        const auto pointer_size = image.is_64_bit ? 8U : 4U;
+        write_guest_pointer(slot, slot + pointer_size);
     }
     if (const auto slot = data_slot("_wenviron"); slot != 0) {
-        memory.write64(slot, slot + 8);
+        const auto pointer_size = image.is_64_bit ? 8U : 4U;
+        write_guest_pointer(slot, slot + pointer_size);
     }
     if (const auto slot = data_slot("_winmajor"); slot != 0) {
         memory.write32(slot, 10);

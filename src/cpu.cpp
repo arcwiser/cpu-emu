@@ -58,11 +58,14 @@ Cpu::Cpu(Memory &memory) : memory_(memory) {}
 void Cpu::reset(std::uint64_t entry, std::uint64_t stack_pointer, bool long_mode) {
     registers_.fill(0);
     xmm_.fill({0, 0});
+    x87_.fill(0);
+    x87_depth_ = 0;
     history_.fill(0);
     history_cursor_ = 0;
     registers_[Rsp] = stack_pointer;
     rip_ = entry;
     flags_ = 2;
+    x87_control_ = 0x037f;
     instructions_ = 0;
     long_mode_ = long_mode;
 }
@@ -443,6 +446,25 @@ void Cpu::step() {
         opcode = fetch8();
     }
     const unsigned width = long_mode_ && (rex & 8) != 0 ? 64 : (operand16 ? 16 : 32);
+    const auto x87_push = [&](long double value) {
+        if (x87_depth_ == x87_.size()) {
+            throw Error("x87 stack overflow");
+        }
+        for (std::size_t index = x87_depth_; index != 0; --index) {
+            x87_[index] = x87_[index - 1];
+        }
+        x87_[0] = value;
+        ++x87_depth_;
+    };
+    const auto x87_pop = [&] {
+        if (x87_depth_ == 0) {
+            throw Error("x87 stack underflow");
+        }
+        for (std::size_t index = 1; index < x87_depth_; ++index) {
+            x87_[index - 1] = x87_[index];
+        }
+        --x87_depth_;
+    };
 
     if (opcode >= 0xb0 && opcode <= 0xb7) {
         const auto raw = static_cast<std::uint8_t>(opcode - 0xb0);
@@ -466,6 +488,16 @@ void Cpu::step() {
     if (opcode >= 0x50 && opcode <= 0x57) {
         const auto source = static_cast<std::uint8_t>((opcode - 0x50) + ((rex & 1) ? 8 : 0));
         push64(registers_[source]);
+        return;
+    }
+    if (opcode >= 0x90 && opcode <= 0x97) {
+        const auto source = static_cast<std::uint8_t>((opcode - 0x90) + ((rex & 1) ? 8 : 0));
+        if (source != Rax) {
+            const auto accumulator = read_register(Rax, width);
+            const auto other = read_register(source, width);
+            write_register(Rax, width, other);
+            write_register(source, width, accumulator);
+        }
         return;
     }
     if (opcode >= 0x58 && opcode <= 0x5f) {
@@ -810,8 +842,6 @@ void Cpu::step() {
         write_register(decoded.reg, width, decoded.rm.address);
         return;
     }
-    case 0x90:
-        return;
     case 0x98:
         if (width == 64) {
             registers_[Rax] = static_cast<std::uint64_t>(
@@ -822,6 +852,139 @@ void Cpu::step() {
                                static_cast<std::int16_t>(registers_[Rax]))));
         }
         return;
+    case 0x9b:
+        // WAIT/FWAIT only checks for pending unmasked x87 exceptions. CPUEmu executes x87
+        // operations synchronously and does not retain a deferred exception state.
+        return;
+    case 0x9c:
+        if (width == 16) {
+            registers_[Rsp] = (registers_[Rsp] - 2) & (long_mode_ ? UINT64_MAX : UINT32_MAX);
+            memory_.write16(registers_[Rsp], static_cast<std::uint16_t>(flags_));
+        } else {
+            push64(flags_);
+        }
+        return;
+    case 0x9d:
+        if (width == 16) {
+            flags_ = (flags_ & ~0xffffULL) | memory_.read16(registers_[Rsp]) | 2;
+            registers_[Rsp] = (registers_[Rsp] + 2) & (long_mode_ ? UINT64_MAX : UINT32_MAX);
+        } else {
+            flags_ = pop64() | 2;
+        }
+        return;
+    case 0xd9: {
+        const auto decoded = decode_rm(rex);
+        if (decoded.rm.is_register) {
+            if ((decoded.reg & 7) == 0 && decoded.rm.register_index < x87_depth_) { // FLD ST(i)
+                x87_push(x87_[decoded.rm.register_index]);
+                return;
+            }
+            throw Error("unsupported x87 D9 register instruction");
+        }
+        switch (decoded.reg & 7) {
+        case 0: // FLD m32real
+            x87_push(std::bit_cast<float>(memory_.read32(decoded.rm.address)));
+            return;
+        case 2: // FST m32real
+        case 3: // FSTP m32real
+            if (x87_depth_ == 0) {
+                throw Error("x87 stack underflow");
+            }
+            memory_.write32(decoded.rm.address,
+                            std::bit_cast<std::uint32_t>(static_cast<float>(x87_[0])));
+            if ((decoded.reg & 7) == 3) {
+                x87_pop();
+            }
+            return;
+        case 5: // FLDCW m2byte
+            x87_control_ = static_cast<std::uint16_t>(read_operand(decoded.rm, 16));
+            return;
+        case 7: // FNSTCW m2byte
+            write_operand(decoded.rm, 16, x87_control_);
+            return;
+        default:
+            throw Error("unsupported x87 D9 memory instruction");
+        }
+    }
+    case 0xdb: {
+        const auto decoded = decode_rm(rex);
+        if (!decoded.rm.is_register && (decoded.reg & 7) == 0) { // FILD m32int
+            x87_push(static_cast<long double>(
+                static_cast<std::int32_t>(memory_.read32(decoded.rm.address))));
+            return;
+        }
+        if (decoded.rm.is_register && (decoded.reg & 7) == 4 && decoded.rm.register_index == Rdx) {
+            // FNCLEX clears pending x87 exception state. CPUEmu does not defer x87 exceptions.
+            return;
+        }
+        if (decoded.rm.is_register && (decoded.reg & 7) == 4 && decoded.rm.register_index == Rbx) {
+            // FNINIT restores the architectural x87 control-word default.
+            x87_control_ = 0x037f;
+            return;
+        }
+        throw Error("unsupported x87 DB instruction");
+    }
+    case 0xdc: {
+        const auto decoded = decode_rm(rex);
+        if (!decoded.rm.is_register && (decoded.reg & 7) == 1 && x87_depth_ != 0) { // FMUL m64
+            x87_[0] *= std::bit_cast<double>(memory_.read64(decoded.rm.address));
+            return;
+        }
+        throw Error("unsupported x87 DC instruction");
+    }
+    case 0xdd: {
+        const auto decoded = decode_rm(rex);
+        if (decoded.rm.is_register) {
+            throw Error("unsupported x87 DD register instruction");
+        }
+        switch (decoded.reg & 7) {
+        case 0: // FLD m64real
+            x87_push(std::bit_cast<double>(memory_.read64(decoded.rm.address)));
+            return;
+        case 2: // FST m64real
+        case 3: // FSTP m64real
+            if (x87_depth_ == 0) {
+                throw Error("x87 stack underflow");
+            }
+            memory_.write64(decoded.rm.address,
+                            std::bit_cast<std::uint64_t>(static_cast<double>(x87_[0])));
+            if ((decoded.reg & 7) == 3) {
+                x87_pop();
+            }
+            return;
+        default:
+            throw Error("unsupported x87 DD memory instruction");
+        }
+    }
+    case 0xde: {
+        const auto decoded = decode_rm(rex);
+        if (decoded.rm.is_register && (decoded.reg & 7) == 5 && x87_depth_ >= 2) { // FSUBP
+            x87_[1] -= x87_[0];
+            x87_pop();
+            return;
+        }
+        throw Error("unsupported x87 DE instruction");
+    }
+    case 0xdf: {
+        const auto decoded = decode_rm(rex);
+        if (!decoded.rm.is_register && (decoded.reg & 7) == 5) { // FILD m64int
+            x87_push(static_cast<long double>(
+                static_cast<std::int64_t>(memory_.read64(decoded.rm.address))));
+            return;
+        }
+        if (!decoded.rm.is_register && (decoded.reg & 7) == 7 && x87_depth_ != 0) { // FISTP m64
+            const auto rounding = (x87_control_ >> 10) & 3;
+            const auto rounded = rounding == 1   ? std::floor(x87_[0])
+                                 : rounding == 2 ? std::ceil(x87_[0])
+                                 : rounding == 3 ? std::trunc(x87_[0])
+                                                 : std::nearbyint(x87_[0]);
+            memory_.write64(decoded.rm.address,
+                            static_cast<std::uint64_t>(static_cast<std::int64_t>(rounded)));
+            x87_pop();
+            return;
+        }
+        throw Error("unsupported x87 DF instruction");
+    }
     case 0xc0:
     case 0xc1:
     case 0xd0:
@@ -1852,6 +2015,22 @@ void Cpu::step() {
             set_xmm_low_double(decoded.reg, converted);
             return;
         }
+        if (repeat_prefix == 0xf3 && second == 0x5a) { // CVTSS2SD
+            const auto decoded = decode_rm(rex);
+            const auto value = decoded.rm.is_register
+                                   ? xmm_low_float(decoded.rm.register_index)
+                                   : std::bit_cast<float>(memory_.read32(decoded.rm.address));
+            set_xmm_low_double(decoded.reg, static_cast<double>(value));
+            return;
+        }
+        if (repeat_prefix == 0xf2 && second == 0x5a) { // CVTSD2SS
+            const auto decoded = decode_rm(rex);
+            const auto value = decoded.rm.is_register
+                                   ? xmm_low_double(decoded.rm.register_index)
+                                   : std::bit_cast<double>(memory_.read64(decoded.rm.address));
+            set_xmm_low_float(decoded.reg, static_cast<float>(value));
+            return;
+        }
         if (repeat_prefix == 0xf3 && second == 0x2c) {
             // CVTTSS2SI: scalar float to signed integer with truncation.
             const auto decoded = decode_rm(rex);
@@ -2010,6 +2189,15 @@ void Cpu::step() {
                 xmm_[decoded.reg] = {read_operand(decoded.rm, move_width), 0};
             } else {
                 write_operand(decoded.rm, move_width, xmm_[decoded.reg][0]);
+            }
+            return;
+        }
+        if (second == 0xd6 && operand16) { // MOVQ xmm/m64, xmm
+            const auto decoded = decode_rm(rex);
+            if (decoded.rm.is_register) {
+                xmm_[decoded.rm.register_index] = {xmm_[decoded.reg][0], 0};
+            } else {
+                memory_.write64(decoded.rm.address, xmm_[decoded.reg][0]);
             }
             return;
         }

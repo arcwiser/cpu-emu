@@ -2,8 +2,8 @@
 
 CPUEmu is targeting the current Windows GameMaker build of Undertale. The Windows depot contains
 `UNDERTALE.exe`, `data.win`, `D3DX9_43.dll`, `steam_api.dll`, and a large OGG soundtrack. SteamDB's
-branch history includes explicit 64-bit test branches, but the exact installed executable must
-still be checked because CPUEmu currently loads only x86-64 PE32+ images.
+branch history includes explicit 64-bit test branches. The installed executable is a fixed-base
+x86 PE32 image, which CPUEmu now loads through its 32-bit execution path.
 
 Depot reference: <https://steamdb.info/depot/391541/>
 
@@ -24,7 +24,7 @@ DLLs into this repository.
 
 ## Expected compatibility layers
 
-1. **Image and startup:** PE32+ loading, sections, imports, CRT initialization, TLS, stack, TEB,
+1. **Image and startup:** PE32/PE32+ loading, sections, imports, CRT initialization, TLS, stack, TEB,
    PEB, command line, environment, and relative asset paths.
 2. **Game loop:** high-resolution timers, sleep/yield behavior, window creation, message pumping,
    keyboard/gamepad input, and stable interpreted callbacks.
@@ -46,11 +46,11 @@ DLLs into this repository.
 - Window callback re-entry exists and is exercised by the Paint and Notepad paths.
 - Basic synchronous WinMM playback exists, but streaming/game audio is not complete.
 - Direct3D 9 and Steamworks have not been validated against Undertale yet.
-- The installed Steam executable is PE32 x86. CPUEmu now loads it at `0x00400000`, resolves all 313
-  imports, and executes 4,010 instructions through CRT security initialization, heap setup, dynamic
-  procedure lookup, TLS, and critical-section setup. The current first unsupported call is
-  `USER32!GetProcessWindowStation`.
+- The installed Steam executable loads at `0x00400000`, resolves all 313 imports, and now executes
+  507,053 instructions through CRT initialization, locale conversion, heap/TLS management, SIMD,
+  and x87 setup without an unsupported-operation stop. It currently returns exit code 255 before
+  window creation, so the next task is tracing the compatibility result that selects that path.
 
-The next engineering step is to run the owned x64 executable and implement the earliest general
-failure with a regression. Guessing later Direct3D or audio interfaces before that trace risks
-building the wrong compatibility layer.
+The next engineering step is to trace the early-return decision and correct the responsible general
+Win32, ABI, or CPU behavior with a regression. Guessing later Direct3D or audio interfaces before
+that trace risks building the wrong compatibility layer.

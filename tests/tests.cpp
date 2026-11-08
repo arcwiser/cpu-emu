@@ -71,13 +71,27 @@ void test_cpu_32bit_mode() {
         0x40,                                  // inc eax (not a REX prefix in x86 mode)
         0x50,                                  // push eax
         0x59,                                  // pop ecx
+        0x94,                                  // xchg eax, esp
+        0x94,                                  // xchg eax, esp (restore both registers)
+        0x9b,                                  // wait/fwait with no pending x87 exception
         0xa3, 0x04, 0x01, 0x00, 0x10,          // mov [10000104h], eax
         0x64, 0x8b, 0x15, 0x10, 0,    0,    0, // mov edx, fs:[10h]
+        0xd9, 0x3d, 0x08, 0x01, 0x00, 0x10,    // fnstcw [10000108h]
+        0xd9, 0x2d, 0x0c, 0x01, 0x00, 0x10,    // fldcw [1000010ch]
+        0xd9, 0x3d, 0x10, 0x01, 0x00, 0x10,    // fnstcw [10000110h]
+        0xdb, 0xe2,                            // fnclex
+        0x9c, 0x5b, 0x53, 0x9d,                // pushfd; pop ebx; push ebx; popfd
+        0xdb, 0x05, 0x20, 0x01, 0x00, 0x10,    // fild dword ptr [10000120h]
+        0xdc, 0x0d, 0x28, 0x01, 0x00, 0x10,    // fmul qword ptr [10000128h]
+        0xdd, 0x1d, 0x30, 0x01, 0x00, 0x10,    // fstp qword ptr [10000130h]
         0xc3,
     };
     memory.write(code_address, code);
     memory.write32(code_address + 0x100, 41);
     memory.write32(fs_base + 0x10, 0x12345678);
+    memory.write16(code_address + 0x10c, 0x027f);
+    memory.write32(code_address + 0x120, 3);
+    memory.write64(code_address + 0x128, std::bit_cast<std::uint64_t>(2.5));
     memory.write32(stack_address + 0xffc, 0xdeadbeef);
     winemu::Cpu cpu(memory);
     cpu.reset(code_address, stack_address + 0xffc, false);
@@ -87,8 +101,13 @@ void test_cpu_32bit_mode() {
     }
     require(cpu.reg(winemu::Rax) == 42, "x86 absolute addressing and INC");
     require(cpu.reg(winemu::Rcx) == 42, "x86 4-byte push/pop");
+    require(cpu.reg(winemu::Rsp) == stack_address + 0x1000, "x86 XCHG register family");
     require(memory.read32(code_address + 0x104) == 42, "x86 moffs store");
     require(cpu.reg(winemu::Rdx) == 0x12345678, "x86 FS segment addressing");
+    require(memory.read16(code_address + 0x108) == 0x037f, "x87 default control word");
+    require(memory.read16(code_address + 0x110) == 0x027f, "x87 FLDCW/FNSTCW round trip");
+    require(memory.read64(code_address + 0x130) == std::bit_cast<std::uint64_t>(7.5),
+            "x87 integer load, multiply, and store");
 }
 
 void test_pshufd() {
@@ -103,10 +122,17 @@ void test_pshufd() {
         0x66, 0x0f, 0x6c, 0xc1,                                     // punpcklqdq xmm0, xmm1
         0x66, 0x0f, 0x70, 0xc0, 0x1b,                               // pshufd xmm0, xmm0, 1bh
         0xf3, 0x0f, 0x7f, 0x07,                                     // movdqu [rdi], xmm0
+        0x66, 0x0f, 0xd6, 0x47, 0x10,                               // movq [rdi+10h], xmm0
+        0xf3, 0x0f, 0x10, 0x47, 0x20,                               // movss xmm0, [rdi+20h]
+        0xf3, 0x0f, 0x5a, 0xc0,                                     // cvtss2sd xmm0, xmm0
+        0xf2, 0x0f, 0x11, 0x47, 0x28,                               // movsd [rdi+28h], xmm0
+        0xf2, 0x0f, 0x5a, 0xc0,                                     // cvtsd2ss xmm0, xmm0
+        0xf3, 0x0f, 0x11, 0x47, 0x30,                               // movss [rdi+30h], xmm0
         0xc3,
     };
     memory.write(0x200000000ULL, code);
     memory.write64(0x300000ff8ULL, 0xdeadbeef);
+    memory.write32(0x300000120ULL, std::bit_cast<std::uint32_t>(1.5f));
     winemu::Cpu cpu(memory);
     cpu.reset(0x200000000ULL, 0x300000ff8ULL);
     cpu.set_reg(winemu::Rdi, 0x300000100ULL);
@@ -115,6 +141,11 @@ void test_pshufd() {
     }
     require(memory.read64(0x300000100ULL) == 0x99aabbccddeeff00ULL, "PSHUFD low lanes");
     require(memory.read64(0x300000108ULL) == 0x1122334455667788ULL, "PSHUFD high lanes");
+    require(memory.read64(0x300000110ULL) == 0x99aabbccddeeff00ULL, "MOVQ XMM store");
+    require(memory.read64(0x300000128ULL) == std::bit_cast<std::uint64_t>(1.5),
+            "CVTSS2SD scalar conversion");
+    require(memory.read32(0x300000130ULL) == std::bit_cast<std::uint32_t>(1.5f),
+            "CVTSD2SS scalar conversion");
 }
 
 void test_pshufb() {

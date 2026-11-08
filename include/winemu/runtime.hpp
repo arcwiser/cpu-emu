@@ -34,6 +34,16 @@ class Runtime {
         ExitProcess,
         TerminateProcess,
         GetStdHandle,
+        SetHandleCount,
+        GuestFileType,
+        ConsoleCodePage,
+        GuestCodePageInfo,
+        ValidateCodePage,
+        ConsoleMode,
+        ConsoleWindow,
+        CurrentPseudoHandle,
+        ProcessorFeature,
+        SimpleHandleSuccess,
         WriteFile,
         GetLastError,
         SetLastError,
@@ -44,6 +54,10 @@ class Runtime {
         CriticalSectionInitialize,
         CriticalSectionOperation,
         CriticalSectionTry,
+        InterlockedOperation,
+        GetProcessWindowStation,
+        UserObjectInformation,
+        GuestMessageBox,
         OutputDebugStringA,
         Beep,
         MessageBeep,
@@ -68,7 +82,12 @@ class Runtime {
         CommodePointer,
         ErrnoPointer,
         SetUnhandledExceptionFilter,
+        GetCommandLineA,
         GetCommandLineW,
+        WideCharConversion,
+        MultiByteConversion,
+        GuestStringType,
+        GuestMapString,
         CommandLineToArgvW,
         GetSecurityInfo,
         MapViewOfFile,
@@ -141,6 +160,7 @@ class Runtime {
     std::uint32_t last_error_ = 0;
     std::uint64_t guest_exception_filter_ = 0;
     std::uint64_t guest_command_line_ = 0;
+    std::uint64_t guest_command_line_a_ = 0;
     std::uint64_t guest_winmain_command_line_ = 0;
     std::uint64_t heap_next_ = 0x0000'0006'0000'0000ULL;
     std::unordered_map<std::uint64_t, std::uint64_t> heap_sizes_;

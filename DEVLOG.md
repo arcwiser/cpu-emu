@@ -4,6 +4,19 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-08 — Undertale CRT and x87 bring-up
+
+- Corrected the x86 TEB, static TLS pointer array, process-environment addresses, guest data-import
+  pointer widths, and low-address heap so the Visual C++ runtime no longer reports R6016.
+- Added guest-safe window-station, code-page, locale, character conversion, console, pseudo-handle,
+  interlocked, heap-size/reallocation, processor-feature, and controlled termination adapters.
+- Added x86 `XCHG` register opcodes, `WAIT`, `PUSHF`/`POPF`, SSE scalar float/double conversion,
+  `MOVQ` XMM stores, and an initial x87 stack with control-word, load, store, multiply, integer
+  conversion, clear/init, and pop support.
+- Undertale now executes 507,053 instructions without an unsupported instruction or import. It
+  exits through `CorExitProcess` with code 255 before creating a window; tracing that early-return
+  decision is the next compatibility milestone.
+
 ## 2026-11-08 — PE32 execution and Undertale startup
 
 ### Added
