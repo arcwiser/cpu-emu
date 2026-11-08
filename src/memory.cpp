@@ -343,6 +343,19 @@ std::string Memory::read_c_string(std::uint64_t address, std::size_t limit) cons
     throw Error("unterminated string at " + hex_address(address));
 }
 
+std::wstring Memory::read_wide_string(std::uint64_t address, std::size_t limit) const {
+    std::wstring value;
+    value.reserve(std::min<std::size_t>(limit, 256));
+    for (std::size_t index = 0; index < limit; ++index) {
+        const auto character = read16(address + index * 2);
+        if (character == 0) {
+            return value;
+        }
+        value.push_back(static_cast<wchar_t>(character));
+    }
+    throw Error("unterminated wide string at " + hex_address(address));
+}
+
 void Memory::write8(std::uint64_t address, std::uint8_t value) {
     auto &region = region_for(address, 1, Write);
     region.data[static_cast<std::size_t>(address - region.base)] = value;

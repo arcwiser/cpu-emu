@@ -4,6 +4,64 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-08 — Undertale target groundwork
+
+### Added
+
+- Added SSE3 duplicate loads, `LDDQU`, horizontal packed float/double add/subtract, and alternating
+  packed add/subtract operations used by multimedia-oriented native runtimes.
+- Added explicit guest-safe adapters for performance counters, tick counts, sleeping, and WinMM
+  millisecond/timer-period functions.
+- Added an Undertale bring-up document covering executable validation, relative assets, Direct3D
+  9, audio, Steamworks, persistence, probe commands, and the first-failure workflow.
+
+### Verified
+
+- Added machine-code regressions for packed horizontal arithmetic, duplicate loads, and alternating
+  add/subtract behavior.
+
+## 2026-11-08 — SSSE3, audio, and application compatibility
+
+### Added
+
+- Added `PHADDW`, `PHADDD`, `PHADDSW`, `PHSUBW`, `PHSUBD`, `PHSUBSW`, `PMADDUBSW`,
+  `PSIGNB/W/D`, `PMULHRSW`, and `PALIGNR` with packed-lane, saturation, immediate, register, and
+  memory semantics.
+- Added safe synchronous adapters for `Beep`, `MessageBeep`, `PlaySoundA/W`, and
+  `sndPlaySoundA/W`. Retained-pointer audio modes are rejected until lifetime-aware guest objects
+  exist.
+- Added checked UTF-16 string reads to `Memory` and an `APP.md` compatibility matrix covering the
+  test fixtures, Paint, Windows 11 Notepad, and the current Discord/Chromium probe.
+
+### Verified
+
+- Added machine-code tests for horizontal SSSE3 arithmetic and byte alignment, plus a checked
+  guest wide-string regression.
+
+## 2026-11-08 — Bit-count instructions and compatibility documentation
+
+### Added
+
+- Implemented width-correct `POPCNT`, `LZCNT`, and `TZCNT`, including their defined flag behavior,
+  zero-input edge cases, register/memory decoding, and optional-feature `CPUID` reporting.
+- Added Windows compatibility documentation describing ownership rules, adapter categories,
+  currently supported facilities, safe refusals, and the checklist for new API bridges.
+- Added an instruction-coverage document that records feature-advertising policy and expansion
+  priorities without using a misleading raw mnemonic count.
+
+### Verified
+
+- Added compact machine-code regressions for nonzero and zero-input bit counting.
+
+## 2026-11-08 — Packed byte shuffle support
+
+### Added
+
+- Implemented the SSSE3 `PSHUFB`, `PABSB`, `PABSW`, and `PABSD` XMM instructions, including
+  register and memory operands, high-bit zeroing for shuffle controls, and REX-extended registers.
+- Added compact machine-code regressions covering shuffle selection, selector low-nibble wrapping,
+  zeroed lanes, packed absolute-value edge cases, memory operands, and extended registers.
+
 ## 2026-10-31 — Compatibility audit and Discord probe
 
 ### Improved

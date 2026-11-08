@@ -47,6 +47,8 @@ class Memory {
     [[nodiscard]] std::uint64_t read64(std::uint64_t address) const;
     [[nodiscard]] std::vector<std::uint8_t> read(std::uint64_t address, std::size_t size) const;
     [[nodiscard]] std::string read_c_string(std::uint64_t address, std::size_t limit = 32768) const;
+    [[nodiscard]] std::wstring read_wide_string(std::uint64_t address,
+                                                std::size_t limit = 32768) const;
     void write8(std::uint64_t address, std::uint8_t value);
     void write16(std::uint64_t address, std::uint16_t value);
     void write32(std::uint64_t address, std::uint32_t value);

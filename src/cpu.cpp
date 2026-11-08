@@ -2,6 +2,7 @@
 
 #include "winemu/error.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <iomanip>
@@ -1290,6 +1291,190 @@ void Cpu::step() {
         const auto set_xmm_low_double = [&](unsigned index, double value) {
             xmm_[index][0] = std::bit_cast<std::uint64_t>(value);
         };
+        if (second == 0x38) {
+            const auto third = fetch8();
+            if (third == 0x00 && operand16) { // PSHUFB xmm, xmm/m128
+                const auto decoded = decode_rm(rex);
+                const auto control =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                const auto source = xmm_[decoded.reg];
+                std::array<std::uint64_t, 2> result{};
+                for (unsigned byte = 0; byte < 16; ++byte) {
+                    const auto selector =
+                        static_cast<std::uint8_t>(control[byte / 8] >> ((byte % 8) * 8));
+                    if ((selector & 0x80) == 0) {
+                        const auto source_byte = static_cast<std::uint8_t>(
+                            source[(selector & 0x0f) / 8] >> (((selector & 0x0f) % 8) * 8));
+                        result[byte / 8] |= static_cast<std::uint64_t>(source_byte)
+                                            << ((byte % 8) * 8);
+                    }
+                }
+                xmm_[decoded.reg] = result;
+                return;
+            }
+            if (third >= 0x01 && third <= 0x07 && operand16) {
+                const auto decoded = decode_rm(rex);
+                const auto source =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                const auto destination = xmm_[decoded.reg];
+                std::array<std::uint64_t, 2> result{};
+                const auto signed_lane = [](const std::array<std::uint64_t, 2> &value,
+                                            unsigned lane, unsigned lane_bits) {
+                    const auto shift = (lane * lane_bits) % 64;
+                    const auto mask = (1ULL << lane_bits) - 1;
+                    const auto raw = (value[(lane * lane_bits) / 64] >> shift) & mask;
+                    const auto sign = 1ULL << (lane_bits - 1);
+                    return static_cast<std::int64_t>((raw ^ sign) - sign);
+                };
+                const auto put_lane = [&](unsigned lane, unsigned lane_bits, std::uint64_t value) {
+                    const auto shift = (lane * lane_bits) % 64;
+                    const auto mask = (1ULL << lane_bits) - 1;
+                    result[(lane * lane_bits) / 64] |= (value & mask) << shift;
+                };
+                if (third == 0x04) { // PMADDUBSW
+                    for (unsigned lane = 0; lane < 8; ++lane) {
+                        std::int64_t sum = 0;
+                        for (unsigned byte = 0; byte < 2; ++byte) {
+                            const auto index = lane * 2 + byte;
+                            const auto shift = (index % 8) * 8;
+                            const auto left =
+                                static_cast<std::uint8_t>(destination[index / 8] >> shift);
+                            const auto right = static_cast<std::int8_t>(source[index / 8] >> shift);
+                            sum += static_cast<std::int64_t>(left) * right;
+                        }
+                        sum = std::clamp<std::int64_t>(sum, -32768, 32767);
+                        put_lane(lane, 16, static_cast<std::uint64_t>(sum));
+                    }
+                } else {
+                    const bool dword = third == 0x02 || third == 0x06;
+                    const bool subtract = third >= 0x05;
+                    const bool saturate = third == 0x03 || third == 0x07;
+                    const unsigned lane_bits = dword ? 32U : 16U;
+                    const unsigned pairs_per_input = 64 / lane_bits;
+                    for (unsigned input = 0; input < 2; ++input) {
+                        const auto &value = input == 0 ? destination : source;
+                        for (unsigned pair = 0; pair < pairs_per_input; ++pair) {
+                            const auto left = signed_lane(value, pair * 2, lane_bits);
+                            const auto right = signed_lane(value, pair * 2 + 1, lane_bits);
+                            auto combined = subtract ? left - right : left + right;
+                            if (saturate) {
+                                combined = std::clamp<std::int64_t>(combined, -32768, 32767);
+                            }
+                            put_lane(input * pairs_per_input + pair, lane_bits,
+                                     static_cast<std::uint64_t>(combined));
+                        }
+                    }
+                }
+                xmm_[decoded.reg] = result;
+                return;
+            }
+            if (third >= 0x08 && third <= 0x0a && operand16) { // PSIGNB/W/D
+                const auto decoded = decode_rm(rex);
+                const auto control =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                const auto source = xmm_[decoded.reg];
+                const unsigned lane_bits = 8U << (third - 0x08);
+                const auto lane_mask = (1ULL << lane_bits) - 1;
+                const auto sign_bit = 1ULL << (lane_bits - 1);
+                std::array<std::uint64_t, 2> result{};
+                for (unsigned lane = 0; lane < 128 / lane_bits; ++lane) {
+                    const auto shift = (lane * lane_bits) % 64;
+                    const auto half = (lane * lane_bits) / 64;
+                    const auto value = (source[half] >> shift) & lane_mask;
+                    const auto sign = (control[half] >> shift) & lane_mask;
+                    const auto signed_value =
+                        sign == 0 ? 0 : ((sign & sign_bit) != 0 ? -value : value) & lane_mask;
+                    result[half] |= signed_value << shift;
+                }
+                xmm_[decoded.reg] = result;
+                return;
+            }
+            if (third == 0x0b && operand16) { // PMULHRSW
+                const auto decoded = decode_rm(rex);
+                const auto source =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                const auto destination = xmm_[decoded.reg];
+                std::array<std::uint64_t, 2> result{};
+                for (unsigned lane = 0; lane < 8; ++lane) {
+                    const auto shift = (lane % 4) * 16;
+                    const auto left = static_cast<std::int16_t>(destination[lane / 4] >> shift);
+                    const auto right = static_cast<std::int16_t>(source[lane / 4] >> shift);
+                    const auto rounded = (static_cast<std::int32_t>(left) * right + 0x4000) >> 15;
+                    result[lane / 4] |=
+                        static_cast<std::uint64_t>(static_cast<std::uint16_t>(rounded)) << shift;
+                }
+                xmm_[decoded.reg] = result;
+                return;
+            }
+            if (third >= 0x1c && third <= 0x1e && operand16) { // PABSB/PABSW/PABSD
+                const auto decoded = decode_rm(rex);
+                const auto source =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                const auto lane_bits = 8U << (third - 0x1c);
+                const auto lane_mask = (1ULL << lane_bits) - 1;
+                const auto sign_bit = 1ULL << (lane_bits - 1);
+                std::array<std::uint64_t, 2> result{};
+                for (unsigned lane = 0; lane < 128 / lane_bits; ++lane) {
+                    const auto shift = (lane * lane_bits) % 64;
+                    const auto half = (lane * lane_bits) / 64;
+                    const auto value = (source[half] >> shift) & lane_mask;
+                    const auto magnitude =
+                        (value & sign_bit) != 0 ? (~value + 1) & lane_mask : value;
+                    result[half] |= magnitude << shift;
+                }
+                xmm_[decoded.reg] = result;
+                return;
+            }
+            std::ostringstream stream;
+            stream << "unsupported 0F 38 instruction 0x" << std::hex << static_cast<unsigned>(third)
+                   << " at 0x" << instruction_address;
+            throw Error(stream.str());
+        }
+        if (second == 0x3a) {
+            const auto third = fetch8();
+            if (third == 0x0f && operand16) { // PALIGNR xmm, xmm/m128, imm8
+                const auto decoded = decode_rm(rex, 1U);
+                const auto source =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                const auto destination = xmm_[decoded.reg];
+                const auto offset = static_cast<unsigned>(fetch8());
+                std::array<std::uint64_t, 2> result{};
+                for (unsigned byte = 0; byte < 16; ++byte) {
+                    const auto input_byte = byte + offset;
+                    if (input_byte < 32) {
+                        const auto &input = input_byte < 16 ? source : destination;
+                        const auto index = input_byte % 16;
+                        const auto value =
+                            static_cast<std::uint8_t>(input[index / 8] >> ((index % 8) * 8));
+                        result[byte / 8] |= static_cast<std::uint64_t>(value) << ((byte % 8) * 8);
+                    }
+                }
+                xmm_[decoded.reg] = result;
+                return;
+            }
+            std::ostringstream stream;
+            stream << "unsupported 0F 3A instruction 0x" << std::hex << static_cast<unsigned>(third)
+                   << " at 0x" << instruction_address;
+            throw Error(stream.str());
+        }
         if (second == 0x2e || second == 0x2f) {
             const auto decoded = decode_rm(rex);
             const auto left = operand16 ? xmm_low_double(decoded.reg)
@@ -1415,7 +1600,42 @@ void Cpu::step() {
             }
             return;
         }
-        if (second == 0x7c && operand16) { // HADDPD
+        if ((second == 0x12 && (repeat_prefix == 0xf2 || repeat_prefix == 0xf3)) ||
+            (second == 0x16 && repeat_prefix == 0xf3)) {
+            const auto decoded = decode_rm(rex);
+            const auto source =
+                decoded.rm.is_register
+                    ? xmm_[decoded.rm.register_index]
+                    : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                   second == 0x12 && repeat_prefix == 0xf2
+                                                       ? 0
+                                                       : memory_.read64(decoded.rm.address + 8)};
+            if (repeat_prefix == 0xf2) { // MOVDDUP
+                xmm_[decoded.reg] = {source[0], source[0]};
+            } else {
+                const auto lane = [&](unsigned index) {
+                    return static_cast<std::uint32_t>(source[index / 2] >> ((index % 2) * 32));
+                };
+                const auto first = second == 0x12 ? lane(0) : lane(1);
+                const auto second_lane = second == 0x12 ? lane(2) : lane(3);
+                xmm_[decoded.reg] = {static_cast<std::uint64_t>(first) |
+                                         (static_cast<std::uint64_t>(first) << 32),
+                                     static_cast<std::uint64_t>(second_lane) |
+                                         (static_cast<std::uint64_t>(second_lane) << 32)};
+            }
+            return;
+        }
+        if (second == 0xf0 && repeat_prefix == 0xf2) { // LDDQU
+            const auto decoded = decode_rm(rex);
+            if (decoded.rm.is_register) {
+                throw Error("LDDQU requires a memory operand");
+            }
+            xmm_[decoded.reg] = {memory_.read64(decoded.rm.address),
+                                 memory_.read64(decoded.rm.address + 8)};
+            return;
+        }
+        if ((second == 0x7c || second == 0x7d) &&
+            (operand16 || repeat_prefix == 0xf2)) { // HADD/HSUB PS/PD
             const auto decoded = decode_rm(rex);
             const auto source =
                 decoded.rm.is_register
@@ -1423,11 +1643,62 @@ void Cpu::step() {
                     : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
                                                    memory_.read64(decoded.rm.address + 8)};
             const auto destination = xmm_[decoded.reg];
-            xmm_[decoded.reg] = {
-                std::bit_cast<std::uint64_t>(std::bit_cast<double>(destination[0]) +
-                                             std::bit_cast<double>(destination[1])),
-                std::bit_cast<std::uint64_t>(std::bit_cast<double>(source[0]) +
-                                             std::bit_cast<double>(source[1]))};
+            const bool subtract = second == 0x7d;
+            if (operand16) {
+                const auto horizontal = [&](const auto &value) {
+                    const auto left = std::bit_cast<double>(value[0]);
+                    const auto right = std::bit_cast<double>(value[1]);
+                    return std::bit_cast<std::uint64_t>(subtract ? left - right : left + right);
+                };
+                xmm_[decoded.reg] = {horizontal(destination), horizontal(source)};
+            } else {
+                std::array<std::uint64_t, 2> result{};
+                for (unsigned input = 0; input < 2; ++input) {
+                    const auto &value = input == 0 ? destination : source;
+                    for (unsigned pair = 0; pair < 2; ++pair) {
+                        const auto bits0 = static_cast<std::uint32_t>(value[pair] & 0xffffffffULL);
+                        const auto bits1 = static_cast<std::uint32_t>(value[pair] >> 32);
+                        const auto left = std::bit_cast<float>(bits0);
+                        const auto right = std::bit_cast<float>(bits1);
+                        const auto combined = subtract ? left - right : left + right;
+                        const auto lane = input * 2 + pair;
+                        result[lane / 2] |=
+                            static_cast<std::uint64_t>(std::bit_cast<std::uint32_t>(combined))
+                            << ((lane % 2) * 32);
+                    }
+                }
+                xmm_[decoded.reg] = result;
+            }
+            return;
+        }
+        if (second == 0xd0 && (operand16 || repeat_prefix == 0xf2)) { // ADDSUBPD/PS
+            const auto decoded = decode_rm(rex);
+            const auto source =
+                decoded.rm.is_register
+                    ? xmm_[decoded.rm.register_index]
+                    : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                   memory_.read64(decoded.rm.address + 8)};
+            if (operand16) {
+                for (unsigned lane = 0; lane < 2; ++lane) {
+                    const auto left = std::bit_cast<double>(xmm_[decoded.reg][lane]);
+                    const auto right = std::bit_cast<double>(source[lane]);
+                    xmm_[decoded.reg][lane] =
+                        std::bit_cast<std::uint64_t>(lane == 0 ? left - right : left + right);
+                }
+            } else {
+                for (unsigned lane = 0; lane < 4; ++lane) {
+                    const auto shift = (lane % 2) * 32;
+                    const auto left = std::bit_cast<float>(
+                        static_cast<std::uint32_t>(xmm_[decoded.reg][lane / 2] >> shift));
+                    const auto right =
+                        std::bit_cast<float>(static_cast<std::uint32_t>(source[lane / 2] >> shift));
+                    const auto result = lane % 2 == 0 ? left - right : left + right;
+                    const auto mask = 0xffffffffULL << shift;
+                    xmm_[decoded.reg][lane / 2] =
+                        (xmm_[decoded.reg][lane / 2] & ~mask) |
+                        (static_cast<std::uint64_t>(std::bit_cast<std::uint32_t>(result)) << shift);
+                }
+            }
             return;
         }
         if (repeat_prefix == 0xf3 && second == 0x2a) {
@@ -1818,14 +2089,16 @@ void Cpu::step() {
             if (leaf == 1) {
                 // x86-64 guarantees SSE2, but the optional ECX feature set selects instructions
                 // that this interpreter does not implement completely yet (SSE3/4, AES,
-                // POPCNT, XSAVE/AVX, RDRAND, and friends).
-                values[2] = 0;
+                // XSAVE/AVX, RDRAND, and friends). POPCNT is independently advertised.
+                values[2] = 1 << 23;
             } else if (leaf == 7 && subleaf == 0) {
                 values[1] = 0;
                 values[2] = 0;
                 values[3] = 0;
             } else if (leaf == 0x80000001U) {
-                values[2] = 0;
+                // ABM bit 5 advertises LZCNT. Do not advertise the rest of the host's optional
+                // extended instruction families.
+                values[2] = 1 << 5;
             }
             write_register(Rax, 32, static_cast<std::uint32_t>(values[0]));
             write_register(Rbx, 32, static_cast<std::uint32_t>(values[1]));
@@ -1898,6 +2171,34 @@ void Cpu::step() {
                 value ^= bit_mask;
                 write_operand(target, width, value);
             }
+            return;
+        }
+        if (repeat_prefix == 0xf3 && (second == 0xb8 || second == 0xbc || second == 0xbd)) {
+            const auto decoded = decode_rm(rex);
+            const auto source = read_operand(decoded.rm, width);
+            std::uint64_t result = 0;
+            if (second == 0xb8) { // POPCNT
+                result = std::popcount(source);
+                flags_ &= ~(flag_cf | flag_pf | flag_af | flag_zf | flag_sf | flag_of);
+                if (source == 0) {
+                    flags_ |= flag_zf;
+                }
+            } else {
+                result =
+                    source == 0
+                        ? width
+                        : (second == 0xbc
+                               ? static_cast<unsigned>(std::countr_zero(source))
+                               : width - 1 - static_cast<unsigned>(std::bit_width(source) - 1));
+                flags_ &= ~(flag_cf | flag_zf);
+                if (source == 0) {
+                    flags_ |= flag_cf;
+                }
+                if (result == 0) {
+                    flags_ |= flag_zf;
+                }
+            }
+            write_register(decoded.reg, width, result);
             return;
         }
         if (second == 0xbc || second == 0xbd) {

@@ -69,6 +69,12 @@ When the guest faults, the emulator logs the full CPU register state plus a hist
 last 64 executed instruction addresses to make diagnosis possible.
 
 A running record of agent-assisted development changes lives in `DEVLOG.md`.
+Windows API compatibility and instruction-family coverage are documented in
+[`docs/WINDOWS_COMPATIBILITY.md`](docs/WINDOWS_COMPATIBILITY.md) and
+[`docs/INSTRUCTION_COVERAGE.md`](docs/INSTRUCTION_COVERAGE.md).
+Observed application results are tracked in [`APP.md`](APP.md).
+The current game-compatibility target has a dedicated roadmap in
+[`docs/UNDERTALE.md`](docs/UNDERTALE.md).
 
 After building, generated test applications are available in `build/test-apps`.
 

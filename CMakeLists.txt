@@ -13,7 +13,7 @@ add_library(winemu_core
     src/runtime.cpp
 )
 target_include_directories(winemu_core PUBLIC include)
-target_link_libraries(winemu_core PUBLIC advapi32 shell32)
+target_link_libraries(winemu_core PUBLIC advapi32 shell32 winmm)
 target_compile_options(winemu_core PRIVATE
     $<$<CXX_COMPILER_ID:Clang>:-Wall -Wextra -Wpedantic -Werror>
 )

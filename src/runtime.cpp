@@ -20,6 +20,11 @@
 extern "C" __declspec(dllimport) wchar_t **__stdcall CommandLineToArgvW(const wchar_t *, int *);
 extern "C" __declspec(dllimport) DWORD __stdcall
 GetSecurityInfo(HANDLE, DWORD, DWORD, void **, void **, void **, void **, void **);
+extern "C" __declspec(dllimport) BOOL __stdcall PlaySoundA(const char *, HMODULE, DWORD);
+extern "C" __declspec(dllimport) BOOL __stdcall PlaySoundW(const wchar_t *, HMODULE, DWORD);
+extern "C" __declspec(dllimport) DWORD __stdcall timeGetTime();
+extern "C" __declspec(dllimport) UINT __stdcall timeBeginPeriod(UINT);
+extern "C" __declspec(dllimport) UINT __stdcall timeEndPeriod(UINT);
 
 namespace winemu {
 
@@ -39,6 +44,10 @@ constexpr std::uint64_t crt_commode = environment_base + 0x1000;
 constexpr std::uint64_t crt_errno = environment_base + 0x1008;
 constexpr std::uint64_t command_line_address = environment_base + 0x2000;
 constexpr std::uint64_t winmain_command_line_address = environment_base + 0x3000;
+constexpr DWORD sound_async = 0x0001;
+constexpr DWORD sound_memory = 0x0004;
+constexpr DWORD sound_loop = 0x0008;
+constexpr DWORD sound_resource = 0x00040004;
 
 thread_local Runtime *active_runtime = nullptr;
 thread_local Cpu *active_cpu = nullptr;
@@ -339,6 +348,34 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::SetLastError;
     } else if (kernel_module && name == "OutputDebugStringA") {
         api = Api::OutputDebugStringA;
+    } else if (kernel_module && name == "Beep") {
+        api = Api::Beep;
+    } else if (name == "MessageBeep") {
+        api = Api::MessageBeep;
+    } else if (name == "PlaySoundA") {
+        api = Api::PlaySoundA;
+    } else if (name == "PlaySoundW") {
+        api = Api::PlaySoundW;
+    } else if (name == "sndPlaySoundA") {
+        api = Api::SndPlaySoundA;
+    } else if (name == "sndPlaySoundW") {
+        api = Api::SndPlaySoundW;
+    } else if (kernel_module && name == "GetTickCount") {
+        api = Api::GetTickCount;
+    } else if (kernel_module && name == "GetTickCount64") {
+        api = Api::GetTickCount64;
+    } else if (kernel_module && name == "QueryPerformanceCounter") {
+        api = Api::QueryPerformanceCounter;
+    } else if (kernel_module && name == "QueryPerformanceFrequency") {
+        api = Api::QueryPerformanceFrequency;
+    } else if (kernel_module && name == "Sleep") {
+        api = Api::Sleep;
+    } else if (name == "timeGetTime") {
+        api = Api::TimeGetTime;
+    } else if (name == "timeBeginPeriod") {
+        api = Api::TimeBeginPeriod;
+    } else if (name == "timeEndPeriod") {
+        api = Api::TimeEndPeriod;
     } else if (name == "_initterm") {
         api = Api::InitTerm;
     } else if (name == "_initterm_e") {
@@ -635,6 +672,81 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     case Api::OutputDebugStringA:
         log::info("guest", "OutputDebugStringA: " + cpu.memory().read_c_string(cpu.reg(Rcx)));
+        finish_call();
+        break;
+    case Api::Beep:
+        cpu.set_reg(Rax, ::Beep(static_cast<DWORD>(cpu.reg(Rcx)),
+                                static_cast<DWORD>(cpu.reg(Rdx))) != FALSE);
+        finish_call();
+        break;
+    case Api::MessageBeep:
+        cpu.set_reg(Rax, ::MessageBeep(static_cast<UINT>(cpu.reg(Rcx))) != FALSE);
+        finish_call();
+        break;
+    case Api::PlaySoundA:
+    case Api::PlaySoundW:
+    case Api::SndPlaySoundA:
+    case Api::SndPlaySoundW: {
+        const bool legacy =
+            found->second == Api::SndPlaySoundA || found->second == Api::SndPlaySoundW;
+        const bool wide = found->second == Api::PlaySoundW || found->second == Api::SndPlaySoundW;
+        const auto sound = cpu.reg(Rcx);
+        const auto module = legacy ? 0 : cpu.reg(Rdx);
+        const auto requested_flags = static_cast<DWORD>(legacy ? cpu.reg(Rdx) : cpu.reg(R8));
+        constexpr DWORD retained_or_pointer_flags =
+            sound_async | sound_loop | sound_memory | sound_resource;
+        if (module != 0 || (requested_flags & retained_or_pointer_flags) != 0) {
+            // Async playback can retain the name pointer, while memory/resource modes interpret
+            // the argument as non-string host data. Both require guest-owned lifetime adapters.
+            cpu.set_reg(Rax, 0);
+        } else if (sound == 0) {
+            cpu.set_reg(Rax, ::PlaySoundW(nullptr, nullptr, 0) != FALSE);
+        } else if (wide) {
+            const auto name = cpu.memory().read_wide_string(sound);
+            cpu.set_reg(Rax, ::PlaySoundW(name.c_str(), nullptr, requested_flags) != FALSE);
+        } else {
+            const auto name = cpu.memory().read_c_string(sound);
+            cpu.set_reg(Rax, ::PlaySoundA(name.c_str(), nullptr, requested_flags) != FALSE);
+        }
+        finish_call();
+        break;
+    }
+    case Api::GetTickCount:
+        cpu.set_reg(Rax, ::GetTickCount());
+        finish_call();
+        break;
+    case Api::GetTickCount64:
+        cpu.set_reg(Rax, ::GetTickCount64());
+        finish_call();
+        break;
+    case Api::QueryPerformanceCounter:
+    case Api::QueryPerformanceFrequency: {
+        LARGE_INTEGER value{};
+        const auto success = found->second == Api::QueryPerformanceCounter
+                                 ? ::QueryPerformanceCounter(&value)
+                                 : ::QueryPerformanceFrequency(&value);
+        if (success != FALSE) {
+            cpu.memory().write64(cpu.reg(Rcx), static_cast<std::uint64_t>(value.QuadPart));
+        }
+        cpu.set_reg(Rax, success != FALSE);
+        finish_call();
+        break;
+    }
+    case Api::Sleep:
+        ::Sleep(static_cast<DWORD>(cpu.reg(Rcx)));
+        cpu.set_reg(Rax, 0);
+        finish_call();
+        break;
+    case Api::TimeGetTime:
+        cpu.set_reg(Rax, ::timeGetTime());
+        finish_call();
+        break;
+    case Api::TimeBeginPeriod:
+        cpu.set_reg(Rax, ::timeBeginPeriod(static_cast<UINT>(cpu.reg(Rcx))));
+        finish_call();
+        break;
+    case Api::TimeEndPeriod:
+        cpu.set_reg(Rax, ::timeEndPeriod(static_cast<UINT>(cpu.reg(Rcx))));
         finish_call();
         break;
     case Api::InitTerm:

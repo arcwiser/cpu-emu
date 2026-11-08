@@ -1,0 +1,69 @@
+# Windows compatibility
+
+CPUEmu interprets x86-64 PE32+ applications and presents a deliberately bounded Win32
+compatibility layer. It is not Wine, a virtual machine, or a transparent native-call forwarder.
+Every guest pointer is untrusted, and APIs that retain pointers or invoke callbacks need an
+explicit adapter.
+
+## Compatibility levels
+
+- **Guest-owned adapter:** CPUEmu implements the operation and keeps all returned memory and
+  callback state in guest space. This is the preferred level.
+- **Marshalled host adapter:** CPUEmu validates guest input, converts it to host data, calls a
+  Windows API, and copies safe results back to guest memory.
+- **Direct native call:** Only simple calls that do not retain pointers, return host-owned
+  pointers, or invoke callbacks may use the generic native bridge.
+- **Safe refusal:** Process, thread, exception, and callback-bearing APIs return failure when a
+  correct guest-side implementation does not exist. This prevents guest code addresses from
+  being executed as native host callbacks.
+
+## Implemented guest-owned facilities
+
+| Area | APIs and behavior | Current limits |
+| --- | --- | --- |
+| Process lifecycle | `ExitProcess`, CRT exit functions, `TerminateProcess` | Single guest process |
+| Console output | `GetStdHandle`, `WriteFile` | Focused on standard output/error handles |
+| Errors and diagnostics | `GetLastError`, `SetLastError`, `OutputDebugStringA` | Per-runtime error state |
+| Virtual memory | `VirtualAlloc`, `VirtualFree`, `VirtualProtect`, `VirtualQuery` | No placeholders, write-watch, or full mapped-section semantics |
+| Heap and local/global memory | `malloc`, `free`, `HeapAlloc`, `HeapFree`, `LocalAlloc`, `GlobalAlloc`, related size/lock calls | Guest heap rather than a host heap handle model |
+| TLS/FLS | `TlsAlloc`, `TlsFree`, `TlsGetValue`, `TlsSetValue`, FLS equivalents | No guest thread scheduler; FLS cleanup callbacks are not invoked |
+| Startup and environment | command line, environment blocks, CRT on-exit tables, static TLS initialization | Main thread only |
+| Module queries | module handles, module filename, selected `GetProcAddress`, delay imports | Loaded main image and emulated thunks; no general guest DLL loader |
+| Basic audio | `Beep`, `MessageBeep`, synchronous `PlaySoundA/W`, `sndPlaySoundA/W` | No retained guest buffers, asynchronous playback, loops, resource audio, or streaming APIs |
+| Game-loop timing | `GetTickCount`, `GetTickCount64`, performance counter/frequency, `Sleep`, `timeGetTime`, timer period begin/end | Host-clock backed; no virtual or deterministic clock |
+
+## Marshalled Windows adapters
+
+CPUEmu currently has explicit adapters for `CommandLineToArgvW`, `GetSecurityInfo`, read-only
+`MapViewOfFile`, `SHGetKnownFolderPath`, resource loading, cursor/icon/image loading, accelerator
+loading, window-class registration, window creation, and selected WinRT protection-policy calls.
+The window bridge re-enters interpreted code through `Runtime::invoke_guest`; it never casts a
+guest window procedure to a native function pointer.
+
+## Safely refused operations
+
+The following families currently report failure or remain inert because native forwarding would
+escape emulation or retain unsafe guest state:
+
+- `CreateThread`, `_beginthreadex`, remote-thread creation, work items, waits, and thread-pool
+  callback objects.
+- `CreateProcess*` and child-process creation.
+- Vectored exception handlers and native language exception callbacks.
+- General COM objects whose interface pointers and vtables have not been proxied into guest
+  memory.
+- Dialog, font-enumeration, printing, and other APIs that retain or synchronously invoke callbacks
+  without a dedicated adapter.
+- WaveOut, DirectSound, WASAPI, Media Foundation, and other streaming or callback-driven audio
+  interfaces.
+
+## Adding an API
+
+1. Determine every pointer's ownership and lifetime, including nested pointers.
+2. Validate all guest ranges through `Memory` before reading or writing them.
+3. Marshal host results into guest-owned allocations; never return a host pointer.
+4. Route guest callbacks through `Runtime::invoke_guest` and account for re-entry.
+5. Add success, failure, invalid-pointer, output-pointer, and lifetime tests where the fixture
+   system permits them.
+
+See `src/runtime.cpp` for the authoritative resolver and dispatch implementation. This document is
+an overview, not a promise that every flag and structure variant of a named API is complete.
