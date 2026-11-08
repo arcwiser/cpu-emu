@@ -11,6 +11,7 @@
 namespace winemu {
 
 struct LoadedImage {
+    bool is_64_bit;
     std::uint64_t base;
     std::uint64_t size;
     std::uint64_t entry;
@@ -21,7 +22,8 @@ struct LoadedImage {
     std::vector<std::uint64_t> tls_callbacks;
 };
 
-using ImportResolver = std::function<std::uint64_t(const std::string &, const std::string &)>;
+using ImportResolver =
+    std::function<std::uint64_t(const std::string &, const std::string &, bool is_64_bit)>;
 
 class PeLoader {
   public:

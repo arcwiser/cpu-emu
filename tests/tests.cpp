@@ -2,6 +2,7 @@
 #include "winemu/error.hpp"
 #include "winemu/log.hpp"
 #include "winemu/memory.hpp"
+#include "winemu/pe.hpp"
 #include "winemu/runtime.hpp"
 
 #include <algorithm>
@@ -55,6 +56,39 @@ void test_cpu_loop() {
         cpu.step();
     }
     require(cpu.reg(winemu::Rax) == 55, "CPU loop sum result");
+}
+
+void test_cpu_32bit_mode() {
+    constexpr std::uint64_t code_address = 0x10000000;
+    constexpr std::uint64_t stack_address = 0x20000000;
+    constexpr std::uint64_t fs_base = 0x30000000;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "x86 code");
+    memory.map(stack_address, 0x1000, winemu::Read | winemu::Write, "x86 stack");
+    memory.map(fs_base, 0x1000, winemu::Read | winemu::Write, "x86 fs");
+    const std::uint8_t code[] = {
+        0x8b, 0x05, 0x00, 0x01, 0x00, 0x10,    // mov eax, [10000100h]
+        0x40,                                  // inc eax (not a REX prefix in x86 mode)
+        0x50,                                  // push eax
+        0x59,                                  // pop ecx
+        0xa3, 0x04, 0x01, 0x00, 0x10,          // mov [10000104h], eax
+        0x64, 0x8b, 0x15, 0x10, 0,    0,    0, // mov edx, fs:[10h]
+        0xc3,
+    };
+    memory.write(code_address, code);
+    memory.write32(code_address + 0x100, 41);
+    memory.write32(fs_base + 0x10, 0x12345678);
+    memory.write32(stack_address + 0xffc, 0xdeadbeef);
+    winemu::Cpu cpu(memory);
+    cpu.reset(code_address, stack_address + 0xffc, false);
+    cpu.set_fs_base(fs_base);
+    while (cpu.rip() != 0xdeadbeef) {
+        cpu.step();
+    }
+    require(cpu.reg(winemu::Rax) == 42, "x86 absolute addressing and INC");
+    require(cpu.reg(winemu::Rcx) == 42, "x86 4-byte push/pop");
+    require(memory.read32(code_address + 0x104) == 42, "x86 moffs store");
+    require(cpu.reg(winemu::Rdx) == 0x12345678, "x86 FS segment addressing");
 }
 
 void test_pshufd() {
@@ -501,6 +535,24 @@ void test_sign_extend_accumulator() {
 void test_apps() {
     const std::filesystem::path apps(WINEMU_TEST_APPS_DIR);
     {
+        winemu::Memory memory;
+        const auto image = winemu::PeLoader::load(
+            apps / "exit32.exe", memory,
+            [](const std::string &, const std::string &, bool) -> std::uint64_t {
+                throw std::runtime_error("unexpected PE32 import");
+            });
+        require(!image.is_64_bit, "PE32 image mode");
+        constexpr std::uint64_t stack_base = 0x00800000;
+        memory.map(stack_base, 0x1000, winemu::Read | winemu::Write, "PE32 stack");
+        memory.write32(stack_base + 0xffc, 0xdeadbeef);
+        winemu::Cpu cpu(memory);
+        cpu.reset(image.entry, stack_base + 0xffc, false);
+        while (cpu.rip() != 0xdeadbeef) {
+            cpu.step();
+        }
+        require(cpu.reg(winemu::Rax) == 42, "PE32 CPU result");
+    }
+    {
         std::ostringstream output;
         winemu::Runtime runtime(output);
         const auto result = runtime.run(apps / "exit42.exe");
@@ -551,6 +603,7 @@ int main() {
     try {
         test_memory();
         test_cpu_loop();
+        test_cpu_32bit_mode();
         test_pshufd();
         test_pshufb();
         test_packed_absolute_values();

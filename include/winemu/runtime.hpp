@@ -37,6 +37,13 @@ class Runtime {
         WriteFile,
         GetLastError,
         SetLastError,
+        GetSystemTimeAsFileTime,
+        GetCurrentProcessId,
+        GetCurrentThreadId,
+        StartupInfo,
+        CriticalSectionInitialize,
+        CriticalSectionOperation,
+        CriticalSectionTry,
         OutputDebugStringA,
         Beep,
         MessageBeep,
@@ -89,11 +96,13 @@ class Runtime {
         Reallocate,
         FreeRcx,
         HeapFree,
+        HeapDestroy,
         AllocationSize,
         IdentityRcx,
         ProcessHeap,
         ReturnOne,
         GuestModuleHandle,
+        ModuleLoad,
         GetModuleHandleExW,
         GetModuleFileNameW,
         GetModuleFileNameA,
@@ -126,6 +135,7 @@ class Runtime {
     std::unordered_map<std::uint64_t, std::string> thunk_names_;
     std::unordered_map<std::uint64_t, void *> native_functions_;
     std::uint64_t next_thunk_ = 0xffff'0000'0000'0100ULL;
+    bool guest_is_64_bit_ = true;
     std::uint64_t data_import_next_ = 0;
     std::unordered_map<std::string, std::uint64_t> data_import_slots_;
     std::uint32_t last_error_ = 0;
@@ -135,6 +145,8 @@ class Runtime {
     std::uint64_t heap_next_ = 0x0000'0006'0000'0000ULL;
     std::unordered_map<std::uint64_t, std::uint64_t> heap_sizes_;
     std::uint64_t guest_image_base_ = 0;
+    std::uint64_t next_module_handle_ = 0x7fe0'0000ULL;
+    std::unordered_map<std::uint64_t, std::string> guest_modules_;
     std::filesystem::path guest_executable_;
     void *resource_module_ = nullptr;
     std::unordered_map<std::wstring, std::uint64_t> class_window_procedures_;

@@ -4,6 +4,7 @@
 #include "winemu/log.hpp"
 
 #include <algorithm>
+#include <array>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -37,8 +38,7 @@ bool range_fits(std::uint64_t base, std::uint64_t size, std::uint64_t address,
 
 Memory::~Memory() {
     for (const auto &allocation : allocations_) {
-        VirtualFree(reinterpret_cast<void *>(static_cast<std::uintptr_t>(allocation.base)), 0,
-                    MEM_RELEASE);
+        VirtualFree(allocation.data, 0, MEM_RELEASE);
     }
 }
 
@@ -58,15 +58,37 @@ void Memory::map(std::uint64_t base, std::uint64_t size, std::uint8_t permission
         }
     }
     auto *const requested = reinterpret_cast<void *>(static_cast<std::uintptr_t>(base));
-    auto *const allocation = VirtualAlloc(requested, static_cast<SIZE_T>(size),
-                                          MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (allocation != requested) {
-        if (allocation != nullptr) {
-            VirtualFree(allocation, 0, MEM_RELEASE);
-        }
-        throw Error("cannot reserve guest mapping at " + hex_address(base));
+    auto *allocation = VirtualAlloc(requested, static_cast<SIZE_T>(size), MEM_RESERVE | MEM_COMMIT,
+                                    PAGE_READWRITE);
+    if (allocation != requested && allocation != nullptr) {
+        VirtualFree(allocation, 0, MEM_RELEASE);
+        allocation = nullptr;
     }
-    allocations_.push_back({base, size, name, false});
+    if (allocation == nullptr) {
+        const auto error = GetLastError();
+        MEMORY_BASIC_INFORMATION information{};
+        static_cast<void>(VirtualQuery(requested, &information, sizeof(information)));
+        std::array<wchar_t, 32768> module_path{};
+        const auto module_length =
+            GetModuleFileNameW(static_cast<HMODULE>(information.AllocationBase), module_path.data(),
+                               static_cast<DWORD>(module_path.size()));
+        std::string occupied_by;
+        for (DWORD index = 0; index < module_length; ++index) {
+            occupied_by.push_back(module_path[index] < 0x80 ? static_cast<char>(module_path[index])
+                                                            : '?');
+        }
+        allocation = VirtualAlloc(nullptr, static_cast<SIZE_T>(size), MEM_RESERVE | MEM_COMMIT,
+                                  PAGE_READWRITE);
+        if (allocation == nullptr) {
+            throw Error("cannot reserve backing memory for guest mapping at " + hex_address(base) +
+                        " (Win32 error " + std::to_string(error) + ")");
+        }
+        log::trace("memory", "guest address " + hex_address(base) +
+                                 " uses non-identity backing; preferred state=" +
+                                 hex_address(information.State) +
+                                 (occupied_by.empty() ? "" : " module=" + occupied_by));
+    }
+    allocations_.push_back({base, size, name, false, static_cast<std::uint8_t *>(allocation)});
     regions_.push_back(
         {base, size, permissions, std::move(name), static_cast<std::uint8_t *>(allocation)});
     if (log::enabled(log::Level::Trace)) {
@@ -112,7 +134,8 @@ void Memory::track_allocation(std::uint64_t base, std::uint64_t size, std::strin
             throw Error("tracked allocation overlaps " + allocation.name);
         }
     }
-    allocations_.push_back({base, size, std::move(name), true});
+    allocations_.push_back({base, size, std::move(name), true,
+                            reinterpret_cast<std::uint8_t *>(static_cast<std::uintptr_t>(base))});
     log::trace("memory", "reserved guest virtual memory base=" + hex_address(base) +
                              " size=" + hex_address(size));
 }

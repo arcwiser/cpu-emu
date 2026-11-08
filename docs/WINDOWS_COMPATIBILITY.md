@@ -1,6 +1,6 @@
 # Windows compatibility
 
-CPUEmu interprets x86-64 PE32+ applications and presents a deliberately bounded Win32
+CPUEmu interprets x86 PE32 and x86-64 PE32+ applications and presents a deliberately bounded Win32
 compatibility layer. It is not Wine, a virtual machine, or a transparent native-call forwarder.
 Every guest pointer is untrusted, and APIs that retain pointers or invoke callbacks need an
 explicit adapter.
@@ -31,6 +31,7 @@ explicit adapter.
 | Module queries | module handles, module filename, selected `GetProcAddress`, delay imports | Loaded main image and emulated thunks; no general guest DLL loader |
 | Basic audio | `Beep`, `MessageBeep`, synchronous `PlaySoundA/W`, `sndPlaySoundA/W` | No retained guest buffers, asynchronous playback, loops, resource audio, or streaming APIs |
 | Game-loop timing | `GetTickCount`, `GetTickCount64`, performance counter/frequency, `Sleep`, `timeGetTime`, timer period begin/end | Host-clock backed; no virtual or deterministic clock |
+| PE32 startup | stack-based stdcall arguments, low thunk/module handles, startup info, process/thread IDs, security cookie helpers, heap, TLS, and critical-section adapters | Adapter-by-adapter ABI audit remains in progress |
 
 ## Marshalled Windows adapters
 

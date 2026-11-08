@@ -34,6 +34,7 @@ add_executable(make_test_apps tools/make_test_apps.cpp)
 add_custom_command(
     OUTPUT
         ${CMAKE_BINARY_DIR}/test-apps/exit42.exe
+        ${CMAKE_BINARY_DIR}/test-apps/exit32.exe
         ${CMAKE_BINARY_DIR}/test-apps/sum.exe
         ${CMAKE_BINARY_DIR}/test-apps/hello.exe
     COMMAND make_test_apps ${CMAKE_BINARY_DIR}/test-apps
@@ -42,6 +43,7 @@ add_custom_command(
 )
 add_custom_target(generate_test_apps ALL DEPENDS
     ${CMAKE_BINARY_DIR}/test-apps/exit42.exe
+    ${CMAKE_BINARY_DIR}/test-apps/exit32.exe
     ${CMAKE_BINARY_DIR}/test-apps/sum.exe
     ${CMAKE_BINARY_DIR}/test-apps/hello.exe
 )

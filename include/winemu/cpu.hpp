@@ -30,7 +30,7 @@ enum Register : std::size_t {
 class Cpu {
   public:
     explicit Cpu(Memory &memory);
-    void reset(std::uint64_t entry, std::uint64_t stack_pointer);
+    void reset(std::uint64_t entry, std::uint64_t stack_pointer, bool long_mode = true);
     void step();
     [[nodiscard]] std::uint64_t reg(Register index) const;
     void set_reg(Register index, std::uint64_t value);
@@ -38,6 +38,7 @@ class Cpu {
     void set_rip(std::uint64_t value);
     [[nodiscard]] std::uint64_t flags() const;
     void set_gs_base(std::uint64_t value);
+    void set_fs_base(std::uint64_t value);
     [[nodiscard]] std::uint64_t instructions() const;
     [[nodiscard]] std::vector<std::uint64_t> recent_instructions() const;
     [[nodiscard]] Memory &memory();
@@ -90,8 +91,10 @@ class Cpu {
     std::uint64_t flags_ = 2;
     std::uint64_t instructions_ = 0;
     std::uint64_t gs_base_ = 0;
+    std::uint64_t fs_base_ = 0;
     std::uint64_t segment_base_ = 0;
     bool address32_ = false;
+    bool long_mode_ = true;
 };
 
 } // namespace winemu

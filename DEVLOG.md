@@ -4,6 +4,28 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-08 — PE32 execution and Undertale startup
+
+### Added
+
+- Added PE32 loader support with x86 machine validation, 32-bit optional headers, four-byte import
+  thunks, ordinal handling, and 32-bit TLS directories/callback arrays.
+- Added explicit x86 CPU mode with 32-bit addressing, legacy `INC`/`DEC`, four-byte stack/call/return
+  behavior, `FS` segment state, and absolute `moffs` moves.
+- Added non-identity guest-memory backing so fixed PE32 images can occupy guest addresses already
+  used by the 64-bit host process without exposing host pointers.
+- Added low 32-bit import/module thunks, stack-based stdcall argument access and cleanup, safe module
+  lookup/loading, dynamic procedure lookup, startup/time/process helpers, heap/TLS fixes, pointer
+  encoding helpers, and single-threaded critical-section adapters.
+
+### Verified
+
+- Added a generated PE32 fixture and focused regressions for loading, absolute addressing,
+  four-byte stack behavior, legacy opcodes, `FS`, and `moffs` stores.
+- The installed Undertale PE32 image now loads at `0x00400000`, resolves 313 imports, and advances
+  from immediate loader rejection to 4,010 interpreted instructions. The next blocker is
+  `USER32!GetProcessWindowStation`.
+
 ## 2026-11-08 — SSE4.1 packed-integer foundation
 
 ### Added

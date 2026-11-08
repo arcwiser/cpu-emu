@@ -1,6 +1,8 @@
 # CPUEmu
 
-CPUEmu is a Windows-hosted x86-64 user-mode CPU emulator. It loads PE32+ executables, interprets guest machine instructions, isolates guest memory, and bridges selected Win32 APIs to the host. It does not boot a guest operating system and is not a virtual machine.
+CPUEmu is a Windows-hosted x86 and x86-64 user-mode CPU emulator. It loads PE32 and PE32+
+executables, interprets guest machine instructions, isolates guest memory, and bridges selected
+Win32 APIs to the host. It does not boot a guest operating system and is not a virtual machine.
 
 The current milestone runs small native Windows applications end to end and can start the Windows
 11 `notepad.exe` UI under interpreted guest execution. The included fixtures cover:
@@ -98,7 +100,7 @@ build-release\cpuemu.exe C:\Windows\System32\notepad.exe --limit 100000000 -v --
 ## Architecture
 
 - `Memory` owns checked guest mappings and rejects unmapped or disallowed accesses.
-- `PeLoader` validates and maps PE32+ images and resolves their import tables.
+- `PeLoader` validates and maps PE32/PE32+ images and resolves 32-bit or 64-bit import tables.
 - `Cpu` implements x86-64 fetch, decode, addressing, execution, and flags, and keeps a
   recent-instruction ring buffer for fault diagnostics.
 - `Runtime` owns the stack, instruction budget, and controlled Win32 API thunks.

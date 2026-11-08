@@ -55,7 +55,7 @@ std::uint64_t divide_unsigned_128(std::uint64_t high, std::uint64_t low, std::ui
 
 Cpu::Cpu(Memory &memory) : memory_(memory) {}
 
-void Cpu::reset(std::uint64_t entry, std::uint64_t stack_pointer) {
+void Cpu::reset(std::uint64_t entry, std::uint64_t stack_pointer, bool long_mode) {
     registers_.fill(0);
     xmm_.fill({0, 0});
     history_.fill(0);
@@ -64,6 +64,7 @@ void Cpu::reset(std::uint64_t entry, std::uint64_t stack_pointer) {
     rip_ = entry;
     flags_ = 2;
     instructions_ = 0;
+    long_mode_ = long_mode;
 }
 
 std::uint64_t Cpu::reg(Register index) const { return registers_[index]; }
@@ -77,6 +78,8 @@ void Cpu::set_rip(std::uint64_t value) { rip_ = value; }
 std::uint64_t Cpu::flags() const { return flags_; }
 
 void Cpu::set_gs_base(std::uint64_t value) { gs_base_ = value; }
+
+void Cpu::set_fs_base(std::uint64_t value) { fs_base_ = value; }
 
 std::uint64_t Cpu::instructions() const { return instructions_; }
 
@@ -390,13 +393,20 @@ bool Cpu::condition(std::uint8_t code) const {
 }
 
 void Cpu::push64(std::uint64_t value) {
-    registers_[Rsp] -= 8;
-    memory_.write64(registers_[Rsp], value);
+    const auto size = long_mode_ ? 8U : 4U;
+    registers_[Rsp] = (registers_[Rsp] - size) & (long_mode_ ? UINT64_MAX : UINT32_MAX);
+    if (long_mode_) {
+        memory_.write64(registers_[Rsp], value);
+    } else {
+        memory_.write32(registers_[Rsp], static_cast<std::uint32_t>(value));
+    }
 }
 
 std::uint64_t Cpu::pop64() {
-    const auto value = memory_.read64(registers_[Rsp]);
-    registers_[Rsp] += 8;
+    const auto value = long_mode_ ? memory_.read64(registers_[Rsp])
+                                  : static_cast<std::uint64_t>(memory_.read32(registers_[Rsp]));
+    registers_[Rsp] =
+        (registers_[Rsp] + (long_mode_ ? 8U : 4U)) & (long_mode_ ? UINT64_MAX : UINT32_MAX);
     return value;
 }
 
@@ -409,13 +419,15 @@ void Cpu::step() {
     std::uint8_t repeat_prefix = 0;
     std::uint8_t rex = 0;
     segment_base_ = 0;
-    address32_ = false;
+    address32_ = !long_mode_;
     auto opcode = fetch8();
-    while (opcode == 0x66 || opcode == 0x65 || opcode == 0xf0 || opcode == 0xf2 || opcode == 0xf3 ||
-           opcode == 0x67 || opcode == 0x2e || opcode == 0x36 || opcode == 0x3e || opcode == 0x26 ||
-           (opcode >= 0x40 && opcode <= 0x4f)) {
+    while (opcode == 0x66 || opcode == 0x64 || opcode == 0x65 || opcode == 0xf0 || opcode == 0xf2 ||
+           opcode == 0xf3 || opcode == 0x67 || opcode == 0x2e || opcode == 0x36 || opcode == 0x3e ||
+           opcode == 0x26 || (long_mode_ && opcode >= 0x40 && opcode <= 0x4f)) {
         if (opcode == 0x66) {
             operand16 = true;
+        } else if (opcode == 0x64) {
+            segment_base_ = fs_base_;
         } else if (opcode == 0x65) {
             segment_base_ = gs_base_;
         } else if (opcode == 0xf0) {
@@ -423,14 +435,14 @@ void Cpu::step() {
         } else if (opcode == 0xf2 || opcode == 0xf3) {
             repeat_prefix = opcode;
         } else if (opcode == 0x67) {
-            address32_ = true;
+            address32_ = !address32_;
         } else if (opcode >= 0x40 && opcode <= 0x4f) {
             rex = opcode;
         }
         // 0x2e/0x36/0x3e/0x26 are segment overrides, which are no-ops in 64-bit code.
         opcode = fetch8();
     }
-    const unsigned width = (rex & 8) != 0 ? 64 : (operand16 ? 16 : 32);
+    const unsigned width = long_mode_ && (rex & 8) != 0 ? 64 : (operand16 ? 16 : 32);
 
     if (opcode >= 0xb0 && opcode <= 0xb7) {
         const auto raw = static_cast<std::uint8_t>(opcode - 0xb0);
@@ -459,6 +471,21 @@ void Cpu::step() {
     if (opcode >= 0x58 && opcode <= 0x5f) {
         const auto destination = static_cast<std::uint8_t>((opcode - 0x58) + ((rex & 1) ? 8 : 0));
         registers_[destination] = pop64();
+        return;
+    }
+    if (!long_mode_ && opcode >= 0x40 && opcode <= 0x4f) {
+        const auto destination = static_cast<std::uint8_t>(opcode & 7);
+        const auto old = read_register(destination, width);
+        const bool decrement = opcode >= 0x48;
+        const auto result = decrement ? old - 1 : old + 1;
+        const auto carry = flags_ & flag_cf;
+        write_register(destination, width, result);
+        if (decrement) {
+            set_sub_flags(old, 1, result, width);
+        } else {
+            set_add_flags(old, 1, result, width);
+        }
+        flags_ = (flags_ & ~flag_cf) | carry;
         return;
     }
     if (opcode >= 0x70 && opcode <= 0x7f) {
@@ -1103,15 +1130,15 @@ void Cpu::step() {
         }
         if (group == 2) {
             push64(rip_);
-            rip_ = read_operand(decoded.rm, 64);
+            rip_ = read_operand(decoded.rm, long_mode_ ? 64U : 32U);
             return;
         }
         if (group == 4) {
-            rip_ = read_operand(decoded.rm, 64);
+            rip_ = read_operand(decoded.rm, long_mode_ ? 64U : 32U);
             return;
         }
         if (group == 6) {
-            push64(read_operand(decoded.rm, 64));
+            push64(read_operand(decoded.rm, long_mode_ ? 64U : 32U));
             return;
         }
         throw Error("unsupported FF instruction group");
@@ -1199,6 +1226,21 @@ void Cpu::step() {
     case 0xa8: {
         const auto immediate = fetch8();
         set_logic_flags(read_register(Rax, 8) & immediate, 8);
+        return;
+    }
+    case 0xa0:
+    case 0xa1:
+    case 0xa2:
+    case 0xa3: {
+        const auto address = segment_base_ + (address32_ ? fetch32() : fetch64());
+        const auto actual_width = opcode == 0xa0 || opcode == 0xa2 ? 8U : width;
+        if (opcode == 0xa0 || opcode == 0xa1) {
+            const Operand source{false, 0, address, false};
+            write_register(Rax, actual_width, read_operand(source, actual_width));
+        } else {
+            const Operand destination{false, 0, address, false};
+            write_operand(destination, actual_width, read_register(Rax, actual_width));
+        }
         return;
     }
     case 0xa9: {

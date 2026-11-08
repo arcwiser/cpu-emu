@@ -5,6 +5,10 @@ instruction-name count. Prefixes, operand widths, ModRM forms, memory addressing
 cases can make one mnemonic represent many distinct behaviors; claiming “3,000 instructions”
 without those semantics would be misleading.
 
+The decoder now has explicit x86 and x86-64 modes. PE32 execution uses 32-bit effective addresses,
+legacy one-byte `INC`/`DEC`, four-byte calls/returns/stacks, absolute `moffs` moves, and `FS` segment
+state; PE32+ retains long-mode REX, RIP-relative, eight-byte stack, and `GS` behavior.
+
 ## Current coverage areas
 
 - Core integer moves, arithmetic, logic, comparisons, shifts, rotates, branches, calls, returns,

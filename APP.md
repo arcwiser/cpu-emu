@@ -11,7 +11,7 @@ documented probe point under interpreted execution; it does not imply that every
 | `hello.exe` fixture | Supported | Imports resolve and console output passes through `GetStdHandle`/`WriteFile` | Test fixture only |
 | CPUEmu Paint fixture | Supported smoke test | Interactive GDI path starts; `--selftest` draws and reports success | Intended as a compatibility probe, not a full paint program |
 | Windows 11 Notepad | Partially supported | Main image loads, basic window/editor UI starts, resources load, and the message loop runs | No guest threads, broad COM support, exceptions, or complete Windows API surface |
-| Undertale (Windows) | Targeted; awaiting first local probe | GameMaker-specific SSE3 and timing work has started; a bring-up plan is documented | Owned executable is not installed locally; Direct3D 9, streaming audio, Steamworks, and exact architecture remain to be validated |
+| Undertale (Windows, PE32) | Bring-up in progress | Fixed-base image loads, all 313 imports resolve, and CRT/heap/TLS/module startup reaches 4,010 interpreted instructions | Currently stops at `USER32!GetProcessWindowStation`; Direct3D 9, streaming audio, and Steamworks remain |
 | Discord / Chromium | Not usable | Loads the installed x64 image and advances through more than 2.6 million V8 startup instructions | Blocked by guest threads/processes, DLL loading, exceptions, mapped sections, and broader SIMD support |
 
 ## Audio status

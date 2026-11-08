@@ -69,6 +69,7 @@ class Memory {
         std::uint64_t size;
         std::string name;
         bool releasable;
+        std::uint8_t *data;
     };
 
     void remove_mappings(std::uint64_t base, std::uint64_t size);

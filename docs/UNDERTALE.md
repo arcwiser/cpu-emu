@@ -46,8 +46,10 @@ DLLs into this repository.
 - Window callback re-entry exists and is exercised by the Paint and Notepad paths.
 - Basic synchronous WinMM playback exists, but streaming/game audio is not complete.
 - Direct3D 9 and Steamworks have not been validated against Undertale yet.
-- No Undertale installation was found in the standard local Steam library paths during the latest
-  audit, so there is not yet an authoritative first-failure trace.
+- The installed Steam executable is PE32 x86. CPUEmu now loads it at `0x00400000`, resolves all 313
+  imports, and executes 4,010 instructions through CRT security initialization, heap setup, dynamic
+  procedure lookup, TLS, and critical-section setup. The current first unsupported call is
+  `USER32!GetProcessWindowStation`.
 
 The next engineering step is to run the owned x64 executable and implement the earliest general
 failure with a regression. Guessing later Direct3D or audio interfaces before that trace risks

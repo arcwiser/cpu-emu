@@ -30,7 +30,8 @@ namespace winemu {
 
 namespace {
 
-constexpr std::uint64_t return_thunk = 0xffff'0000'0000'0000ULL;
+constexpr std::uint64_t return_thunk64 = 0xffff'0000'0000'0000ULL;
+constexpr std::uint64_t return_thunk32 = 0x7ff0'0000ULL;
 constexpr std::uint64_t callback_return = 0xffff'0000'0000'0080ULL;
 constexpr std::uint64_t stack_top = 0x0000'0000'7000'0000ULL;
 constexpr std::uint64_t minimum_stack_size = 1024 * 1024;
@@ -296,7 +297,7 @@ LRESULT CALLBACK window_proc_bridge(HWND window, UINT message, WPARAM word_param
 } // namespace
 
 Runtime::Runtime(std::ostream &output) : output_(output) {
-    thunks_.emplace(return_thunk, Api::ProcessReturn);
+    thunks_.emplace(return_thunk64, Api::ProcessReturn);
 }
 
 Runtime::~Runtime() {
@@ -346,6 +347,22 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GetLastError;
     } else if (kernel_module && name == "SetLastError") {
         api = Api::SetLastError;
+    } else if (kernel_module && name == "GetSystemTimeAsFileTime") {
+        api = Api::GetSystemTimeAsFileTime;
+    } else if (kernel_module && name == "GetCurrentProcessId") {
+        api = Api::GetCurrentProcessId;
+    } else if (kernel_module && name == "GetCurrentThreadId") {
+        api = Api::GetCurrentThreadId;
+    } else if (kernel_module && (name == "GetStartupInfoA" || name == "GetStartupInfoW")) {
+        api = Api::StartupInfo;
+    } else if (kernel_module && (name == "InitializeCriticalSection" ||
+                                 name == "InitializeCriticalSectionAndSpinCount")) {
+        api = Api::CriticalSectionInitialize;
+    } else if (kernel_module && (name == "EnterCriticalSection" || name == "LeaveCriticalSection" ||
+                                 name == "DeleteCriticalSection")) {
+        api = Api::CriticalSectionOperation;
+    } else if (kernel_module && name == "TryEnterCriticalSection") {
+        api = Api::CriticalSectionTry;
     } else if (kernel_module && name == "OutputDebugStringA") {
         api = Api::OutputDebugStringA;
     } else if (kernel_module && name == "Beep") {
@@ -450,6 +467,10 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::AllocateRdx;
     } else if (name == "HeapAlloc") {
         api = Api::AllocateR8;
+    } else if (name == "HeapCreate" || name == "GetProcessHeap") {
+        api = Api::ProcessHeap;
+    } else if (name == "HeapDestroy") {
+        api = Api::HeapDestroy;
     } else if (name == "LocalReAlloc") {
         api = Api::Reallocate;
     } else if (name == "_o_free" || name == "free" || name == "CoTaskMemFree" ||
@@ -461,10 +482,10 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::AllocationSize;
     } else if (name == "LocalLock" || name == "GlobalLock") {
         api = Api::IdentityRcx;
+    } else if (kernel_module && (name == "EncodePointer" || name == "DecodePointer")) {
+        api = Api::IdentityRcx;
     } else if (name == "LocalUnlock" || name == "GlobalUnlock") {
         api = Api::ReturnZero;
-    } else if (name == "GetProcessHeap") {
-        api = Api::ProcessHeap;
     } else if (name == "HeapSetInformation") {
         api = Api::ReturnOne;
     } else if (name == "_o_exit" || name == "_o__exit" || name == "_exit" || name == "exit" ||
@@ -476,6 +497,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::TerminateProcess;
     } else if (name == "GetModuleHandleW" || name == "GetModuleHandleA") {
         api = Api::GuestModuleHandle;
+    } else if (name == "LoadLibraryA" || name == "LoadLibraryW") {
+        api = Api::ModuleLoad;
     } else if (name == "GetModuleHandleExW") {
         api = Api::GetModuleHandleExW;
     } else if (name == "GetModuleFileNameW") {
@@ -557,7 +580,7 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
             "ResolveDelayLoadedAPI",
         };
         void *function = nullptr;
-        if (!unsafe_calls.contains(name)) {
+        if (guest_is_64_bit_ && !unsafe_calls.contains(name)) {
             if (const auto library = LoadLibraryA(module.c_str()); library != nullptr) {
                 if (name.starts_with('#')) {
                     const auto ordinal = static_cast<WORD>(std::stoul(name.substr(1)));
@@ -600,7 +623,20 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                             ", rdx=" + log::hex(cpu.reg(Rdx)) + ", r8=" + log::hex(cpu.reg(R8)) +
                             ", r9=" + log::hex(cpu.reg(R9)) + ")");
     }
-    const auto finish_call = [&] { cpu.set_rip(cpu.pop64()); };
+    const auto finish_call = [&](unsigned argument_count = 0) {
+        cpu.set_rip(cpu.pop64());
+        if (!guest_is_64_bit_ && argument_count != 0) {
+            cpu.set_reg(Rsp, (cpu.reg(Rsp) + argument_count * 4) & UINT32_MAX);
+        }
+    };
+    const auto argument = [&](unsigned index) {
+        if (!guest_is_64_bit_) {
+            return static_cast<std::uint64_t>(
+                cpu.memory().read32(cpu.reg(Rsp) + 4 + static_cast<std::uint64_t>(index) * 4));
+        }
+        constexpr Register argument_registers[] = {Rcx, Rdx, R8, R9};
+        return cpu.reg(argument_registers[index]);
+    };
     const auto allocate = [&](std::uint64_t requested_size) {
         const auto size = std::max<std::uint64_t>(requested_size, 1);
         const auto mapped_size = (size + 0xffff) & ~0xffffULL;
@@ -637,7 +673,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             handle = std::numeric_limits<std::uint64_t>::max();
         }
         cpu.set_reg(Rax, handle);
-        finish_call();
+        finish_call(1);
         break;
     }
     case Api::WriteFile: {
@@ -659,7 +695,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             }
             cpu.set_reg(Rax, 1);
         }
-        finish_call();
+        finish_call(5);
         break;
     }
     case Api::GetLastError:
@@ -667,8 +703,84 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call();
         break;
     case Api::SetLastError:
-        last_error_ = static_cast<std::uint32_t>(cpu.reg(Rcx));
+        last_error_ = static_cast<std::uint32_t>(argument(0));
+        finish_call(1);
+        break;
+    case Api::GetSystemTimeAsFileTime: {
+        FILETIME time{};
+        ::GetSystemTimeAsFileTime(&time);
+        cpu.memory().write32(argument(0), time.dwLowDateTime);
+        cpu.memory().write32(argument(0) + 4, time.dwHighDateTime);
+        finish_call(1);
+        break;
+    }
+    case Api::GetCurrentProcessId:
+        cpu.set_reg(Rax, ::GetCurrentProcessId());
         finish_call();
+        break;
+    case Api::GetCurrentThreadId:
+        cpu.set_reg(Rax, ::GetCurrentThreadId());
+        finish_call();
+        break;
+    case Api::StartupInfo: {
+        const auto destination = argument(0);
+        STARTUPINFOW native{};
+        native.cb = sizeof(native);
+        ::GetStartupInfoW(&native);
+        if (!guest_is_64_bit_) {
+            constexpr std::uint32_t guest_size = 68;
+            for (std::uint32_t offset = 0; offset < guest_size; offset += 4) {
+                cpu.memory().write32(destination + offset, 0);
+            }
+            cpu.memory().write32(destination, guest_size);
+            cpu.memory().write32(destination + 16, native.dwX);
+            cpu.memory().write32(destination + 20, native.dwY);
+            cpu.memory().write32(destination + 24, native.dwXSize);
+            cpu.memory().write32(destination + 28, native.dwYSize);
+            cpu.memory().write32(destination + 32, native.dwXCountChars);
+            cpu.memory().write32(destination + 36, native.dwYCountChars);
+            cpu.memory().write32(destination + 40, native.dwFillAttribute);
+            cpu.memory().write32(destination + 44, native.dwFlags);
+            cpu.memory().write16(destination + 48, native.wShowWindow);
+        } else {
+            constexpr std::uint32_t guest_size = 104;
+            for (std::uint32_t offset = 0; offset < guest_size; offset += 8) {
+                cpu.memory().write64(destination + offset, 0);
+            }
+            cpu.memory().write32(destination, guest_size);
+            cpu.memory().write32(destination + 32, native.dwX);
+            cpu.memory().write32(destination + 36, native.dwY);
+            cpu.memory().write32(destination + 40, native.dwXSize);
+            cpu.memory().write32(destination + 44, native.dwYSize);
+            cpu.memory().write32(destination + 48, native.dwXCountChars);
+            cpu.memory().write32(destination + 52, native.dwYCountChars);
+            cpu.memory().write32(destination + 56, native.dwFillAttribute);
+            cpu.memory().write32(destination + 60, native.dwFlags);
+            cpu.memory().write16(destination + 64, native.wShowWindow);
+        }
+        finish_call(1);
+        break;
+    }
+    case Api::CriticalSectionInitialize: {
+        const auto destination = argument(0);
+        const auto size = guest_is_64_bit_ ? 40U : 24U;
+        for (unsigned offset = 0; offset < size; offset += 4) {
+            cpu.memory().write32(destination + offset, 0);
+        }
+        cpu.memory().write32(destination + (guest_is_64_bit_ ? 8U : 4U), UINT32_MAX);
+        const bool returns_status = thunk_name.ends_with("InitializeCriticalSectionAndSpinCount");
+        if (returns_status) {
+            cpu.set_reg(Rax, 1);
+        }
+        finish_call(returns_status ? 2 : 1);
+        break;
+    }
+    case Api::CriticalSectionOperation:
+        finish_call(1);
+        break;
+    case Api::CriticalSectionTry:
+        cpu.set_reg(Rax, 1);
+        finish_call(1);
         break;
     case Api::OutputDebugStringA:
         log::info("guest", "OutputDebugStringA: " + cpu.memory().read_c_string(cpu.reg(Rcx)));
@@ -726,28 +838,28 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                                  ? ::QueryPerformanceCounter(&value)
                                  : ::QueryPerformanceFrequency(&value);
         if (success != FALSE) {
-            cpu.memory().write64(cpu.reg(Rcx), static_cast<std::uint64_t>(value.QuadPart));
+            cpu.memory().write64(argument(0), static_cast<std::uint64_t>(value.QuadPart));
         }
         cpu.set_reg(Rax, success != FALSE);
-        finish_call();
+        finish_call(1);
         break;
     }
     case Api::Sleep:
-        ::Sleep(static_cast<DWORD>(cpu.reg(Rcx)));
+        ::Sleep(static_cast<DWORD>(argument(0)));
         cpu.set_reg(Rax, 0);
-        finish_call();
+        finish_call(1);
         break;
     case Api::TimeGetTime:
         cpu.set_reg(Rax, ::timeGetTime());
         finish_call();
         break;
     case Api::TimeBeginPeriod:
-        cpu.set_reg(Rax, ::timeBeginPeriod(static_cast<UINT>(cpu.reg(Rcx))));
-        finish_call();
+        cpu.set_reg(Rax, ::timeBeginPeriod(static_cast<UINT>(argument(0))));
+        finish_call(1);
         break;
     case Api::TimeEndPeriod:
-        cpu.set_reg(Rax, ::timeEndPeriod(static_cast<UINT>(cpu.reg(Rcx))));
-        finish_call();
+        cpu.set_reg(Rax, ::timeEndPeriod(static_cast<UINT>(argument(0))));
+        finish_call(1);
         break;
     case Api::InitTerm:
     case Api::InitTermE: {
@@ -1150,24 +1262,24 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         const auto index = next_fls_index_++;
         fls_values_.emplace(index, 0);
         cpu.set_reg(Rax, index);
-        finish_call();
+        finish_call(1);
         break;
     }
     case Api::TlsFree:
     case Api::FlsFree: {
         auto &values = found->second == Api::TlsFree ? tls_values_ : fls_values_;
-        const auto erased = values.erase(static_cast<std::uint32_t>(cpu.reg(Rcx))) != 0;
+        const auto erased = values.erase(static_cast<std::uint32_t>(argument(0))) != 0;
         if (!erased) {
             last_error_ = ERROR_INVALID_PARAMETER;
         }
         cpu.set_reg(Rax, erased ? 1 : 0);
-        finish_call();
+        finish_call(1);
         break;
     }
     case Api::TlsGetValue:
     case Api::FlsGetValue: {
         auto &values = found->second == Api::TlsGetValue ? tls_values_ : fls_values_;
-        const auto value = values.find(static_cast<std::uint32_t>(cpu.reg(Rcx)));
+        const auto value = values.find(static_cast<std::uint32_t>(argument(0)));
         if (value == values.end()) {
             last_error_ = ERROR_INVALID_PARAMETER;
             cpu.set_reg(Rax, 0);
@@ -1175,21 +1287,21 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             last_error_ = ERROR_SUCCESS;
             cpu.set_reg(Rax, value->second);
         }
-        finish_call();
+        finish_call(1);
         break;
     }
     case Api::TlsSetValue:
     case Api::FlsSetValue: {
         auto &values = found->second == Api::TlsSetValue ? tls_values_ : fls_values_;
-        const auto value = values.find(static_cast<std::uint32_t>(cpu.reg(Rcx)));
+        const auto value = values.find(static_cast<std::uint32_t>(argument(0)));
         if (value == values.end()) {
             last_error_ = ERROR_INVALID_PARAMETER;
             cpu.set_reg(Rax, 0);
         } else {
-            value->second = cpu.reg(Rdx);
+            value->second = argument(1);
             cpu.set_reg(Rax, 1);
         }
-        finish_call();
+        finish_call(2);
         break;
     }
     case Api::InitOnceExecuteOnce: {
@@ -1212,20 +1324,20 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     }
     case Api::AllocateRcx:
-        cpu.set_reg(Rax, allocate(cpu.reg(Rcx)));
-        finish_call();
+        cpu.set_reg(Rax, allocate(argument(0)));
+        finish_call(1);
         break;
     case Api::AllocateRdx:
-        cpu.set_reg(Rax, allocate(cpu.reg(Rdx)));
-        finish_call();
+        cpu.set_reg(Rax, allocate(argument(1)));
+        finish_call(2);
         break;
     case Api::AllocateR8:
-        cpu.set_reg(Rax, allocate(cpu.reg(R8)));
-        finish_call();
+        cpu.set_reg(Rax, allocate(argument(2)));
+        finish_call(3);
         break;
     case Api::Reallocate: {
-        const auto old_address = cpu.reg(Rcx);
-        const auto new_size = cpu.reg(Rdx);
+        const auto old_address = argument(0);
+        const auto new_size = argument(1);
         const auto new_address = allocate(new_size);
         if (const auto old = heap_sizes_.find(old_address); old != heap_sizes_.end()) {
             const auto copy_size = static_cast<std::size_t>(std::min(old->second, new_size));
@@ -1233,47 +1345,85 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             cpu.memory().write(new_address, bytes);
         }
         cpu.set_reg(Rax, new_address);
-        finish_call();
+        finish_call(3);
         break;
     }
     case Api::FreeRcx:
         cpu.set_reg(Rax, 0);
-        finish_call();
+        finish_call(1);
         break;
     case Api::HeapFree:
         cpu.set_reg(Rax, 1);
-        finish_call();
+        finish_call(3);
+        break;
+    case Api::HeapDestroy:
+        cpu.set_reg(Rax, 1);
+        finish_call(1);
         break;
     case Api::AllocationSize: {
-        const auto allocation = heap_sizes_.find(cpu.reg(Rcx));
+        const auto allocation = heap_sizes_.find(argument(0));
         cpu.set_reg(Rax, allocation == heap_sizes_.end() ? 0 : allocation->second);
-        finish_call();
+        finish_call(1);
         break;
     }
     case Api::IdentityRcx:
-        cpu.set_reg(Rax, cpu.reg(Rcx));
-        finish_call();
+        cpu.set_reg(Rax, argument(0));
+        finish_call(1);
         break;
     case Api::ProcessHeap:
         cpu.set_reg(Rax, 1);
-        finish_call();
+        finish_call(thunk_name.ends_with("!HeapCreate") ? 3 : 0);
         break;
     case Api::ReturnOne:
         cpu.set_reg(Rax, 1);
         finish_call();
         break;
     case Api::GuestModuleHandle:
-        if (cpu.reg(Rcx) == 0) {
+        if (argument(0) == 0) {
             cpu.set_reg(Rax, guest_image_base_);
-        } else if (thunk_names_.at(cpu.rip()).ends_with("GetModuleHandleA")) {
-            cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(
-                                 ::GetModuleHandleA(reinterpret_cast<const char *>(cpu.reg(Rcx)))));
         } else {
-            cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(::GetModuleHandleW(
-                                 reinterpret_cast<const wchar_t *>(cpu.reg(Rcx)))));
+            const auto requested = thunk_name.ends_with("GetModuleHandleA")
+                                       ? cpu.memory().read_c_string(argument(0))
+                                       : narrow_string(cpu.memory().read_wide_string(argument(0)));
+            const auto filename = guest_executable_.filename().string();
+            if (lowercase(requested) == lowercase(filename)) {
+                cpu.set_reg(Rax, guest_image_base_);
+            } else {
+                const auto normalized = lowercase(requested);
+                const auto existing = std::find_if(
+                    guest_modules_.begin(), guest_modules_.end(),
+                    [&](const auto &entry) { return lowercase(entry.second) == normalized; });
+                if (existing != guest_modules_.end()) {
+                    cpu.set_reg(Rax, existing->first);
+                } else {
+                    const auto handle = next_module_handle_;
+                    next_module_handle_ += 0x1000;
+                    guest_modules_.emplace(handle, requested);
+                    cpu.set_reg(Rax, handle);
+                }
+            }
         }
-        finish_call();
+        finish_call(1);
         break;
+    case Api::ModuleLoad: {
+        const auto requested = thunk_name.ends_with("LoadLibraryA")
+                                   ? cpu.memory().read_c_string(argument(0))
+                                   : narrow_string(cpu.memory().read_wide_string(argument(0)));
+        const auto normalized = lowercase(requested);
+        const auto existing =
+            std::find_if(guest_modules_.begin(), guest_modules_.end(),
+                         [&](const auto &entry) { return lowercase(entry.second) == normalized; });
+        if (existing != guest_modules_.end()) {
+            cpu.set_reg(Rax, existing->first);
+        } else {
+            const auto handle = next_module_handle_;
+            next_module_handle_ += 0x1000;
+            guest_modules_.emplace(handle, requested);
+            cpu.set_reg(Rax, handle);
+        }
+        finish_call(1);
+        break;
+    }
     case Api::GetModuleHandleExW:
         if (cpu.reg(R8) != 0) {
             cpu.memory().write64(cpu.reg(R8), guest_image_base_);
@@ -1310,25 +1460,36 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     }
     case Api::GetProcAddress: {
-        const auto module = reinterpret_cast<HMODULE>(cpu.reg(Rcx));
+        const auto module_value = argument(0);
         std::string import_name;
-        if (cpu.reg(Rdx) <= 0xffff) {
-            import_name = "#" + std::to_string(cpu.reg(Rdx));
+        if (argument(1) <= 0xffff) {
+            import_name = "#" + std::to_string(argument(1));
         } else {
-            import_name = cpu.memory().read_c_string(cpu.reg(Rdx));
+            import_name = cpu.memory().read_c_string(argument(1));
         }
-        std::array<char, 32768> module_path{};
-        const auto length = ::GetModuleFileNameA(module, module_path.data(), module_path.size());
-        if (length == 0) {
-            cpu.set_reg(Rax, 0);
-        } else {
+        if (!guest_is_64_bit_) {
+            const auto module = guest_modules_.find(module_value);
             const auto module_name =
-                std::filesystem::path(std::string(module_path.data(), module_path.data() + length))
-                    .filename()
-                    .string();
-            cpu.set_reg(Rax, resolve_import(module_name, import_name));
+                module_value == guest_image_base_
+                    ? guest_executable_.filename().string()
+                    : (module == guest_modules_.end() ? std::string() : module->second);
+            cpu.set_reg(Rax, module_name.empty() ? 0 : resolve_import(module_name, import_name));
+        } else {
+            std::array<char, 32768> module_path{};
+            const auto length = ::GetModuleFileNameA(reinterpret_cast<HMODULE>(module_value),
+                                                     module_path.data(), module_path.size());
+            if (length == 0) {
+                cpu.set_reg(Rax, 0);
+            } else {
+                const auto module_name =
+                    std::filesystem::path(
+                        std::string(module_path.data(), module_path.data() + length))
+                        .filename()
+                        .string();
+                cpu.set_reg(Rax, resolve_import(module_name, import_name));
+            }
         }
-        finish_call();
+        finish_call(2);
         break;
     }
     case Api::LoadStringW: {
@@ -1817,24 +1978,38 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     thunks_.clear();
     thunk_names_.clear();
     native_functions_.clear();
-    thunks_.emplace(return_thunk, Api::ProcessReturn);
-    next_thunk_ = return_thunk + 0x100;
+    bool format_initialized = false;
+    const auto configure_format = [&](bool is_64_bit) {
+        if (!format_initialized) {
+            guest_is_64_bit_ = is_64_bit;
+            const auto return_thunk = is_64_bit ? return_thunk64 : return_thunk32;
+            thunks_.emplace(return_thunk, Api::ProcessReturn);
+            next_thunk_ = return_thunk + 0x100;
+            format_initialized = true;
+        } else if (guest_is_64_bit_ != is_64_bit) {
+            throw Error("PE architecture changed while resolving imports");
+        }
+    };
     data_import_next_ = 0;
     data_import_slots_.clear();
     last_error_ = 0;
     guest_exception_filter_ = 0;
     heap_next_ = 0x0000'0006'0000'0000ULL;
     heap_sizes_.clear();
+    next_module_handle_ = 0x7fe0'0000ULL;
+    guest_modules_.clear();
     protection_policy_proxy_ = 0;
     protection_policy_methods_.clear();
     next_tls_index_ = 1;
     next_fls_index_ = 1;
     tls_values_.clear();
     fls_values_.clear();
-    const auto image =
-        PeLoader::load(executable, memory, [&](const auto &module, const auto &name) {
-            return resolve_import(module, name);
-        });
+    const auto image = PeLoader::load(executable, memory,
+                                      [&](const auto &module, const auto &name, bool is_64_bit) {
+                                          configure_format(is_64_bit);
+                                          return resolve_import(module, name);
+                                      });
+    configure_format(image.is_64_bit);
     guest_image_base_ = image.base;
     guest_executable_ = std::filesystem::absolute(executable);
     if (resource_module_ != nullptr) {
@@ -1859,8 +2034,14 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     memory.map_existing(
         0x7ffe0000ULL, 0x1000, Read, "kuser shared data",
         reinterpret_cast<std::uint8_t *>(static_cast<std::uintptr_t>(0x7ffe0000ULL)));
-    const auto initial_rsp = stack_base + stack_size - 0x1000 - 8;
-    memory.write64(initial_rsp, return_thunk);
+    const auto stack_entry_size = image.is_64_bit ? 8U : 4U;
+    const auto initial_rsp = stack_base + stack_size - 0x1000 - stack_entry_size;
+    const auto return_thunk = image.is_64_bit ? return_thunk64 : return_thunk32;
+    if (image.is_64_bit) {
+        memory.write64(initial_rsp, return_thunk);
+    } else {
+        memory.write32(initial_rsp, static_cast<std::uint32_t>(return_thunk));
+    }
     memory.write64(teb_base + 0x08, stack_base + stack_size);
     memory.write64(teb_base + 0x10, stack_base);
     memory.write64(teb_base + 0x30, teb_base);
@@ -1949,8 +2130,12 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     log::info("runtime", "guest command line: " + narrow_string(full_command_line));
 
     Cpu cpu(memory);
-    cpu.reset(image.entry, initial_rsp);
-    cpu.set_gs_base(teb_base);
+    cpu.reset(image.entry, initial_rsp, image.is_64_bit);
+    if (image.is_64_bit) {
+        cpu.set_gs_base(teb_base);
+    } else {
+        cpu.set_fs_base(teb_base);
+    }
     std::uint32_t exit_code = 0;
     bool exited = false;
     active_runtime = this;
