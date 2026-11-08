@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace winemu {
@@ -78,8 +79,13 @@ class Memory {
                                            std::uint8_t permission) const;
     [[nodiscard]] Region &region_for(std::uint64_t address, std::uint64_t size,
                                      std::uint8_t permission);
+    // Regions never overlap, so the last region found for a page is a strong cache candidate.
+    // Entries are verified against the full access range before use and fall back to a scan,
+    // which keeps the cache correct even when several small regions share one page.
+    static constexpr std::uint64_t region_page_shift = 12;
     std::vector<Region> regions_;
     std::vector<Allocation> allocations_;
+    mutable std::unordered_map<std::uint64_t, std::size_t> region_cache_;
 };
 
 } // namespace winemu

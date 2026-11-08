@@ -1513,10 +1513,11 @@ void Cpu::step() {
     case 0xa5: {
         const auto element_width = opcode == 0xa4 ? 8U : width;
         const auto element_size = element_width / 8;
-        auto count = repeat_prefix != 0 ? registers_[Rcx] : 1ULL;
+        const auto address_mask = address32_ ? UINT32_MAX : UINT64_MAX;
+        auto count = repeat_prefix != 0 ? registers_[Rcx] & address_mask : 1ULL;
         const auto step = (flags_ & flag_df) != 0 ? -static_cast<std::int64_t>(element_size)
                                                   : static_cast<std::int64_t>(element_size);
-        while (count-- != 0) {
+        while (count != 0) {
             const auto value = element_width == 8    ? memory_.read8(registers_[Rsi])
                                : element_width == 16 ? memory_.read16(registers_[Rsi])
                                : element_width == 32 ? memory_.read32(registers_[Rsi])
@@ -1530,11 +1531,12 @@ void Cpu::step() {
             } else {
                 memory_.write64(registers_[Rdi], value);
             }
-            registers_[Rsi] += step;
-            registers_[Rdi] += step;
+            registers_[Rsi] = (registers_[Rsi] + step) & address_mask;
+            registers_[Rdi] = (registers_[Rdi] + step) & address_mask;
+            --count;
         }
         if (repeat_prefix != 0) {
-            registers_[Rcx] = 0;
+            registers_[Rcx] = count & address_mask;
         }
         return;
     }
@@ -1542,11 +1544,12 @@ void Cpu::step() {
     case 0xab: {
         const auto element_width = opcode == 0xaa ? 8U : width;
         const auto element_size = element_width / 8;
-        auto count = repeat_prefix != 0 ? registers_[Rcx] : 1ULL;
+        const auto address_mask = address32_ ? UINT32_MAX : UINT64_MAX;
+        auto count = repeat_prefix != 0 ? registers_[Rcx] & address_mask : 1ULL;
         const auto step = (flags_ & flag_df) != 0 ? -static_cast<std::int64_t>(element_size)
                                                   : static_cast<std::int64_t>(element_size);
         const auto value = read_register(Rax, element_width);
-        while (count-- != 0) {
+        while (count != 0) {
             if (element_width == 8) {
                 memory_.write8(registers_[Rdi], static_cast<std::uint8_t>(value));
             } else if (element_width == 16) {
@@ -1556,10 +1559,39 @@ void Cpu::step() {
             } else {
                 memory_.write64(registers_[Rdi], value);
             }
-            registers_[Rdi] += step;
+            registers_[Rdi] = (registers_[Rdi] + step) & address_mask;
+            --count;
         }
         if (repeat_prefix != 0) {
-            registers_[Rcx] = 0;
+            registers_[Rcx] = count & address_mask;
+        }
+        return;
+    }
+    case 0xae:
+    case 0xaf: {
+        const auto element_width = opcode == 0xae ? 8U : width;
+        const auto element_size = element_width / 8;
+        const auto address_mask = address32_ ? UINT32_MAX : UINT64_MAX;
+        auto count = repeat_prefix != 0 ? registers_[Rcx] & address_mask : 1ULL;
+        const auto step = (flags_ & flag_df) != 0 ? -static_cast<std::int64_t>(element_size)
+                                                  : static_cast<std::int64_t>(element_size);
+        const auto accumulator = read_register(Rax, element_width);
+        while (count != 0) {
+            const auto address = registers_[Rdi] & address_mask;
+            const auto value = element_width == 8    ? memory_.read8(address)
+                               : element_width == 16 ? memory_.read16(address)
+                               : element_width == 32 ? memory_.read32(address)
+                                                     : memory_.read64(address);
+            set_sub_flags(accumulator, value, accumulator - value, element_width);
+            registers_[Rdi] = (registers_[Rdi] + step) & address_mask;
+            --count;
+            if (repeat_prefix == 0 || (repeat_prefix == 0xf3 && (flags_ & flag_zf) == 0) ||
+                (repeat_prefix == 0xf2 && (flags_ & flag_zf) != 0)) {
+                break;
+            }
+        }
+        if (repeat_prefix != 0) {
+            registers_[Rcx] = count & address_mask;
         }
         return;
     }
@@ -2293,6 +2325,13 @@ void Cpu::step() {
             } else {
                 write_operand(decoded.rm, move_width, xmm_[decoded.reg][0]);
             }
+            return;
+        }
+        if (second == 0x7e && repeat_prefix == 0xf3) { // MOVQ xmm, xmm/m64
+            const auto decoded = decode_rm(rex);
+            xmm_[decoded.reg] = {decoded.rm.is_register ? xmm_[decoded.rm.register_index][0]
+                                                        : memory_.read64(decoded.rm.address),
+                                 0};
             return;
         }
         if (second == 0xd6 && operand16) { // MOVQ xmm/m64, xmm

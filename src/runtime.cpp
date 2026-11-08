@@ -384,6 +384,9 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GuestCreateFile;
     } else if (kernel_module && name == "ReadFile") {
         api = Api::GuestReadFile;
+    } else if (kernel_module &&
+               (name == "SetFilePointer" || name == "GetFileSize" || name == "SetEndOfFile")) {
+        api = Api::GuestFilePosition;
     } else if (kernel_module && name == "WriteFile") {
         api = Api::WriteFile;
     } else if (kernel_module && name == "CloseHandle") {
@@ -446,6 +449,10 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GdiplusStartup;
     } else if (name == "GdiplusShutdown") {
         api = Api::GdiplusShutdown;
+    } else if (name == "SteamAPI_RestartAppIfNecessary") {
+        api = Api::SteamRestartApp;
+    } else if (name == "SteamAPI_Init" || name == "SteamAPI_InitSafe") {
+        api = Api::SteamInitialize;
     } else if (kernel_module && name == "OutputDebugStringA") {
         api = Api::OutputDebugStringA;
     } else if (kernel_module && name == "Beep") {
@@ -521,6 +528,16 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::EnvironmentStringsA;
     } else if (name == "GetEnvironmentVariableA" || name == "GetEnvironmentVariableW") {
         api = Api::EnvironmentVariable;
+    } else if (name == "ExpandEnvironmentStringsA" || name == "ExpandEnvironmentStringsW") {
+        api = Api::EnvironmentExpansion;
+    } else if (name == "GetFullPathNameA" || name == "GetFullPathNameW") {
+        api = Api::FullPathName;
+    } else if (name == "GetCurrentDirectoryA" || name == "GetCurrentDirectoryW" ||
+               name == "SetCurrentDirectoryA" || name == "SetCurrentDirectoryW") {
+        api = Api::CurrentDirectory;
+    } else if (name == "GetFileAttributesA" || name == "GetFileAttributesW" ||
+               name == "SetFileAttributesA" || name == "SetFileAttributesW") {
+        api = Api::FileAttributes;
     } else if (name == "FreeEnvironmentStringsW" || name == "FreeEnvironmentStringsA") {
         api = Api::ReturnOne;
     } else if (name == "_o__get_wide_winmain_command_line") {
@@ -594,6 +611,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GuestModuleHandle;
     } else if (name == "LoadLibraryA" || name == "LoadLibraryW") {
         api = Api::ModuleLoad;
+    } else if (name == "FreeLibrary") {
+        api = Api::ModuleFree;
     } else if (name == "FindFirstFileA" || name == "FindFirstFileW") {
         api = Api::GuestFindFirstFile;
     } else if (name == "FindNextFileA" || name == "FindNextFileW") {
@@ -786,11 +805,19 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     case Api::GuestFileType: {
         const auto handle = argument(0);
-        const bool known = handle >= 0x100 && handle <= 0x102;
-        if (!known) {
+        std::uint32_t type = FILE_TYPE_UNKNOWN;
+        if (handle >= 0x100 && handle <= 0x102) {
+            type = FILE_TYPE_CHAR;
+        } else if (const auto found = file_handles_.find(handle); found != file_handles_.end()) {
+            ::SetLastError(ERROR_SUCCESS);
+            type = ::GetFileType(static_cast<HANDLE>(found->second));
+            if (type == FILE_TYPE_UNKNOWN) {
+                last_error_ = ::GetLastError();
+            }
+        } else {
             last_error_ = ERROR_INVALID_HANDLE;
         }
-        cpu.set_reg(Rax, known ? FILE_TYPE_CHAR : FILE_TYPE_UNKNOWN);
+        cpu.set_reg(Rax, type);
         finish_call(1);
         break;
     }
@@ -854,6 +881,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         const bool ansi = thunk_name.ends_with("CreateFileA");
         const auto path = ansi ? std::filesystem::path(cpu.memory().read_c_string(argument(0)))
                                : std::filesystem::path(cpu.memory().read_wide_string(argument(0)));
+        log::api("file", "CreateFile path='" + narrow_string(path.wstring()) + "'");
         HANDLE template_handle = nullptr;
         if (const auto found = file_handles_.find(argument(6)); found != file_handles_.end()) {
             template_handle = static_cast<HANDLE>(found->second);
@@ -891,6 +919,67 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         cpu.set_reg(Rax, result ? 1 : 0);
         finish_call(5);
+        break;
+    }
+    case Api::GuestFilePosition: {
+        const auto found = file_handles_.find(argument(0));
+        if (found == file_handles_.end()) {
+            last_error_ = ERROR_INVALID_HANDLE;
+            cpu.set_reg(Rax, thunk_name.ends_with("!SetEndOfFile") ? 0 : UINT32_MAX);
+            finish_call(thunk_name.ends_with("!SetFilePointer")
+                            ? 4
+                            : (thunk_name.ends_with("!SetEndOfFile") ? 1 : 2));
+            break;
+        }
+        const auto host_handle = static_cast<HANDLE>(found->second);
+        if (thunk_name.ends_with("!SetEndOfFile")) {
+            const auto result = ::SetEndOfFile(host_handle);
+            if (result == FALSE) {
+                last_error_ = ::GetLastError();
+            }
+            cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+            finish_call(1);
+            break;
+        }
+        if (thunk_name.ends_with("!GetFileSize")) {
+            LARGE_INTEGER size{};
+            if (::GetFileSizeEx(host_handle, &size) == FALSE) {
+                last_error_ = ::GetLastError();
+                cpu.set_reg(Rax, UINT32_MAX);
+            } else {
+                if (argument(1) != 0) {
+                    cpu.memory().write32(argument(1),
+                                         static_cast<std::uint32_t>(size.QuadPart >> 32));
+                }
+                cpu.set_reg(Rax, static_cast<std::uint32_t>(size.QuadPart));
+            }
+            finish_call(2);
+            break;
+        }
+        const auto high_pointer = argument(2);
+        const auto low = static_cast<std::uint32_t>(argument(1));
+        std::uint64_t distance_bits = low;
+        if (high_pointer != 0) {
+            distance_bits |= static_cast<std::uint64_t>(cpu.memory().read32(high_pointer)) << 32;
+        } else if ((low & 0x80000000U) != 0) {
+            distance_bits |= 0xffffffff00000000ULL;
+        }
+        LARGE_INTEGER distance{};
+        distance.QuadPart = static_cast<std::int64_t>(distance_bits);
+        LARGE_INTEGER position{};
+        const auto result =
+            ::SetFilePointerEx(host_handle, distance, &position, static_cast<DWORD>(argument(3)));
+        if (result == FALSE) {
+            last_error_ = ::GetLastError();
+            cpu.set_reg(Rax, UINT32_MAX);
+        } else {
+            if (high_pointer != 0) {
+                cpu.memory().write32(high_pointer,
+                                     static_cast<std::uint32_t>(position.QuadPart >> 32));
+            }
+            cpu.set_reg(Rax, static_cast<std::uint32_t>(position.QuadPart));
+        }
+        finish_call(4);
         break;
     }
     case Api::GuestCloseHandle: {
@@ -1308,13 +1397,32 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         break;
     }
-    case Api::GuestFileDialog:
+    case Api::GuestFileDialog: {
         // Treat an unavailable interactive host dialog as a user cancellation. The Win32
         // contract distinguishes this from an error by returning zero here and from
         // CommDlgExtendedError, while keeping guest-owned pointers and hooks off the host.
+        if (!thunk_name.ends_with("!CommDlgExtendedError") && argument(0) != 0) {
+            const auto structure = argument(0);
+            const bool wide = thunk_name.ends_with("W");
+            const auto read_dialog_string = [&](std::uint32_t offset32, std::uint32_t offset64) {
+                const auto pointer = guest_is_64_bit_ ? cpu.memory().read64(structure + offset64)
+                                                      : cpu.memory().read32(structure + offset32);
+                if (pointer == 0) {
+                    return std::string{};
+                }
+                return wide ? narrow_string(cpu.memory().read_wide_string(pointer))
+                            : cpu.memory().read_c_string(pointer);
+            };
+            log::api("dialog",
+                     "file='" + read_dialog_string(28, 48) + "' initial-dir='" +
+                         read_dialog_string(44, 80) + "' title='" + read_dialog_string(48, 88) +
+                         "' flags=" +
+                         log::hex(cpu.memory().read32(structure + (guest_is_64_bit_ ? 96 : 52))));
+        }
         cpu.set_reg(Rax, 0);
         finish_call(thunk_name.ends_with("!CommDlgExtendedError") ? 0 : 1);
         break;
+    }
     case Api::CommonControlsInitialize: {
         struct CommonControls {
             DWORD size;
@@ -1381,6 +1489,18 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             host_gdiplus_token_ = 0;
         }
         finish_call(1);
+        break;
+    case Api::SteamRestartApp:
+        // CPUEmu cannot safely hand the guest process to the native Steam client. Reporting that
+        // no restart is required is Steamworks' documented offline-friendly continuation path.
+        cpu.set_reg(Rax, 0);
+        finish_call();
+        break;
+    case Api::SteamInitialize:
+        // Report offline initialization failure instead of loading native Steamworks objects,
+        // which retain callbacks and return host-owned interface pointers.
+        cpu.set_reg(Rax, 0);
+        finish_call();
         break;
     case Api::OutputDebugStringA:
         log::info("guest", "OutputDebugStringA: " + cpu.memory().read_c_string(cpu.reg(Rcx)));
@@ -1951,6 +2071,162 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(3);
         break;
     }
+    case Api::EnvironmentExpansion: {
+        const bool wide = thunk_name.ends_with("W");
+        const auto capacity = static_cast<DWORD>(argument(2));
+        DWORD result = 0;
+        if (wide) {
+            const auto source = cpu.memory().read_wide_string(argument(0));
+            std::vector<wchar_t> buffer(std::max<DWORD>(capacity, 1));
+            result = ::ExpandEnvironmentStringsW(source.c_str(),
+                                                 capacity == 0 ? nullptr : buffer.data(), capacity);
+            if (result != 0 && result <= capacity) {
+                cpu.memory().write(argument(1),
+                                   std::span<const std::uint8_t>(
+                                       reinterpret_cast<const std::uint8_t *>(buffer.data()),
+                                       static_cast<std::size_t>(result) * sizeof(wchar_t)));
+            }
+        } else {
+            const auto source = cpu.memory().read_c_string(argument(0));
+            std::vector<char> buffer(std::max<DWORD>(capacity, 1));
+            result = ::ExpandEnvironmentStringsA(source.c_str(),
+                                                 capacity == 0 ? nullptr : buffer.data(), capacity);
+            if (result != 0 && result <= capacity) {
+                cpu.memory().write(
+                    argument(1),
+                    std::span<const std::uint8_t>(
+                        reinterpret_cast<const std::uint8_t *>(buffer.data()), result));
+            }
+        }
+        if (result == 0) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(3);
+        break;
+    }
+    case Api::FullPathName: {
+        const bool wide = thunk_name.ends_with("W");
+        const auto capacity = static_cast<DWORD>(argument(1));
+        const auto destination = argument(2);
+        DWORD result = 0;
+        std::size_t file_part_offset = 0;
+        bool has_file_part = false;
+        if (wide) {
+            const auto input = cpu.memory().read_wide_string(argument(0));
+            std::vector<wchar_t> buffer(std::max<DWORD>(capacity, 1));
+            wchar_t *file_part = nullptr;
+            result = ::GetFullPathNameW(input.c_str(), capacity,
+                                        capacity == 0 ? nullptr : buffer.data(), &file_part);
+            if (result != 0 && result < capacity) {
+                cpu.memory().write(destination,
+                                   std::span<const std::uint8_t>(
+                                       reinterpret_cast<const std::uint8_t *>(buffer.data()),
+                                       (static_cast<std::size_t>(result) + 1) * sizeof(wchar_t)));
+                if (file_part != nullptr) {
+                    file_part_offset = static_cast<std::size_t>(file_part - buffer.data()) * 2;
+                    has_file_part = true;
+                }
+            }
+        } else {
+            const auto input = cpu.memory().read_c_string(argument(0));
+            std::vector<char> buffer(std::max<DWORD>(capacity, 1));
+            char *file_part = nullptr;
+            result = ::GetFullPathNameA(input.c_str(), capacity,
+                                        capacity == 0 ? nullptr : buffer.data(), &file_part);
+            if (result != 0 && result < capacity) {
+                cpu.memory().write(
+                    destination,
+                    std::span<const std::uint8_t>(
+                        reinterpret_cast<const std::uint8_t *>(buffer.data()), result + 1));
+                if (file_part != nullptr) {
+                    file_part_offset = static_cast<std::size_t>(file_part - buffer.data());
+                    has_file_part = true;
+                }
+            }
+        }
+        if (result == 0) {
+            last_error_ = ::GetLastError();
+        }
+        if (argument(3) != 0 && result != 0 && result < capacity) {
+            const auto guest_file_part = has_file_part ? destination + file_part_offset : 0;
+            if (guest_is_64_bit_) {
+                cpu.memory().write64(argument(3), guest_file_part);
+            } else {
+                cpu.memory().write32(argument(3), static_cast<std::uint32_t>(guest_file_part));
+            }
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(4);
+        break;
+    }
+    case Api::CurrentDirectory: {
+        const bool get = thunk_name.find("!GetCurrentDirectory") != std::string::npos;
+        const bool wide = thunk_name.ends_with("W");
+        if (!get) {
+            const auto result =
+                wide ? ::SetCurrentDirectoryW(cpu.memory().read_wide_string(argument(0)).c_str())
+                     : ::SetCurrentDirectoryA(cpu.memory().read_c_string(argument(0)).c_str());
+            if (result == FALSE) {
+                last_error_ = ::GetLastError();
+            }
+            cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+            finish_call(1);
+            break;
+        }
+        const auto capacity = static_cast<DWORD>(argument(0));
+        DWORD result = 0;
+        if (wide) {
+            std::vector<wchar_t> buffer(std::max<DWORD>(capacity, 1));
+            result = ::GetCurrentDirectoryW(capacity, capacity == 0 ? nullptr : buffer.data());
+            if (result != 0 && result < capacity) {
+                cpu.memory().write(argument(1),
+                                   std::span<const std::uint8_t>(
+                                       reinterpret_cast<const std::uint8_t *>(buffer.data()),
+                                       (static_cast<std::size_t>(result) + 1) * sizeof(wchar_t)));
+            }
+        } else {
+            std::vector<char> buffer(std::max<DWORD>(capacity, 1));
+            result = ::GetCurrentDirectoryA(capacity, capacity == 0 ? nullptr : buffer.data());
+            if (result != 0 && result < capacity) {
+                cpu.memory().write(
+                    argument(1),
+                    std::span<const std::uint8_t>(
+                        reinterpret_cast<const std::uint8_t *>(buffer.data()), result + 1));
+            }
+        }
+        if (result == 0) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(2);
+        break;
+    }
+    case Api::FileAttributes: {
+        const bool get = thunk_name.find("!GetFileAttributes") != std::string::npos;
+        const bool wide = thunk_name.ends_with("W");
+        const auto ansi_path = wide ? std::string{} : cpu.memory().read_c_string(argument(0));
+        const auto wide_path = wide ? cpu.memory().read_wide_string(argument(0)) : std::wstring{};
+        if (get) {
+            const auto result = wide ? ::GetFileAttributesW(wide_path.c_str())
+                                     : ::GetFileAttributesA(ansi_path.c_str());
+            if (result == INVALID_FILE_ATTRIBUTES) {
+                last_error_ = ::GetLastError();
+            }
+            cpu.set_reg(Rax, result);
+            finish_call(1);
+        } else {
+            const auto attributes = static_cast<DWORD>(argument(1));
+            const auto result = wide ? ::SetFileAttributesW(wide_path.c_str(), attributes)
+                                     : ::SetFileAttributesA(ansi_path.c_str(), attributes);
+            if (result == FALSE) {
+                last_error_ = ::GetLastError();
+            }
+            cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+            finish_call(2);
+        }
+        break;
+    }
     case Api::EventRegister:
         if (cpu.reg(R9) != 0) {
             cpu.memory().write64(cpu.reg(R9), 1);
@@ -2265,6 +2541,19 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             guest_modules_.emplace(handle, requested);
             cpu.set_reg(Rax, handle);
         }
+        finish_call(1);
+        break;
+    }
+    case Api::ModuleFree: {
+        const auto handle = argument(0);
+        const auto loaded = guest_modules_.find(handle);
+        const bool result = loaded != guest_modules_.end();
+        if (result) {
+            guest_modules_.erase(loaded);
+        } else {
+            last_error_ = ERROR_INVALID_HANDLE;
+        }
+        cpu.set_reg(Rax, result ? 1 : 0);
         finish_call(1);
         break;
     }

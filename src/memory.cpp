@@ -160,6 +160,7 @@ void Memory::remove_mappings(std::uint64_t base, std::uint64_t size) {
         }
     }
     regions_ = std::move(replacement);
+    region_cache_.clear();
 }
 
 void Memory::commit(std::uint64_t base, std::uint64_t size, std::uint8_t permissions,
@@ -246,6 +247,7 @@ bool Memory::protect(std::uint64_t base, std::uint64_t size, std::uint8_t permis
         }
     }
     regions_.insert(regions_.end(), additions.begin(), additions.end());
+    region_cache_.clear();
     return true;
 }
 
@@ -305,8 +307,20 @@ bool Memory::contains(std::uint64_t address, std::uint64_t size) const {
 
 const Memory::Region &Memory::region_for(std::uint64_t address, std::uint64_t size,
                                          std::uint8_t permission) const {
-    for (const auto &region : regions_) {
+    const auto page = address >> region_page_shift;
+    if (const auto cached = region_cache_.find(page); cached != region_cache_.end()) {
+        const Region &region = regions_[cached->second];
         if (range_fits(region.base, region.size, address, size)) {
+            if ((region.permissions & permission) != permission) {
+                throw Error("memory protection violation at " + hex_address(address));
+            }
+            return region;
+        }
+    }
+    for (std::size_t index = 0; index < regions_.size(); ++index) {
+        const Region &region = regions_[index];
+        if (range_fits(region.base, region.size, address, size)) {
+            region_cache_[page] = index;
             if ((region.permissions & permission) != permission) {
                 throw Error("memory protection violation at " + hex_address(address));
             }

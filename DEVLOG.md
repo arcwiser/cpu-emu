@@ -4,6 +4,31 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-08 — Undertale game-data and offline Steam startup
+
+- Corrected guest file-type reporting so the CRT accepts mapped disk handles instead of rejecting
+  `data.win` with `ERROR_INVALID_HANDLE`; this removed the runner's fallback file-picker path.
+- Added guest-safe full/current-path, file-attribute, seek/size/end-of-file, environment expansion,
+  module unloading, and offline Steam restart/initialization behavior.
+- Added `SCASB/W/D/Q` repeat and direction semantics, corrected address-width handling in existing
+  string moves/stores, and added the SSE2 `F3 0F 7E` `MOVQ` load form with regressions.
+- Undertale now parses `data.win`, probes `options.ini` and config/save paths, takes the offline
+  Steam fallback, and reaches the 15,000,000-instruction limit without an unsupported operation.
+
+## 2026-11-08 — Guest page-indexed memory lookup
+
+- Replaced the per-access linear scan of guest regions in `Memory::region_for` with a verified
+  page-index cache. Regions never overlap, so a cached region is accepted only when it covers the
+  full access, otherwise the code falls back to a scan and refreshes the entry; mutations that
+  reorder or resize regions (`remove_mappings`, `protect`) clear the cache.
+- This removes the dominant cost of the growing guest heap, where every heap allocation added a
+  region and every byte access rescanned them all. The Undertale probe now executes 6,000,000
+  instructions in ~6.6 seconds instead of ~317 seconds (about 48x) with an identical final CPU
+  state.
+- Added a regression covering two same-page fragments and cache invalidation after `protect`.
+- With the faster core the probe exposed `KERNEL32.dll!ExpandEnvironmentStringsW`, which is now
+  implemented and no longer blocks Undertale startup.
+
 ## 2026-11-08 — Undertale runner and message-loop bring-up
 
 - Corrected x86 stdcall argument handling for module filenames and generic return adapters, then

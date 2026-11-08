@@ -11,7 +11,7 @@ documented probe point under interpreted execution; it does not imply that every
 | `hello.exe` fixture | Supported | Imports resolve and console output passes through `GetStdHandle`/`WriteFile` | Test fixture only |
 | CPUEmu Paint fixture | Supported smoke test | Interactive GDI path starts; `--selftest` draws and reports success | Intended as a compatibility probe, not a full paint program |
 | Windows 11 Notepad | Partially supported | Main image loads, basic window/editor UI starts, resources load, and the message loop runs | No guest threads, broad COM support, exceptions, or complete Windows API surface |
-| Undertale (Windows, PE32) | Bring-up in progress | Fixed-base image loads, all 313 imports resolve, discovers assets, initializes GDI+, enters the message-pump path, and exits cleanly after 2,957,604 interpreted instructions | The current headless file-dialog cancellation path leads the runner to exit with code 1 before window creation; Direct3D 9, streaming audio, and Steamworks remain |
+| Undertale (Windows, PE32) | Bring-up in progress | Fixed-base image loads, all 313 imports resolve, parses `data.win`, probes configuration/save paths, and continues through the offline Steam fallback for at least 15,000,000 interpreted instructions | Window creation has not been reached yet; Direct3D 9, streaming audio, and full Steamworks interfaces remain |
 | Discord / Chromium | Not usable | Loads the installed x64 image and advances through more than 2.6 million V8 startup instructions | Blocked by guest threads/processes, DLL loading, exceptions, mapped sections, and broader SIMD support |
 
 ## Audio status

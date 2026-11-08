@@ -39,6 +39,25 @@ void test_memory() {
     const std::uint8_t wide_text[] = {'C', 0, 'P', 0, 'U', 0, 0, 0};
     memory.write(0x200000200ULL, wide_text);
     require(memory.read_wide_string(0x200000200ULL) == L"CPU", "wide string round trip");
+
+    // Two small regions that share one lookup page must both stay reachable through the
+    // region cache, and re-protecting a page must invalidate stale cache entries.
+    memory.map(0x210000400ULL, 0x10, winemu::Read | winemu::Write, "low fragment");
+    memory.map(0x210000800ULL, 0x10, winemu::Read | winemu::Write, "high fragment");
+    memory.write32(0x210000400ULL, 0x11111111U);
+    memory.write32(0x210000800ULL, 0x22222222U);
+    require(memory.read32(0x210000400ULL) == 0x11111111U, "same-page fragment A");
+    require(memory.read32(0x210000800ULL) == 0x22222222U, "same-page fragment B");
+    require(memory.read32(0x210000400ULL) == 0x11111111U, "same-page fragment A re-read");
+    require(memory.protect(0x210000800ULL, 0x10, winemu::Read), "protect fragment B read-only");
+    bool write_rejected = false;
+    try {
+        memory.write32(0x210000800ULL, 0x33333333U);
+    } catch (const winemu::Error &) {
+        write_rejected = true;
+    }
+    require(write_rejected, "protect must invalidate the region cache for that page");
+    require(memory.read32(0x210000800ULL) == 0x22222222U, "protected fragment stays readable");
 }
 
 void test_cpu_loop() {
@@ -98,6 +117,13 @@ void test_cpu_32bit_mode() {
         0xdd, 0x1d, 0x68, 0x01, 0x00, 0x10,       // fstp qword ptr [10000168h]
         0xd9, 0xe8,                               // fld1
         0xdd, 0x1d, 0x70, 0x01, 0x00, 0x10,       // fstp qword ptr [10000170h]
+        0xbf, 0x80, 0x01, 0x00, 0x10,             // mov edi, 10000180h
+        0xb9, 0x04, 0x00, 0x00, 0x00,             // mov ecx, 4
+        0x31, 0xc0,                               // xor eax, eax
+        0xf2, 0xae,                               // repne scasb
+        0x89, 0x3d, 0x78, 0x01, 0x00, 0x10,       // mov [10000178h], edi
+        0x89, 0x0d, 0x7c, 0x01, 0x00, 0x10,       // mov [1000017ch], ecx
+        0xb9, 0x2a, 0x00, 0x00, 0x00,             // restore ecx result
         0xdf, 0xe0, 0x9f, 0x9e,                   // fnstsw ax; lahf; sahf
         0xb8, 0x2a, 0x00, 0x00, 0x00,             // restore eax result
         0xc3,
@@ -110,6 +136,7 @@ void test_cpu_32bit_mode() {
     memory.write64(code_address + 0x128, std::bit_cast<std::uint64_t>(2.5));
     memory.write32(code_address + 0x138, std::bit_cast<std::uint32_t>(1.5f));
     memory.write32(code_address + 0x150, 0);
+    memory.write(code_address + 0x180, std::array<std::uint8_t, 4>{'a', 'b', 0, 'c'});
     memory.write32(stack_address + 0xffc, 0xdeadbeef);
     winemu::Cpu cpu(memory);
     cpu.reset(code_address, stack_address + 0xffc, false);
@@ -133,6 +160,9 @@ void test_cpu_32bit_mode() {
     require(memory.read64(code_address + 0x160) == 0, "x87 FSIN");
     require(memory.read64(code_address + 0x168) == 0, "x87 FLDZ");
     require(memory.read64(code_address + 0x170) == std::bit_cast<std::uint64_t>(1.0), "x87 FLD1");
+    require(memory.read32(code_address + 0x178) == code_address + 0x183,
+            "REPNE SCASB destination advance");
+    require(memory.read32(code_address + 0x17c) == 1, "REPNE SCASB remaining count");
 }
 
 void test_pshufd() {
@@ -153,11 +183,14 @@ void test_pshufd() {
         0xf2, 0x0f, 0x11, 0x47, 0x28,                               // movsd [rdi+28h], xmm0
         0xf2, 0x0f, 0x5a, 0xc0,                                     // cvtsd2ss xmm0, xmm0
         0xf3, 0x0f, 0x11, 0x47, 0x30,                               // movss [rdi+30h], xmm0
+        0xf3, 0x0f, 0x7e, 0x47, 0x38,                               // movq xmm0, [rdi+38h]
+        0xf3, 0x0f, 0x7f, 0x47, 0x40,                               // movdqu [rdi+40h], xmm0
         0xc3,
     };
     memory.write(0x200000000ULL, code);
     memory.write64(0x300000ff8ULL, 0xdeadbeef);
     memory.write32(0x300000120ULL, std::bit_cast<std::uint32_t>(1.5f));
+    memory.write64(0x300000138ULL, 0x0123456789abcdefULL);
     winemu::Cpu cpu(memory);
     cpu.reset(0x200000000ULL, 0x300000ff8ULL);
     cpu.set_reg(winemu::Rdi, 0x300000100ULL);
@@ -171,6 +204,9 @@ void test_pshufd() {
             "CVTSS2SD scalar conversion");
     require(memory.read32(0x300000130ULL) == std::bit_cast<std::uint32_t>(1.5f),
             "CVTSD2SS scalar conversion");
+    require(memory.read64(0x300000140ULL) == 0x0123456789abcdefULL,
+            "MOVQ XMM memory load low half");
+    require(memory.read64(0x300000148ULL) == 0, "MOVQ XMM memory load clears high half");
 }
 
 void test_pshufb() {
