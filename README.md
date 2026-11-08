@@ -46,9 +46,10 @@ stored in this repository.
 
 ## Instruction completion map
 
-The map is an auditable family-level view. “Broad” means the useful forms currently exercised by
-regressions and compatibility probes are implemented; it does **not** claim every historical x86
-encoding or edge case is complete.
+The map is an auditable family-level maturity view. “Broad” means the useful forms currently
+exercised by regressions and compatibility probes are implemented; it does **not** claim every
+historical x86 encoding or edge case is complete. The small grid cells are decorative and do not
+represent individual instructions, encodings, tests, or percentages.
 
 ![CPUEmu instruction coverage map](docs/assets/instruction-status.svg)
 

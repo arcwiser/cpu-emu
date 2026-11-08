@@ -10,7 +10,7 @@
     <style>.title{font:700 27px 'Segoe UI',Arial;fill:#f8fafc}.sub{font:14px 'Segoe UI',Arial;fill:#94a3b8}.badge{font:600 13px 'Segoe UI',Arial;fill:#fff}.label{font:700 14px 'Segoe UI',Arial;fill:#fff;paint-order:stroke;stroke:#07110b;stroke-width:3px}.small{font:600 12px 'Segoe UI',Arial;fill:#e2e8f0;paint-order:stroke;stroke:#07110b;stroke-width:3px}.legend{font:13px 'Segoe UI',Arial;fill:#cbd5e1}</style>
   </defs>
   <rect width="1200" height="540" rx="16" fill="url(#bg)"/>
-  <text x="28" y="43" class="title">Instruction coverage atlas</text><text x="28" y="68" class="sub">Family-level status • exact forms and caveats live in docs/INSTRUCTION_COVERAGE.md</text>
+  <text x="28" y="43" class="title">Instruction coverage atlas</text><text x="28" y="68" class="sub">Family-level implementation maturity — not percentage of opcodes implemented</text>
   <g transform="translate(690 25)"><rect width="105" height="29" rx="4" fill="#15803d"/><text x="52" y="20" text-anchor="middle" class="badge">6 broad</text><rect x="113" width="105" height="29" rx="4" fill="#4d7c0f"/><text x="165" y="20" text-anchor="middle" class="badge">6 partial</text><rect x="226" width="105" height="29" rx="4" fill="#a16207"/><text x="278" y="20" text-anchor="middle" class="badge">2 initial</text><rect x="339" width="105" height="29" rx="4" fill="#334155"/><text x="391" y="20" text-anchor="middle" class="badge">4 planned</text></g>
   <g transform="translate(28 92)">
     <rect width="330" height="180" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="14" y="25" class="label">Core integer</text><text x="14" y="47" class="small">moves • arithmetic • logic • multiply/divide</text>
@@ -32,5 +32,5 @@
     <rect x="844" y="308" width="146" height="82" rx="6" fill="url(#planned)" stroke="#475569"/><text x="858" y="333" class="label">BMI1 / BMI2</text>
     <rect x="998" y="308" width="146" height="82" rx="6" fill="url(#planned)" stroke="#475569"/><text x="1012" y="333" class="label">Exceptions</text><text x="1012" y="355" class="small">delivery model</text>
   </g>
-  <g transform="translate(30 510)"><rect width="14" height="14" rx="2" fill="#22c55e"/><text x="22" y="12" class="legend">Broad</text><rect x="110" width="14" height="14" rx="2" fill="#65a30d"/><text x="132" y="12" class="legend">Partial</text><rect x="230" width="14" height="14" rx="2" fill="#a16207"/><text x="252" y="12" class="legend">Initial</text><rect x="340" width="14" height="14" rx="2" fill="#334155"/><text x="362" y="12" class="legend">Planned / not advertised</text></g>
+  <g transform="translate(30 510)"><rect width="14" height="14" rx="2" fill="#22c55e"/><text x="22" y="12" class="legend">Broad</text><rect x="110" width="14" height="14" rx="2" fill="#65a30d"/><text x="132" y="12" class="legend">Partial</text><rect x="230" width="14" height="14" rx="2" fill="#a16207"/><text x="252" y="12" class="legend">Initial</text><rect x="340" width="14" height="14" rx="2" fill="#334155"/><text x="362" y="12" class="legend">Planned</text><text x="555" y="12" class="legend">Grid cells are decorative; they do not represent individual opcodes or percentages.</text></g>
 </svg>

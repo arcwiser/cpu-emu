@@ -14,6 +14,28 @@ Legend:
 
 The [visual completion map](assets/instruction-status.svg) summarizes the same family-level state.
 `src/cpu.cpp` and `tests/tests.cpp` remain authoritative when this document and code disagree.
+The repeated cells in the visual are decorative texture, not measured opcode/encoding units.
+
+## Compatibility impact map
+
+Instruction work is prioritized by reusable architectural value and reproducible evidence, not by
+one application's instruction address. This table connects known gaps to the kinds of workloads
+they can unlock while keeping non-CPU blockers visible.
+
+| Coverage area | Evidence or affected workload | Required work | Verification target | Non-instruction dependencies |
+| --- | --- | --- | --- | --- |
+| x87 completeness | Older x86 games and CRT/math paths | Comparisons, status flags, 80-bit values, remaining arithmetic/transcendentals, exceptions | Focused stack/control/rounding tests plus an older-game probe | Win32, graphics, and audio still apply |
+| MMX moves/state | Legacy multimedia/game code | Complete `MOVD`/`MOVQ`, register/memory widths, MMX↔x87 state rules | Encoding matrix and state-transition regressions | Media APIs and timing |
+| SSE/SSE2 audit | Notepad, GameMaker, Chromium startup | Finish register/memory/prefix variants and exact scalar lane preservation | Generated form matrix plus current app probes | Threads/COM/graphics for deeper progress |
+| SSE3/SSSE3 | Modern runtimes and codecs | Complete advertised-family requirements beyond selected operations | Family tests with `CPUID` remaining gated until complete | DLL loading and exception delivery |
+| SSE4.1/SSE4.2 | Chromium/V8 and newer application libraries | Complete packed integer forms, string compare, CRC behavior | V8 startup delta plus independent opcode regressions | Guest processes, threads, mapped sections |
+| BMI1/BMI2 | Modern compiler output | Widths, zero-input behavior, flags, memory forms, feature gating | Compiler-generated fixture and edge-value tests | Usually not the first current blocker |
+| Exception delivery | Divide/access/illegal-instruction recovery and C++ runtimes | Guest exception records, stack dispatch/unwind, handler ABI | Controlled fault/handler fixtures | Loader metadata and per-thread state |
+| AVX/AVX2 | Newer codecs, browsers, game middleware | VEX decode, YMM state, context switching, `CPUID`/XSAVE contract | Generated encoding/state tests before advertising | Scheduler and exception/context model |
+
+The current Undertale blocker is **not** an instruction gap: it is the Direct3D 9Ex interface
+boundary. Filling the instruction atlas alone cannot make a game playable; Win32 APIs, graphics,
+input, audio, threading, loading, services, and persistence are independent compatibility axes.
 
 ## Execution modes
 

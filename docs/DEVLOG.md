@@ -4,6 +4,13 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-08 — Coverage credibility and impact mapping
+
+- Made the instruction atlas explicitly self-describing: its cells are decorative family-level
+  texture, not opcode counts, encoding units, or percentages.
+- Connected instruction-family gaps to affected workload classes, required implementation work,
+  verification targets, and non-CPU dependencies so contributors can see why a family matters.
+
 ## 2026-11-08 — Documentation and contribution standards
 
 - Consolidated compatibility, roadmap, and development-history material under `docs/`, added a
