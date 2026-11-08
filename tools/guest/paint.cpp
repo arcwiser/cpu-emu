@@ -3,6 +3,7 @@
 // Compiled with the host toolchain and executed under the emulator:
 //   build-release\cpuemu.exe build\test-apps\paint.exe                interactive window
 //   build-release\cpuemu.exe build\test-apps\paint.exe -- --selftest  headless verification
+//   build-release\cpuemu.exe build\test-apps\paint.exe -- --screenshot stable visual probe
 //
 // The interactive mode exercises the guest window-procedure bridge: the window is a real
 // host window whose messages are interpreted by the emulated CPU, and all drawing goes
@@ -54,6 +55,9 @@ int last_y = 0;
 HPEN pens[palette_size] = {};
 HBRUSH brushes[palette_size] = {};
 HBRUSH background_brush = nullptr;
+bool message_selftest = false;
+
+void write_stdout(const char *text);
 
 void trace(const char *message) { OutputDebugStringA(message); }
 
@@ -149,6 +153,13 @@ LRESULT CALLBACK paint_window_procedure(HWND window, UINT message, WPARAM word_p
     switch (message) {
     case WM_CREATE:
         trace("paint: window created");
+        if (message_selftest) {
+            PostMessageW(window, WM_APP + 1, 0, 0);
+        }
+        return 0;
+    case WM_APP + 1:
+        write_stdout("PAINT MESSAGE LOOP SELFTEST PASSED\r\n");
+        PostQuitMessage(0);
         return 0;
     case WM_ERASEBKGND:
         return 1;
@@ -243,6 +254,61 @@ int run_windowed(HINSTANCE instance, int show_command) {
     return static_cast<int>(message.wParam);
 }
 
+int run_screenshot(HINSTANCE instance) {
+    background_brush = CreateSolidBrush(RGB(252, 252, 250));
+    WNDCLASSEXW window_class{};
+    window_class.cbSize = sizeof(window_class);
+    window_class.lpfnWndProc = paint_window_procedure;
+    window_class.hInstance = instance;
+    window_class.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    window_class.lpszClassName = L"CPUEmuPaintScreenshot";
+    if (RegisterClassExW(&window_class) == 0) {
+        trace("paint screenshot: RegisterClassExW failed");
+        return 1;
+    }
+    const HWND window =
+        CreateWindowExW(0, window_class.lpszClassName, L"CPUEmu Paint - interpreted guest",
+                        WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
+                        window_width, window_height, nullptr, nullptr, instance, nullptr);
+    if (window == nullptr) {
+        trace("paint screenshot: CreateWindowExW failed");
+        return 1;
+    }
+
+    current_color = 0;
+    add_stamp(150, 155);
+    current_color = 1;
+    add_stamp(260, 225);
+    current_color = 2;
+    add_stamp(375, 155);
+    current_color = 4;
+    add_segment(80, 350, 210, 285);
+    add_segment(210, 285, 340, 365);
+    add_segment(340, 365, 500, 275);
+    current_color = 3;
+    add_segment(500, 275, 680, 350);
+    current_color = 0;
+
+    const HDC dc = GetDC(window);
+    repaint(window, dc);
+    ReleaseDC(window, dc);
+    GdiFlush();
+    trace("paint screenshot: visual probe ready");
+    const DWORD started = GetTickCount();
+    MSG message{};
+    while (GetTickCount() - started < 60000) {
+        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE) != FALSE) {
+            if (message.message == WM_QUIT) {
+                return static_cast<int>(message.wParam);
+            }
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+        Sleep(10);
+    }
+    return 0;
+}
+
 void write_stdout(const char *text) {
     const HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
     DWORD written = 0;
@@ -332,6 +398,13 @@ int run_selftest() {
 extern "C" int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
     if (wcsstr(GetCommandLineW(), L"--selftest") != nullptr) {
         return run_selftest();
+    }
+    if (wcsstr(GetCommandLineW(), L"--screenshot") != nullptr) {
+        return run_screenshot(instance);
+    }
+    if (wcsstr(GetCommandLineW(), L"--message-selftest") != nullptr) {
+        message_selftest = true;
+        return run_windowed(instance, show_command);
     }
     return run_windowed(instance, show_command);
 }

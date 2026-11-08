@@ -1625,14 +1625,16 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             break;
         }
         if (thunk_name.ends_with("!TranslateMessage")) {
-            const auto message = read_message(argument(0));
+            const auto message_address = argument(0);
+            const auto message = read_message(message_address);
             cpu.set_reg(Rax, ::TranslateMessage(&message) != FALSE ? 1 : 0);
             finish_call(1);
             break;
         }
         if (thunk_name.ends_with("!DispatchMessageA") ||
             thunk_name.ends_with("!DispatchMessageW")) {
-            const auto message = read_message(argument(0));
+            const auto message_address = argument(0);
+            const auto message = read_message(message_address);
             const auto result = thunk_name.ends_with("W") ? ::DispatchMessageW(&message)
                                                           : ::DispatchMessageA(&message);
             if (callback_exception != nullptr) {
@@ -1644,16 +1646,24 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             finish_call(1);
             break;
         }
+        // Get/PeekMessage can synchronously deliver sent messages before returning. Those
+        // callbacks legally clobber volatile argument registers, so retain the outer API
+        // arguments before entering USER32 rather than calling argument() afterward.
+        const auto message_address = argument(0);
+        const auto window_value = argument(1);
+        const auto minimum_message = static_cast<UINT>(argument(2));
+        const auto maximum_message = static_cast<UINT>(argument(3));
+        const auto remove_flags = static_cast<UINT>(argument(4));
         MSG message{};
-        const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(1)));
+        const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(window_value));
         int result = 0;
         if (quit_message_pending_) {
             message.message = WM_QUIT;
             message.wParam = quit_message_code_;
-            write_message(argument(0), message);
+            write_message(message_address, message);
             const bool get_message =
                 thunk_name.ends_with("!GetMessageA") || thunk_name.ends_with("!GetMessageW");
-            if (get_message || (static_cast<UINT>(argument(4)) & PM_REMOVE) != 0) {
+            if (get_message || (remove_flags & PM_REMOVE) != 0) {
                 quit_message_pending_ = false;
             }
             cpu.set_reg(Rax, 0);
@@ -1665,26 +1675,22 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             // PeekMessage can synchronously dispatch sent messages even when it returns zero.
             if (!window_procedures_.empty()) {
                 result = thunk_name.ends_with("W")
-                             ? ::PeekMessageW(&message, window, static_cast<UINT>(argument(2)),
-                                              static_cast<UINT>(argument(3)),
-                                              static_cast<UINT>(argument(4)))
-                             : ::PeekMessageA(&message, window, static_cast<UINT>(argument(2)),
-                                              static_cast<UINT>(argument(3)),
-                                              static_cast<UINT>(argument(4)));
+                             ? ::PeekMessageW(&message, window, minimum_message, maximum_message,
+                                              remove_flags)
+                             : ::PeekMessageA(&message, window, minimum_message, maximum_message,
+                                              remove_flags);
             }
             if (result != 0) {
-                write_message(argument(0), message);
+                write_message(message_address, message);
             }
             cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
             finish_call(5);
         } else {
             result = thunk_name.ends_with("W")
-                         ? ::GetMessageW(&message, window, static_cast<UINT>(argument(2)),
-                                         static_cast<UINT>(argument(3)))
-                         : ::GetMessageA(&message, window, static_cast<UINT>(argument(2)),
-                                         static_cast<UINT>(argument(3)));
+                         ? ::GetMessageW(&message, window, minimum_message, maximum_message)
+                         : ::GetMessageA(&message, window, minimum_message, maximum_message);
             if (result >= 0) {
-                write_message(argument(0), message);
+                write_message(message_address, message);
             } else {
                 last_error_ = ::GetLastError();
             }

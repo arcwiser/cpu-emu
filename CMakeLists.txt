@@ -61,3 +61,8 @@ add_custom_command(
 )
 add_custom_target(guest_paint ALL DEPENDS ${CMAKE_BINARY_DIR}/test-apps/paint.exe)
 add_dependencies(cpuemu_tests guest_paint)
+add_test(
+    NAME paint_message_loop
+    COMMAND cpuemu ${CMAKE_BINARY_DIR}/test-apps/paint.exe -- --message-selftest
+)
+set_tests_properties(paint_message_loop PROPERTIES TIMEOUT 10)
