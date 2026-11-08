@@ -1,0 +1,201 @@
+Status,Family,Item
+Broad,Core integer,MOV
+Broad,Core integer,MOVSX
+Broad,Core integer,MOVZX
+Broad,Core integer,LEA
+Broad,Core integer,XCHG
+Broad,Core integer,ADD
+Broad,Core integer,ADC
+Broad,Core integer,SUB
+Broad,Core integer,SBB
+Broad,Core integer,CMP
+Broad,Core integer,INC
+Broad,Core integer,DEC
+Broad,Core integer,NEG
+Broad,Core integer,AND
+Broad,Core integer,OR
+Broad,Core integer,XOR
+Broad,Core integer,TEST
+Broad,Core integer,NOT
+Broad,Core integer,MUL
+Broad,Core integer,IMUL
+Broad,Core integer,DIV
+Broad,Core integer,IDIV
+Broad,Core integer,SHL/SAL
+Broad,Core integer,SHR
+Broad,Core integer,SAR
+Broad,Core integer,ROL
+Broad,Core integer,ROR
+Broad,Core integer,CBW
+Broad,Core integer,CWDE
+Broad,Core integer,CDQE
+Broad,Core integer,CWD
+Broad,Core integer,CDQ
+Broad,Core integer,CQO
+Broad,Control flow,CALL
+Broad,Control flow,RET
+Broad,Control flow,JMP
+Broad,Control flow,JO/JNO
+Broad,Control flow,JB/JAE
+Broad,Control flow,JE/JNE
+Broad,Control flow,JBE/JA
+Broad,Control flow,JS/JNS
+Broad,Control flow,JP/JNP
+Broad,Control flow,JL/JGE
+Broad,Control flow,JLE/JG
+Broad,Control flow,CMOVcc
+Broad,Control flow,SETcc
+Broad,Stack and ABI,PUSH
+Broad,Stack and ABI,POP
+Broad,Stack and ABI,PUSHF
+Broad,Stack and ABI,POPF
+Broad,Stack and ABI,LEAVE
+Broad,Addressing,ModRM
+Broad,Addressing,SIB
+Broad,Addressing,RIP-relative
+Broad,Addressing,moffs
+Broad,Addressing,FS base
+Broad,Addressing,GS base
+Broad,Addressing,REX
+Broad,Addressing,operand-size
+Broad,Addressing,address-size
+Broad,Flags,LAHF
+Broad,Flags,SAHF
+Broad,Flags,CLC
+Broad,Flags,STC
+Broad,Flags,CLD
+Broad,Flags,STD
+Broad,String,MOVSB
+Broad,String,MOVSW
+Broad,String,MOVSD
+Broad,String,MOVSQ
+Broad,String,STOSB
+Broad,String,STOSW
+Broad,String,STOSD
+Broad,String,STOSQ
+Broad,String,SCASB
+Broad,String,SCASW
+Broad,String,SCASD
+Broad,String,SCASQ
+Broad,String,REP/REPE
+Broad,String,REPNE
+Partial,Bit and query,BT/BTS/BTR/BTC
+Partial,Bit and query,BSF
+Partial,Bit and query,BSR
+Partial,Bit and query,POPCNT
+Partial,Bit and query,LZCNT
+Partial,Bit and query,TZCNT
+Partial,Bit and query,CPUID
+Partial,Bit and query,RDTSC
+Partial,SSE,MOVSS
+Partial,SSE,ADDSS
+Partial,SSE,SUBSS
+Partial,SSE,MULSS
+Partial,SSE,DIVSS
+Partial,SSE,ADDPS
+Partial,SSE,SUBPS
+Partial,SSE,MULPS
+Partial,SSE,DIVPS
+Partial,SSE,MINPS/MAXPS
+Partial,SSE,ORPS
+Partial,SSE,UNPCKLPS
+Partial,SSE,CVTSI2SS
+Partial,SSE,CVTTSS2SI
+Partial,SSE2,MOVSD
+Partial,SSE2,MOVQ XMM
+Partial,SSE2,ADDPD
+Partial,SSE2,SUBPD
+Partial,SSE2,MULPD
+Partial,SSE2,DIVPD
+Partial,SSE2,CVTSS2SD
+Partial,SSE2,CVTSD2SS
+Partial,SSE2,PADDB/W/D/Q
+Partial,SSE2,PSUBB/W/D/Q
+Partial,SSE2,PUNPCK*
+Partial,SSE2,PSHUFD
+Partial,SSE2,PSHUFLW
+Partial,SSE2,PSHUFHW
+Partial,SSE2,PSRLDQ
+Partial,SSE2,PSLLDQ
+Partial,SSE2,PMOVMSKB
+Partial,SSE3,MOVDDUP
+Partial,SSE3,LDDQU
+Partial,SSE3,HADDPS/PD
+Partial,SSE3,HSUBPS/PD
+Partial,SSE3,ADDSUBPS/PD
+Partial,SSSE3,PSHUFB
+Partial,SSSE3,PHADD*
+Partial,SSSE3,PHSUB*
+Partial,SSSE3,PMADDUBSW
+Partial,SSSE3,PSIGNB/W/D
+Partial,SSSE3,PMULHRSW
+Partial,SSSE3,PALIGNR
+Partial,SSSE3,PABSB/W/D
+Partial,SSE4.1,PTEST
+Partial,SSE4.1,PACKUSDW
+Partial,SSE4.1,PMIN*/PMAX*
+Partial,SSE4.1,PMULLD
+Partial,SIMD state,LDMXCSR
+Partial,SIMD state,STMXCSR
+Initial,x87,FLD m32/m64
+Initial,x87,FLD ST(i)
+Initial,x87,FLD constants
+Initial,x87,FST/FSTP
+Initial,x87,FADD
+Initial,x87,FMUL
+Initial,x87,FSUB/FSUBR
+Initial,x87,FDIV/FDIVR
+Initial,x87,FSUBP
+Initial,x87,FSIN
+Initial,x87,FCOS
+Initial,x87,FILD
+Initial,x87,FISTP
+Initial,x87,FLDCW/FNSTCW
+Initial,x87,FNSTSW AX
+Initial,x87,FNCLEX/FNINIT
+Initial,MMX,MMX state
+Initial,MMX,MOVD forms
+Initial,MMX,MOVQ forms
+Planned,Legacy integer,RCL/RCR
+Planned,Legacy integer,SHLD/SHRD
+Planned,Legacy integer,BSWAP audit
+Planned,Legacy integer,CMPXCHG
+Planned,Legacy integer,XADD
+Planned,Legacy integer,CMPXCHG8B/16B
+Planned,String,CMPS family
+Planned,String,LODS family
+Planned,String,INS/OUTS
+Planned,SSE4.2,PCMPxSTRx
+Planned,SSE4.2,CRC32
+Planned,BMI1,ANDN
+Planned,BMI1,BEXTR
+Planned,BMI1,BLSI/BLSMSK/BLSR
+Planned,BMI2,BZHI
+Planned,BMI2,MULX
+Planned,BMI2,PDEP/PEXT
+Planned,BMI2,RORX
+Planned,BMI2,SARX/SHLX/SHRX
+Planned,AVX,VEX decode
+Planned,AVX,YMM state
+Planned,AVX,three-operand forms
+Planned,AVX2,256-bit integer
+Planned,AVX2,gather
+Planned,FMA,FMA3
+Planned,F16C,half conversion
+Planned,Crypto,AES-NI
+Planned,Crypto,PCLMULQDQ
+Planned,Crypto,SHA extensions
+Planned,Crypto,GFNI
+Planned,Crypto,VAES/VPCLMUL
+Planned,AVX-512,EVEX decode
+Planned,AVX-512,ZMM/opmask state
+Planned,AVX-512,foundation subsets
+Planned,System,RDTSCP
+Planned,System,RDRAND/RDSEED
+Planned,System,XSAVE/XRSTOR
+Planned,System,CLFLUSH/CLWB
+Planned,Exceptions,divide error
+Planned,Exceptions,access violation
+Planned,Exceptions,illegal instruction
+Planned,Exceptions,breakpoint
+Planned,Exceptions,C++/SEH unwind

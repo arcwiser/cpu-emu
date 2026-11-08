@@ -1,36 +1,291 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540" role="img" aria-labelledby="title desc">
-  <title id="title">CPUEmu instruction family completion map</title>
-  <desc id="desc">Treemap showing six broad, six partial, two initial, and four planned x86 instruction coverage areas.</desc>
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0b1018"/><stop offset="1" stop-color="#101827"/></linearGradient>
-    <pattern id="broad" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="11" height="11" rx="1" fill="#22c55e"/><path d="M11 0H12V12H0V11H11Z" fill="#14532d"/></pattern>
-    <pattern id="partial" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="11" height="11" rx="1" fill="#65a30d"/><path d="M11 0H12V12H0V11H11Z" fill="#365314"/></pattern>
-    <pattern id="initial" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="11" height="11" rx="1" fill="#a16207"/><path d="M11 0H12V12H0V11H11Z" fill="#422006"/></pattern>
-    <pattern id="planned" width="12" height="12" patternUnits="userSpaceOnUse"><rect width="11" height="11" rx="1" fill="#263244"/><path d="M11 0H12V12H0V11H11Z" fill="#111827"/></pattern>
-    <style>.title{font:700 27px 'Segoe UI',Arial;fill:#f8fafc}.sub{font:14px 'Segoe UI',Arial;fill:#94a3b8}.badge{font:600 13px 'Segoe UI',Arial;fill:#fff}.label{font:700 14px 'Segoe UI',Arial;fill:#fff;paint-order:stroke;stroke:#07110b;stroke-width:3px}.small{font:600 12px 'Segoe UI',Arial;fill:#e2e8f0;paint-order:stroke;stroke:#07110b;stroke-width:3px}.legend{font:13px 'Segoe UI',Arial;fill:#cbd5e1}</style>
-  </defs>
-  <rect width="1200" height="540" rx="16" fill="url(#bg)"/>
-  <text x="28" y="43" class="title">Instruction coverage atlas</text><text x="28" y="68" class="sub">Family-level implementation maturity — not percentage of opcodes implemented</text>
-  <g transform="translate(690 25)"><rect width="105" height="29" rx="4" fill="#15803d"/><text x="52" y="20" text-anchor="middle" class="badge">6 broad</text><rect x="113" width="105" height="29" rx="4" fill="#4d7c0f"/><text x="165" y="20" text-anchor="middle" class="badge">6 partial</text><rect x="226" width="105" height="29" rx="4" fill="#a16207"/><text x="278" y="20" text-anchor="middle" class="badge">2 initial</text><rect x="339" width="105" height="29" rx="4" fill="#334155"/><text x="391" y="20" text-anchor="middle" class="badge">4 planned</text></g>
-  <g transform="translate(28 92)">
-    <rect width="330" height="180" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="14" y="25" class="label">Core integer</text><text x="14" y="47" class="small">moves • arithmetic • logic • multiply/divide</text>
-    <rect x="338" width="250" height="180" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="352" y="25" class="label">Control flow</text><text x="352" y="47" class="small">Jcc • CALL • RET • indirect branches</text>
-    <rect x="596" width="260" height="86" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="610" y="25" class="label">Stack &amp; ABI</text><text x="610" y="47" class="small">x86 + x64 widths</text>
-    <rect x="864" width="280" height="86" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="878" y="25" class="label">Addressing</text><text x="878" y="47" class="small">ModRM • SIB • RIP-relative • FS/GS</text>
-    <rect x="596" y="94" width="260" height="86" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="610" y="119" class="label">Flags &amp; conditions</text><text x="610" y="141" class="small">CMOVcc • SETcc • PUSHF/POPF</text>
-    <rect x="864" y="94" width="280" height="86" rx="6" fill="url(#broad)" stroke="#4ade80"/><text x="878" y="119" class="label">String operations</text><text x="878" y="141" class="small">MOVS • STOS • SCAS • REP/DF</text>
-    <rect y="188" width="210" height="112" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="14" y="213" class="label">SSE</text><text x="14" y="235" class="small">scalar + packed</text>
-    <rect x="218" y="188" width="210" height="112" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="232" y="213" class="label">SSE2</text><text x="232" y="235" class="small">integer + double</text>
-    <rect x="436" y="188" width="170" height="112" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="450" y="213" class="label">SSE3</text><text x="450" y="235" class="small">selected forms</text>
-    <rect x="614" y="188" width="170" height="112" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="628" y="213" class="label">SSSE3</text><text x="628" y="235" class="small">selected forms</text>
-    <rect x="792" y="188" width="170" height="112" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="806" y="213" class="label">SSE4.1</text><text x="806" y="235" class="small">initial integer set</text>
-    <rect x="970" y="188" width="174" height="112" rx="6" fill="url(#initial)" stroke="#d97706"/><text x="984" y="213" class="label">x87</text><text x="984" y="235" class="small">startup/math subset</text>
-    <rect y="308" width="260" height="82" rx="6" fill="url(#initial)" stroke="#d97706"/><text x="14" y="333" class="label">MMX</text><text x="14" y="355" class="small">moves incomplete</text>
-    <rect x="268" y="308" width="260" height="82" rx="6" fill="url(#partial)" stroke="#84cc16"/><text x="282" y="333" class="label">System queries</text><text x="282" y="355" class="small">CPUID • RDTSC • feature gating</text>
-    <rect x="536" y="308" width="146" height="82" rx="6" fill="url(#planned)" stroke="#475569"/><text x="550" y="333" class="label">SSE4.2</text>
-    <rect x="690" y="308" width="146" height="82" rx="6" fill="url(#planned)" stroke="#475569"/><text x="704" y="333" class="label">AVX / AVX2</text>
-    <rect x="844" y="308" width="146" height="82" rx="6" fill="url(#planned)" stroke="#475569"/><text x="858" y="333" class="label">BMI1 / BMI2</text>
-    <rect x="998" y="308" width="146" height="82" rx="6" fill="url(#planned)" stroke="#475569"/><text x="1012" y="333" class="label">Exceptions</text><text x="1012" y="355" class="small">delivery model</text>
-  </g>
-  <g transform="translate(30 510)"><rect width="14" height="14" rx="2" fill="#22c55e"/><text x="22" y="12" class="legend">Broad</text><rect x="110" width="14" height="14" rx="2" fill="#65a30d"/><text x="132" y="12" class="legend">Partial</text><rect x="230" width="14" height="14" rx="2" fill="#a16207"/><text x="252" y="12" class="legend">Initial</text><rect x="340" width="14" height="14" rx="2" fill="#334155"/><text x="362" y="12" class="legend">Planned</text><text x="555" y="12" class="legend">Grid cells are decorative; they do not represent individual opcodes or percentages.</text></g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660" role="img">
+<rect width="1200" height="660" fill="#0b1018"/>
+<style>.title{font:700 26px Segoe UI,Arial;fill:#f8fafc}.sub{font:13px Segoe UI,Arial;fill:#94a3b8}.panelTitle{font:15px Segoe UI,Arial;fill:#e2e8f0}.family{font:600 9px Segoe UI,Arial;fill:#f8fafc;paint-order:stroke;stroke:#0b1018;stroke-width:2px}.badge{font:700 12px Segoe UI,Arial;fill:#fff}.small{font:12px Segoe UI,Arial;fill:#e2e8f0}.section{font:15px Segoe UI,Arial;fill:#f8fafc}</style>
+<text x="14" y="30" class="title">Status</text>
+<text x="14" y="52" class="sub">CPUEmu instruction atlas — every cell maps to one catalog entry.</text>
+<rect x="590" y="18" width="140" height="28" fill="#3b82f6"/><text x="660" y="37" text-anchor="middle" class="badge">200 tracked</text>
+<rect x="736" y="18" width="140" height="28" fill="#16a34a"/><text x="806" y="37" text-anchor="middle" class="badge">80 broad</text>
+<rect x="882" y="18" width="140" height="28" fill="#65a30d"/><text x="952" y="37" text-anchor="middle" class="badge">77 in progress</text>
+<rect x="1028" y="18" width="140" height="28" fill="#d97706"/><text x="1098" y="37" text-anchor="middle" class="badge">43 planned</text>
+<text x="14" y="81" class="panelTitle">Implemented and in-progress forms (157)</text>
+<rect x="14" y="90" width="755" height="340" fill="#111827" stroke="#475569"/>
+<rect x="14" y="90" width="192" height="280" fill="#0b1018" stroke="#64748b"/>
+<text x="18" y="103" class="family">Core integer</text>
+<g><title>Core integer: MOV [Broad]</title><rect x="16" y="107" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: MOVSX [Broad]</title><rect x="53.6" y="107" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: MOVZX [Broad]</title><rect x="91.2" y="107" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: LEA [Broad]</title><rect x="128.8" y="107" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: XCHG [Broad]</title><rect x="166.4" y="107" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: ADD [Broad]</title><rect x="16" y="144.29" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: ADC [Broad]</title><rect x="53.6" y="144.29" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: SUB [Broad]</title><rect x="91.2" y="144.29" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: SBB [Broad]</title><rect x="128.8" y="144.29" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: CMP [Broad]</title><rect x="166.4" y="144.29" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: INC [Broad]</title><rect x="16" y="181.57" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: DEC [Broad]</title><rect x="53.6" y="181.57" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: NEG [Broad]</title><rect x="91.2" y="181.57" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: AND [Broad]</title><rect x="128.8" y="181.57" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: OR [Broad]</title><rect x="166.4" y="181.57" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: XOR [Broad]</title><rect x="16" y="218.86" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: TEST [Broad]</title><rect x="53.6" y="218.86" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: NOT [Broad]</title><rect x="91.2" y="218.86" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: MUL [Broad]</title><rect x="128.8" y="218.86" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: IMUL [Broad]</title><rect x="166.4" y="218.86" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: DIV [Broad]</title><rect x="16" y="256.14" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: IDIV [Broad]</title><rect x="53.6" y="256.14" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: SHL/SAL [Broad]</title><rect x="91.2" y="256.14" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: SHR [Broad]</title><rect x="128.8" y="256.14" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: SAR [Broad]</title><rect x="166.4" y="256.14" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: ROL [Broad]</title><rect x="16" y="293.43" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: ROR [Broad]</title><rect x="53.6" y="293.43" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: CBW [Broad]</title><rect x="91.2" y="293.43" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: CWDE [Broad]</title><rect x="128.8" y="293.43" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: CDQE [Broad]</title><rect x="166.4" y="293.43" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: CWD [Broad]</title><rect x="16" y="330.71" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: CDQ [Broad]</title><rect x="53.6" y="330.71" width="36.6" height="36.29" fill="#22c55e"/></g>
+<g><title>Core integer: CQO [Broad]</title><rect x="91.2" y="330.71" width="36.6" height="36.29" fill="#22c55e"/></g>
+<rect x="14" y="370" width="192" height="42" fill="#0b1018" stroke="#64748b"/>
+<text x="18" y="383" class="family">SSE3</text>
+<g><title>SSE3: MOVDDUP [Partial]</title><rect x="16" y="387" width="25.86" height="22" fill="#65a30d"/></g>
+<g><title>SSE3: LDDQU [Partial]</title><rect x="42.86" y="387" width="25.86" height="22" fill="#65a30d"/></g>
+<g><title>SSE3: HADDPS/PD [Partial]</title><rect x="69.71" y="387" width="25.86" height="22" fill="#65a30d"/></g>
+<g><title>SSE3: HSUBPS/PD [Partial]</title><rect x="96.57" y="387" width="25.86" height="22" fill="#65a30d"/></g>
+<g><title>SSE3: ADDSUBPS/PD [Partial]</title><rect x="123.43" y="387" width="25.86" height="22" fill="#65a30d"/></g>
+<rect x="14" y="412" width="192" height="18" fill="#0b1018" stroke="#64748b"/>
+<text x="18" y="425" class="family">SIMD state</text>
+<g><title>SIMD state: LDMXCSR [Partial]</title><rect x="16" y="429" width="8.4" height="1" fill="#65a30d"/></g>
+<g><title>SIMD state: STMXCSR [Partial]</title><rect x="25.4" y="429" width="8.4" height="1" fill="#65a30d"/></g>
+<rect x="206" y="90" width="188" height="148" fill="#0b1018" stroke="#64748b"/>
+<text x="210" y="103" class="family">SSE2</text>
+<g><title>SSE2: MOVSD [Partial]</title><rect x="208" y="107" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: MOVQ XMM [Partial]</title><rect x="244.8" y="107" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: ADDPD [Partial]</title><rect x="281.6" y="107" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: SUBPD [Partial]</title><rect x="318.4" y="107" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: MULPD [Partial]</title><rect x="355.2" y="107" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: DIVPD [Partial]</title><rect x="208" y="139.25" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: CVTSS2SD [Partial]</title><rect x="244.8" y="139.25" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: CVTSD2SS [Partial]</title><rect x="281.6" y="139.25" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: PADDB/W/D/Q [Partial]</title><rect x="318.4" y="139.25" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: PSUBB/W/D/Q [Partial]</title><rect x="355.2" y="139.25" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: PUNPCK* [Partial]</title><rect x="208" y="171.5" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: PSHUFD [Partial]</title><rect x="244.8" y="171.5" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: PSHUFLW [Partial]</title><rect x="281.6" y="171.5" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: PSHUFHW [Partial]</title><rect x="318.4" y="171.5" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: PSRLDQ [Partial]</title><rect x="355.2" y="171.5" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: PSLLDQ [Partial]</title><rect x="208" y="203.75" width="35.8" height="31.25" fill="#65a30d"/></g>
+<g><title>SSE2: PMOVMSKB [Partial]</title><rect x="244.8" y="203.75" width="35.8" height="31.25" fill="#65a30d"/></g>
+<rect x="206" y="238" width="188" height="78" fill="#0b1018" stroke="#64748b"/>
+<text x="210" y="251" class="family">Addressing</text>
+<g><title>Addressing: ModRM [Broad]</title><rect x="208" y="255" width="29.67" height="28.5" fill="#22c55e"/></g>
+<g><title>Addressing: SIB [Broad]</title><rect x="238.67" y="255" width="29.67" height="28.5" fill="#22c55e"/></g>
+<g><title>Addressing: RIP-relative [Broad]</title><rect x="269.33" y="255" width="29.67" height="28.5" fill="#22c55e"/></g>
+<g><title>Addressing: moffs [Broad]</title><rect x="300" y="255" width="29.67" height="28.5" fill="#22c55e"/></g>
+<g><title>Addressing: FS base [Broad]</title><rect x="330.67" y="255" width="29.67" height="28.5" fill="#22c55e"/></g>
+<g><title>Addressing: GS base [Broad]</title><rect x="361.33" y="255" width="29.67" height="28.5" fill="#22c55e"/></g>
+<g><title>Addressing: REX [Broad]</title><rect x="208" y="284.5" width="29.67" height="28.5" fill="#22c55e"/></g>
+<g><title>Addressing: operand-size [Broad]</title><rect x="238.67" y="284.5" width="29.67" height="28.5" fill="#22c55e"/></g>
+<g><title>Addressing: address-size [Broad]</title><rect x="269.33" y="284.5" width="29.67" height="28.5" fill="#22c55e"/></g>
+<rect x="206" y="316" width="188" height="70" fill="#0b1018" stroke="#64748b"/>
+<text x="210" y="329" class="family">Bit and query</text>
+<g><title>Bit and query: BT/BTS/BTR/BTC [Partial]</title><rect x="208" y="333" width="29.67" height="24.5" fill="#65a30d"/></g>
+<g><title>Bit and query: BSF [Partial]</title><rect x="238.67" y="333" width="29.67" height="24.5" fill="#65a30d"/></g>
+<g><title>Bit and query: BSR [Partial]</title><rect x="269.33" y="333" width="29.67" height="24.5" fill="#65a30d"/></g>
+<g><title>Bit and query: POPCNT [Partial]</title><rect x="300" y="333" width="29.67" height="24.5" fill="#65a30d"/></g>
+<g><title>Bit and query: LZCNT [Partial]</title><rect x="330.67" y="333" width="29.67" height="24.5" fill="#65a30d"/></g>
+<g><title>Bit and query: TZCNT [Partial]</title><rect x="361.33" y="333" width="29.67" height="24.5" fill="#65a30d"/></g>
+<g><title>Bit and query: CPUID [Partial]</title><rect x="208" y="358.5" width="29.67" height="24.5" fill="#65a30d"/></g>
+<g><title>Bit and query: RDTSC [Partial]</title><rect x="238.67" y="358.5" width="29.67" height="24.5" fill="#65a30d"/></g>
+<rect x="206" y="386" width="188" height="44" fill="#0b1018" stroke="#64748b"/>
+<text x="210" y="399" class="family">Stack and ABI</text>
+<g><title>Stack and ABI: PUSH [Broad]</title><rect x="208" y="403" width="25.29" height="24" fill="#22c55e"/></g>
+<g><title>Stack and ABI: POP [Broad]</title><rect x="234.29" y="403" width="25.29" height="24" fill="#22c55e"/></g>
+<g><title>Stack and ABI: PUSHF [Broad]</title><rect x="260.57" y="403" width="25.29" height="24" fill="#22c55e"/></g>
+<g><title>Stack and ABI: POPF [Broad]</title><rect x="286.86" y="403" width="25.29" height="24" fill="#22c55e"/></g>
+<g><title>Stack and ABI: LEAVE [Broad]</title><rect x="313.14" y="403" width="25.29" height="24" fill="#22c55e"/></g>
+<rect x="394" y="90" width="188" height="139" fill="#0b1018" stroke="#64748b"/>
+<text x="398" y="103" class="family">x87</text>
+<g><title>x87: FLD m32/m64 [Initial]</title><rect x="396" y="107" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FLD ST(i) [Initial]</title><rect x="432.8" y="107" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FLD constants [Initial]</title><rect x="469.6" y="107" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FST/FSTP [Initial]</title><rect x="506.4" y="107" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FADD [Initial]</title><rect x="543.2" y="107" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FMUL [Initial]</title><rect x="396" y="137" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FSUB/FSUBR [Initial]</title><rect x="432.8" y="137" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FDIV/FDIVR [Initial]</title><rect x="469.6" y="137" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FSUBP [Initial]</title><rect x="506.4" y="137" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FSIN [Initial]</title><rect x="543.2" y="137" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FCOS [Initial]</title><rect x="396" y="167" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FILD [Initial]</title><rect x="432.8" y="167" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FISTP [Initial]</title><rect x="469.6" y="167" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FLDCW/FNSTCW [Initial]</title><rect x="506.4" y="167" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FNSTSW AX [Initial]</title><rect x="543.2" y="167" width="35.8" height="29" fill="#d97706"/></g>
+<g><title>x87: FNCLEX/FNINIT [Initial]</title><rect x="396" y="197" width="35.8" height="29" fill="#d97706"/></g>
+<rect x="394" y="229" width="188" height="113" fill="#0b1018" stroke="#64748b"/>
+<text x="398" y="242" class="family">Control flow</text>
+<g><title>Control flow: CALL [Broad]</title><rect x="396" y="246" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: RET [Broad]</title><rect x="426.67" y="246" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: JMP [Broad]</title><rect x="457.33" y="246" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: JO/JNO [Broad]</title><rect x="488" y="246" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: JB/JAE [Broad]</title><rect x="518.67" y="246" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: JE/JNE [Broad]</title><rect x="549.33" y="246" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: JBE/JA [Broad]</title><rect x="396" y="277.33" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: JS/JNS [Broad]</title><rect x="426.67" y="277.33" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: JP/JNP [Broad]</title><rect x="457.33" y="277.33" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: JL/JGE [Broad]</title><rect x="488" y="277.33" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: JLE/JG [Broad]</title><rect x="518.67" y="277.33" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: CMOVcc [Broad]</title><rect x="549.33" y="277.33" width="29.67" height="30.33" fill="#22c55e"/></g>
+<g><title>Control flow: SETcc [Broad]</title><rect x="396" y="308.67" width="29.67" height="30.33" fill="#22c55e"/></g>
+<rect x="394" y="342" width="188" height="52" fill="#0b1018" stroke="#64748b"/>
+<text x="398" y="355" class="family">Flags</text>
+<g><title>Flags: LAHF [Broad]</title><rect x="396" y="359" width="29.67" height="32" fill="#22c55e"/></g>
+<g><title>Flags: SAHF [Broad]</title><rect x="426.67" y="359" width="29.67" height="32" fill="#22c55e"/></g>
+<g><title>Flags: CLC [Broad]</title><rect x="457.33" y="359" width="29.67" height="32" fill="#22c55e"/></g>
+<g><title>Flags: STC [Broad]</title><rect x="488" y="359" width="29.67" height="32" fill="#22c55e"/></g>
+<g><title>Flags: CLD [Broad]</title><rect x="518.67" y="359" width="29.67" height="32" fill="#22c55e"/></g>
+<g><title>Flags: STD [Broad]</title><rect x="549.33" y="359" width="29.67" height="32" fill="#22c55e"/></g>
+<rect x="394" y="394" width="188" height="36" fill="#0b1018" stroke="#64748b"/>
+<text x="398" y="407" class="family">SSE4.1</text>
+<g><title>SSE4.1: PTEST [Partial]</title><rect x="396" y="411" width="25.29" height="16" fill="#65a30d"/></g>
+<g><title>SSE4.1: PACKUSDW [Partial]</title><rect x="422.29" y="411" width="25.29" height="16" fill="#65a30d"/></g>
+<g><title>SSE4.1: PMIN*/PMAX* [Partial]</title><rect x="448.57" y="411" width="25.29" height="16" fill="#65a30d"/></g>
+<g><title>SSE4.1: PMULLD [Partial]</title><rect x="474.86" y="411" width="25.29" height="16" fill="#65a30d"/></g>
+<rect x="582" y="90" width="187" height="122" fill="#0b1018" stroke="#64748b"/>
+<text x="586" y="103" class="family">SSE</text>
+<g><title>SSE: MOVSS [Partial]</title><rect x="584" y="107" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: ADDSS [Partial]</title><rect x="620.6" y="107" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: SUBSS [Partial]</title><rect x="657.2" y="107" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: MULSS [Partial]</title><rect x="693.8" y="107" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: DIVSS [Partial]</title><rect x="730.4" y="107" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: ADDPS [Partial]</title><rect x="584" y="141.33" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: SUBPS [Partial]</title><rect x="620.6" y="141.33" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: MULPS [Partial]</title><rect x="657.2" y="141.33" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: DIVPS [Partial]</title><rect x="693.8" y="141.33" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: MINPS/MAXPS [Partial]</title><rect x="730.4" y="141.33" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: ORPS [Partial]</title><rect x="584" y="175.67" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: UNPCKLPS [Partial]</title><rect x="620.6" y="175.67" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: CVTSI2SS [Partial]</title><rect x="657.2" y="175.67" width="35.6" height="33.33" fill="#65a30d"/></g>
+<g><title>SSE: CVTTSS2SI [Partial]</title><rect x="693.8" y="175.67" width="35.6" height="33.33" fill="#65a30d"/></g>
+<rect x="582" y="212" width="187" height="122" fill="#0b1018" stroke="#64748b"/>
+<text x="586" y="225" class="family">String</text>
+<g><title>String: MOVSB [Broad]</title><rect x="584" y="229" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: MOVSW [Broad]</title><rect x="620.6" y="229" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: MOVSD [Broad]</title><rect x="657.2" y="229" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: MOVSQ [Broad]</title><rect x="693.8" y="229" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: STOSB [Broad]</title><rect x="730.4" y="229" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: STOSW [Broad]</title><rect x="584" y="263.33" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: STOSD [Broad]</title><rect x="620.6" y="263.33" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: STOSQ [Broad]</title><rect x="657.2" y="263.33" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: SCASB [Broad]</title><rect x="693.8" y="263.33" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: SCASW [Broad]</title><rect x="730.4" y="263.33" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: SCASD [Broad]</title><rect x="584" y="297.67" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: SCASQ [Broad]</title><rect x="620.6" y="297.67" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: REP/REPE [Broad]</title><rect x="657.2" y="297.67" width="35.6" height="33.33" fill="#22c55e"/></g>
+<g><title>String: REPNE [Broad]</title><rect x="693.8" y="297.67" width="35.6" height="33.33" fill="#22c55e"/></g>
+<rect x="582" y="334" width="187" height="70" fill="#0b1018" stroke="#64748b"/>
+<text x="586" y="347" class="family">SSSE3</text>
+<g><title>SSSE3: PSHUFB [Partial]</title><rect x="584" y="351" width="29.5" height="24.5" fill="#65a30d"/></g>
+<g><title>SSSE3: PHADD* [Partial]</title><rect x="614.5" y="351" width="29.5" height="24.5" fill="#65a30d"/></g>
+<g><title>SSSE3: PHSUB* [Partial]</title><rect x="645" y="351" width="29.5" height="24.5" fill="#65a30d"/></g>
+<g><title>SSSE3: PMADDUBSW [Partial]</title><rect x="675.5" y="351" width="29.5" height="24.5" fill="#65a30d"/></g>
+<g><title>SSSE3: PSIGNB/W/D [Partial]</title><rect x="706" y="351" width="29.5" height="24.5" fill="#65a30d"/></g>
+<g><title>SSSE3: PMULHRSW [Partial]</title><rect x="736.5" y="351" width="29.5" height="24.5" fill="#65a30d"/></g>
+<g><title>SSSE3: PALIGNR [Partial]</title><rect x="584" y="376.5" width="29.5" height="24.5" fill="#65a30d"/></g>
+<g><title>SSSE3: PABSB/W/D [Partial]</title><rect x="614.5" y="376.5" width="29.5" height="24.5" fill="#65a30d"/></g>
+<rect x="582" y="404" width="187" height="26" fill="#0b1018" stroke="#64748b"/>
+<text x="586" y="417" class="family">MMX</text>
+<g><title>MMX: MMX state [Initial]</title><rect x="584" y="421" width="19.33" height="6" fill="#d97706"/></g>
+<g><title>MMX: MOVD forms [Initial]</title><rect x="604.33" y="421" width="19.33" height="6" fill="#d97706"/></g>
+<g><title>MMX: MOVQ forms [Initial]</title><rect x="624.67" y="421" width="19.33" height="6" fill="#d97706"/></g>
+<text x="785" y="81" class="panelTitle">Known forms still needed (43)</text>
+<rect x="785" y="90" width="401" height="340" fill="#111827" stroke="#475569"/>
+<rect x="785" y="90" width="140" height="136" fill="#0b1018" stroke="#64748b"/>
+<text x="789" y="103" class="family">Legacy integer</text>
+<g><title>Legacy integer: RCL/RCR [Planned]</title><rect x="787" y="107.0" width="44.33" height="57.5" fill="#334155"/></g>
+<g><title>Legacy integer: SHLD/SHRD [Planned]</title><rect x="832.33" y="107.0" width="44.33" height="57.5" fill="#334155"/></g>
+<g><title>Legacy integer: BSWAP audit [Planned]</title><rect x="877.67" y="107.0" width="44.33" height="57.5" fill="#334155"/></g>
+<g><title>Legacy integer: CMPXCHG [Planned]</title><rect x="787" y="165.5" width="44.33" height="57.5" fill="#334155"/></g>
+<g><title>Legacy integer: XADD [Planned]</title><rect x="832.33" y="165.5" width="44.33" height="57.5" fill="#334155"/></g>
+<g><title>Legacy integer: CMPXCHG8B/16B [Planned]</title><rect x="877.67" y="165.5" width="44.33" height="57.5" fill="#334155"/></g>
+<rect x="785" y="226" width="140" height="68" fill="#0b1018" stroke="#64748b"/>
+<text x="789" y="239" class="family">AVX</text>
+<g><title>AVX: VEX decode [Planned]</title><rect x="787" y="243" width="44.33" height="48" fill="#334155"/></g>
+<g><title>AVX: YMM state [Planned]</title><rect x="832.33" y="243" width="44.33" height="48" fill="#334155"/></g>
+<g><title>AVX: three-operand forms [Planned]</title><rect x="877.67" y="243" width="44.33" height="48" fill="#334155"/></g>
+<rect x="785" y="294" width="140" height="68" fill="#0b1018" stroke="#64748b"/>
+<text x="789" y="307" class="family">AVX-512</text>
+<g><title>AVX-512: EVEX decode [Planned]</title><rect x="787" y="311" width="44.33" height="48" fill="#334155"/></g>
+<g><title>AVX-512: ZMM/opmask state [Planned]</title><rect x="832.33" y="311" width="44.33" height="48" fill="#334155"/></g>
+<g><title>AVX-512: foundation subsets [Planned]</title><rect x="877.67" y="311" width="44.33" height="48" fill="#334155"/></g>
+<rect x="785" y="362" width="140" height="45" fill="#0b1018" stroke="#64748b"/>
+<text x="789" y="375" class="family">AVX2</text>
+<g><title>AVX2: 256-bit integer [Planned]</title><rect x="787" y="379" width="33" height="25" fill="#334155"/></g>
+<g><title>AVX2: gather [Planned]</title><rect x="821" y="379" width="33" height="25" fill="#334155"/></g>
+<rect x="785" y="407" width="140" height="23" fill="#0b1018" stroke="#64748b"/>
+<text x="789" y="420" class="family">FMA</text>
+<g><title>FMA: FMA3 [Planned]</title><rect x="787" y="424" width="21.67" height="3" fill="#334155"/></g>
+<rect x="925" y="90" width="131" height="121" fill="#0b1018" stroke="#64748b"/>
+<text x="929" y="103" class="family">BMI2</text>
+<g><title>BMI2: BZHI [Planned]</title><rect x="927" y="107" width="41.33" height="50" fill="#334155"/></g>
+<g><title>BMI2: MULX [Planned]</title><rect x="969.33" y="107" width="41.33" height="50" fill="#334155"/></g>
+<g><title>BMI2: PDEP/PEXT [Planned]</title><rect x="1011.67" y="107" width="41.33" height="50" fill="#334155"/></g>
+<g><title>BMI2: RORX [Planned]</title><rect x="927" y="158" width="41.33" height="50" fill="#334155"/></g>
+<g><title>BMI2: SARX/SHLX/SHRX [Planned]</title><rect x="969.33" y="158" width="41.33" height="50" fill="#334155"/></g>
+<rect x="925" y="211" width="131" height="121" fill="#0b1018" stroke="#64748b"/>
+<text x="929" y="224" class="family">Exceptions</text>
+<g><title>Exceptions: divide error [Planned]</title><rect x="927" y="228" width="41.33" height="50" fill="#334155"/></g>
+<g><title>Exceptions: access violation [Planned]</title><rect x="969.33" y="228" width="41.33" height="50" fill="#334155"/></g>
+<g><title>Exceptions: illegal instruction [Planned]</title><rect x="1011.67" y="228" width="41.33" height="50" fill="#334155"/></g>
+<g><title>Exceptions: breakpoint [Planned]</title><rect x="927" y="279" width="41.33" height="50" fill="#334155"/></g>
+<g><title>Exceptions: C++/SEH unwind [Planned]</title><rect x="969.33" y="279" width="41.33" height="50" fill="#334155"/></g>
+<rect x="925" y="332" width="131" height="73" fill="#0b1018" stroke="#64748b"/>
+<text x="929" y="345" class="family">String</text>
+<g><title>String: CMPS family [Planned]</title><rect x="927" y="349" width="41.33" height="53" fill="#334155"/></g>
+<g><title>String: LODS family [Planned]</title><rect x="969.33" y="349" width="41.33" height="53" fill="#334155"/></g>
+<g><title>String: INS/OUTS [Planned]</title><rect x="1011.67" y="349" width="41.33" height="53" fill="#334155"/></g>
+<rect x="925" y="405" width="131" height="25" fill="#0b1018" stroke="#64748b"/>
+<text x="929" y="418" class="family">F16C</text>
+<g><title>F16C: half conversion [Planned]</title><rect x="927" y="422" width="24.4" height="5" fill="#334155"/></g>
+<rect x="1056" y="90" width="130" height="121" fill="#0b1018" stroke="#64748b"/>
+<text x="1060" y="103" class="family">Crypto</text>
+<g><title>Crypto: AES-NI [Planned]</title><rect x="1058" y="107" width="41" height="50" fill="#334155"/></g>
+<g><title>Crypto: PCLMULQDQ [Planned]</title><rect x="1100" y="107" width="41" height="50" fill="#334155"/></g>
+<g><title>Crypto: SHA extensions [Planned]</title><rect x="1142" y="107" width="41" height="50" fill="#334155"/></g>
+<g><title>Crypto: GFNI [Planned]</title><rect x="1058" y="158" width="41" height="50" fill="#334155"/></g>
+<g><title>Crypto: VAES/VPCLMUL [Planned]</title><rect x="1100" y="158" width="41" height="50" fill="#334155"/></g>
+<rect x="1056" y="211" width="130" height="97" fill="#0b1018" stroke="#64748b"/>
+<text x="1060" y="224" class="family">System</text>
+<g><title>System: RDTSCP [Planned]</title><rect x="1058" y="228" width="41" height="38" fill="#334155"/></g>
+<g><title>System: RDRAND/RDSEED [Planned]</title><rect x="1100" y="228" width="41" height="38" fill="#334155"/></g>
+<g><title>System: XSAVE/XRSTOR [Planned]</title><rect x="1142" y="228" width="41" height="38" fill="#334155"/></g>
+<g><title>System: CLFLUSH/CLWB [Planned]</title><rect x="1058" y="267" width="41" height="38" fill="#334155"/></g>
+<rect x="1056" y="308" width="130" height="73" fill="#0b1018" stroke="#64748b"/>
+<text x="1060" y="321" class="family">BMI1</text>
+<g><title>BMI1: ANDN [Planned]</title><rect x="1058" y="325" width="41" height="53" fill="#334155"/></g>
+<g><title>BMI1: BEXTR [Planned]</title><rect x="1100" y="325" width="41" height="53" fill="#334155"/></g>
+<g><title>BMI1: BLSI/BLSMSK/BLSR [Planned]</title><rect x="1142" y="325" width="41" height="53" fill="#334155"/></g>
+<rect x="1056" y="381" width="130" height="49" fill="#0b1018" stroke="#64748b"/>
+<text x="1060" y="394" class="family">SSE4.2</text>
+<g><title>SSE4.2: PCMPxSTRx [Planned]</title><rect x="1058" y="398" width="41" height="29" fill="#334155"/></g>
+<g><title>SSE4.2: CRC32 [Planned]</title><rect x="1100" y="398" width="41" height="29" fill="#334155"/></g>
+<text x="14" y="462" class="section">Coverage by maturity</text>
+<text x="14" y="489" class="small">Broad behavior</text>
+<rect x="164" y="478" width="300" height="14" fill="#475569"/><rect x="164" y="478" width="120" height="14" fill="#22c55e"/>
+<text x="476" y="489" class="small">80/200</text>
+<text x="14" y="511" class="small">Partial behavior</text>
+<rect x="164" y="500" width="300" height="14" fill="#475569"/><rect x="164" y="500" width="87" height="14" fill="#65a30d"/>
+<text x="476" y="511" class="small">58/200</text>
+<text x="14" y="533" class="small">Initial behavior</text>
+<rect x="164" y="522" width="300" height="14" fill="#475569"/><rect x="164" y="522" width="28" height="14" fill="#d97706"/>
+<text x="476" y="533" class="small">19/200</text>
+<text x="14" y="555" class="small">Tracked active work</text>
+<rect x="164" y="544" width="300" height="14" fill="#475569"/><rect x="164" y="544" width="236" height="14" fill="#3b82f6"/>
+<text x="476" y="555" class="small">157/200</text>
+<text x="620" y="462" class="section">High-value work still needed</text>
+<text x="620" y="487" class="small">SSE4.2    PCMPxSTRx, CRC32</text>
+<text x="620" y="509" class="small">AVX/AVX2  VEX decode, YMM state, 256-bit integer, gather</text>
+<text x="620" y="531" class="small">BMI1/2    extraction, deposit, multiply, variable shifts</text>
+<text x="620" y="553" class="small">Exceptions divide, access, illegal instruction, breakpoint, SEH</text>
+<text x="14" y="594" class="section">Legend and measurement</text>
+<rect x="14" y="608" width="12" height="12" fill="#22c55e"/><text x="32" y="619" class="small">Broad</text><rect x="100" y="608" width="12" height="12" fill="#65a30d"/><text x="118" y="619" class="small">Partial</text><rect x="190" y="608" width="12" height="12" fill="#d97706"/><text x="208" y="619" class="small">Initial</text><rect x="275" y="608" width="12" height="12" fill="#334155"/><text x="293" y="619" class="small">Planned</text>
+<text x="14" y="642" class="sub">Source: docs/instruction-atlas.csv • Cells are catalog entries, not equal-sized encoding totals or a percentage of all historical x86.</text>
 </svg>

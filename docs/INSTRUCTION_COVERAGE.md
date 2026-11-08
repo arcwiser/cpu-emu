@@ -12,9 +12,11 @@ Legend:
 - 🟧 **Initial** — a narrow startup/compatibility subset exists.
 - ⬜ **Planned** — recognized as required, but not implemented as a dependable family.
 
-The [visual completion map](assets/instruction-status.svg) summarizes the same family-level state.
-`src/cpu.cpp` and `tests/tests.cpp` remain authoritative when this document and code disagree.
-The repeated cells in the visual are decorative texture, not measured opcode/encoding units.
+The [visual completion map](assets/instruction-status.svg) is generated from
+[`instruction-atlas.csv`](instruction-atlas.csv). Every cell maps to one named catalog entry, but
+entries deliberately mix individual mnemonics, grouped condition families, encoding subsets, and
+architectural capabilities; they are not equal-sized encoding units or a percentage denominator.
+`src/cpu.cpp` and `tests/tests.cpp` remain authoritative when documentation and code disagree.
 
 ## Compatibility impact map
 

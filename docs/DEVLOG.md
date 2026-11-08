@@ -4,6 +4,16 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-08 — Catalog-backed atlas and verified UI captures
+
+- Replaced the decorative instruction texture with a generated 200-cell catalog dashboard. Every
+  treemap cell now maps to a named instruction, grouped mnemonic, encoding subset, or capability;
+  the source CSV and PowerShell generator are committed for review.
+- Fixed message-loop callback re-entry by retaining API arguments before native `GetMessage` or
+  `PeekMessage` can synchronously clobber volatile registers, and added an end-to-end regression.
+- Captured genuine CPUEmu-owned Paint and About Windows UI. Corrected current Windows 11 Notepad to
+  blocked because its packaged launcher handoff does not produce a reproducible editor window.
+
 ## 2026-11-08 — Coverage credibility and impact mapping
 
 - Made the instruction atlas explicitly self-describing: its cells are decorative family-level
