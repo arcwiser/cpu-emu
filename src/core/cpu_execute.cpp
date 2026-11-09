@@ -1502,6 +1502,13 @@ void Cpu::step() {
         if (second == 0xae) {
             const auto decoded = decode_rm(rex);
             if (decoded.rm.is_register) {
+                const auto operation = decoded.reg & 7;
+                if (decoded.rm.register_index == 0 && operation >= 5 && operation <= 7) {
+                    // LFENCE/MFENCE/SFENCE. Guest execution is single-threaded and all memory
+                    // accesses complete synchronously, so the architectural ordering is already
+                    // enforced by the interpreter.
+                    return;
+                }
                 throw Error("unsupported 0F AE register instruction");
             }
             if ((decoded.reg & 7) == 2) { // LDMXCSR

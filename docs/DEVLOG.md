@@ -4,6 +4,24 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-09 — Notepad probe reaches one million instructions
+
+- Prevented native MSVC PPL from retaining and executing guest `_Threadpool_chore` callbacks.
+  Chores now run cooperatively through interpreter re-entry; a generated fixture verifies the
+  callback modifies guest memory.
+- Added guest-safe OLEAUT `GetErrorInfo` ordinal handling so native COM pointers cannot be written
+  into guest memory, plus an ordinal-import regression.
+- Expanded `Windows.Foundation.PropertyValue` from a Boolean singleton to per-object scalar
+  values with type reporting and typed getters. A generated fixture covers `CreateUInt32` and
+  `GetUInt32`.
+- Added guest-owned MSVC `basic_ios` state/mask adapters and `basic_istream::tellg`, extended the
+  stream fixture, and made zero-length bulk memory reads/writes no-ops.
+- Added `LFENCE`, `MFENCE`, and `SFENCE`; the sequential interpreter already provides their memory
+  ordering, and a compact machine-code regression covers all three encodings.
+- Modern packaged Notepad 11.2607.14.0 reached the 1,000,000-instruction probe limit without a
+  host crash, unsupported import, or unsupported instruction. It has not created a window, so no
+  launch or input support is claimed.
+
 ## 2026-11-09 — Guest-safe MSVC input streams
 
 - Added guest-owned `argc`/`argv`/wide-`argv` tables so MSVC startup code never receives host

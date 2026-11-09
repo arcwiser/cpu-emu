@@ -114,7 +114,7 @@ The x87 stack and control word are independent state; they are not aliases of XM
 | Family | Status | Implemented or observed forms |
 | --- | :---: | --- |
 | SSE | 🟨 | Scalar single moves/arithmetic and conversions; packed single arithmetic; logical operations; unpack and shuffle forms used by current guests |
-| SSE2 | 🟨 | Packed double arithmetic; scalar double conversions; XMM moves; packed integer add/subtract, compare, unpack, shuffle, byte shifts, and `PMOVMSKB` subsets |
+| SSE2 | 🟨 | Packed double arithmetic; scalar double conversions; XMM moves; packed integer add/subtract, compare, unpack, shuffle, byte shifts, `PMOVMSKB` subsets, and `LFENCE`/`MFENCE`/`SFENCE` ordering |
 | SSE3 | 🟨 | `MOVDDUP`, `LDDQU`, horizontal add/subtract, alternating add/subtract |
 | SSSE3 | 🟨 | `PSHUFB`, horizontal packed add/subtract variants, `PMADDUBSW`, `PSIGNB/W/D`, `PMULHRSW`, `PALIGNR`, `PABSB/W/D` |
 | SSE4.1 | 🟨 | `PTEST`, `PACKUSDW`, signed/unsigned packed min/max subset, `PMULLD` |

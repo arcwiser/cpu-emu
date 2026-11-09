@@ -435,6 +435,9 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
     } else if (normalized_module == "msvcp140.dll" &&
                name.starts_with("?seekg@?$basic_istream@D")) {
         api = Api::MsvcpStreamSeek;
+    } else if (normalized_module == "msvcp140.dll" &&
+               name.starts_with("?tellg@?$basic_istream@D")) {
+        api = Api::MsvcpStreamTell;
     } else if (normalized_module == "msvcp140.dll" && name.starts_with("?read@?$basic_istream@D")) {
         api = Api::MsvcpStreamRead;
     } else if (normalized_module == "msvcp140.dll" &&
@@ -444,12 +447,35 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
                                                        name.starts_with("??1?$basic_istream@D") ||
                                                        name.starts_with("??1?$basic_iostream@D"))) {
         api = Api::MsvcpStreamDestroy;
+    } else if (normalized_module == "msvcp140.dll" && name.starts_with("??0?$basic_ios@")) {
+        api = Api::MsvcpIosConstruct;
+    } else if (normalized_module == "msvcp140.dll" && name.starts_with("?clear@?$basic_ios@")) {
+        api = Api::MsvcpIosClear;
+    } else if (normalized_module == "msvcp140.dll" && name.starts_with("?setstate@?$basic_ios@")) {
+        api = Api::MsvcpIosSetState;
+    } else if (normalized_module == "msvcp140.dll" && name.starts_with("?good@ios_base@")) {
+        api = Api::MsvcpIosGood;
+    } else if (normalized_module == "msvcp140.dll" && name.starts_with("?fail@ios_base@")) {
+        api = Api::MsvcpIosFail;
+    } else if (normalized_module == "msvcp140.dll" && name.starts_with("?exceptions@ios_base@")) {
+        api = Api::MsvcpIosExceptions;
+    } else if (normalized_module == "msvcp140.dll" && name.starts_with("??1?$basic_ios@")) {
+        api = Api::MsvcpIosDestroy;
     } else if (normalized_module == "msvcp140.dll" && name.starts_with("??0?$basic_ostream@")) {
         api = Api::MsvcpOutputStreamConstruct;
     } else if (normalized_module == "msvcp140.dll" && name.starts_with("?write@?$basic_ostream@")) {
         api = Api::MsvcpStreamWrite;
-    } else if (normalized_module == "msvcp140.dll" && name.starts_with("??0?$basic_ios@")) {
-        api = Api::IdentityRcx;
+    } else if (normalized_module == "msvcp140.dll" &&
+               (name.starts_with("?_Schedule_chore@details@Concurrency@@") ||
+                name.starts_with("?_Reschedule_chore@details@Concurrency@@"))) {
+        api = Api::MsvcpScheduleChore;
+    } else if (normalized_module == "msvcp140.dll" &&
+               name.starts_with("?_Release_chore@details@Concurrency@@")) {
+        api = Api::MsvcpReleaseChore;
+    } else if (normalized_module == "oleaut32.dll" && (name == "GetErrorInfo" || name == "#200")) {
+        api = Api::GuestGetErrorInfo;
+    } else if (normalized_module == "oleaut32.dll" && (name == "SetErrorInfo" || name == "#201")) {
+        api = Api::GuestSetErrorInfo;
     } else if (name == "CreateThreadpoolTimer") {
         api = Api::CreateThreadpoolTimer;
     } else if (name == "SetThreadpoolTimer" || name == "WaitForThreadpoolTimerCallbacks" ||

@@ -4,6 +4,7 @@
 #include "winemu/memory.hpp"
 
 #include <cstdint>
+#include <span>
 
 namespace winemu::tests {
 
@@ -19,6 +20,10 @@ void test_memory() {
         rejected = true;
     }
     require(rejected, "unmapped access must fail");
+
+    // Empty bulk operations do not dereference their address, matching memcpy/read semantics.
+    require(memory.read(0xffffffffffffffffULL, 0).empty(), "zero-length read is empty");
+    memory.write(0xffffffffffffffffULL, std::span<const std::uint8_t>{});
 
     const std::uint8_t wide_text[] = {'C', 0, 'P', 0, 'U', 0, 0, 0};
     memory.write(0x200000200ULL, wide_text);

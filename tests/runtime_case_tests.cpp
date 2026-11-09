@@ -86,4 +86,28 @@ void test_winrt_activation() {
     require(result.exit_code == 0, "WinRT activation instance");
 }
 
+void test_schedule_chore() {
+    // MSVC PPL callbacks are guest addresses. They must re-enter the interpreter rather than be
+    // retained by the native thread pool and invoked as host machine code.
+    std::ostringstream output;
+    winemu::Runtime runtime(output);
+    const auto result = runtime.run(WINEMU_TEST_APPS_DIR "/schedule.exe");
+    require(result.exit_code == 0, "MSVC chore callback re-entry");
+}
+
+void test_get_error_info() {
+    // OLEAUT ordinal imports must not write a native COM pointer into guest memory.
+    std::ostringstream output;
+    winemu::Runtime runtime(output);
+    const auto result = runtime.run(WINEMU_TEST_APPS_DIR "/errorinfo.exe");
+    require(result.exit_code == 0, "guest-safe GetErrorInfo output");
+}
+
+void test_property_value() {
+    std::ostringstream output;
+    winemu::Runtime runtime(output);
+    const auto result = runtime.run(WINEMU_TEST_APPS_DIR "/propertyvalue.exe");
+    require(result.exit_code == 0, "PropertyValue UInt32 factory and getter");
+}
+
 } // namespace winemu::tests

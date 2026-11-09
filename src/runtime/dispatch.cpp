@@ -3797,16 +3797,14 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
 
         if (class_name == L"Windows.Foundation.PropertyValue") {
             if (property_value_statics_proxy_ == 0) {
-                const auto value_vtable = allocate(45 * 8);
-                property_value_proxy_ = allocate(8);
-                cpu.memory().write64(property_value_proxy_, value_vtable);
+                property_value_vtable_ = allocate(45 * 8);
                 for (std::uint32_t index = 0; index < 45; ++index) {
                     const auto thunk = next_thunk_;
                     next_thunk_ += 0x100;
                     thunks_.emplace(thunk, Api::PropertyValueMethod);
                     thunk_names_.emplace(thunk, "IPropertyValue#" + std::to_string(index));
                     property_value_methods_.emplace(thunk, index);
-                    cpu.memory().write64(value_vtable + index * 8, thunk);
+                    cpu.memory().write64(property_value_vtable_ + index * 8, thunk);
                 }
 
                 const auto statics_vtable = allocate(45 * 8);
@@ -4657,12 +4655,15 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             cpu.set_reg(Rax, 2);
         } else if (index == 2) {
             cpu.set_reg(Rax, 1);
-        } else if (index == 17) {
+        } else if (index >= 6 && index <= 17) {
             if (cpu.reg(R8) == 0) {
                 cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
             } else {
-                property_value_boolean_ = (cpu.reg(Rdx) & 0xffU) != 0;
-                cpu.memory().write64(cpu.reg(R8), property_value_proxy_);
+                const auto value = allocate(8);
+                cpu.memory().write64(value, property_value_vtable_);
+                property_value_types_[value] = index == 6 ? 0 : index - 6;
+                property_value_data_[value] = cpu.reg(Rdx);
+                cpu.memory().write64(cpu.reg(R8), value);
                 cpu.set_reg(Rax, 0);
             }
         } else {
@@ -4673,6 +4674,8 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     }
     case Api::PropertyValueMethod: {
         const auto index = property_value_methods_.at(cpu.rip());
+        const auto type = property_value_types_.find(cpu.reg(Rcx));
+        const auto data = property_value_data_.find(cpu.reg(Rcx));
         if (index == 0) {
             if (cpu.reg(R8) != 0) {
                 cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
@@ -4684,19 +4687,33 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             cpu.set_reg(Rax, 1);
         } else if (index == 6) {
             if (cpu.reg(Rdx) != 0) {
-                cpu.memory().write32(cpu.reg(Rdx), 11); // PropertyType::Boolean
+                cpu.memory().write32(cpu.reg(Rdx),
+                                     type == property_value_types_.end() ? 0 : type->second);
             }
             cpu.set_reg(Rax, cpu.reg(Rdx) == 0 ? 0x80070057U : 0);
         } else if (index == 7) {
             if (cpu.reg(Rdx) != 0) {
-                cpu.memory().write8(cpu.reg(Rdx), 0);
+                const auto property_type = type == property_value_types_.end() ? 0 : type->second;
+                cpu.memory().write8(cpu.reg(Rdx), property_type >= 1 && property_type <= 9 ? 1 : 0);
             }
             cpu.set_reg(Rax, cpu.reg(Rdx) == 0 ? 0x80070057U : 0);
-        } else if (index == 18) {
-            if (cpu.reg(Rdx) != 0) {
-                cpu.memory().write8(cpu.reg(Rdx), property_value_boolean_ ? 1 : 0);
+        } else if (index >= 8 && index <= 18) {
+            if (cpu.reg(Rdx) == 0 || type == property_value_types_.end() ||
+                data == property_value_data_.end() || type->second != index - 7) {
+                cpu.set_reg(Rax, cpu.reg(Rdx) == 0 ? 0x80070057U : 0x80028ca0U);
+            } else {
+                const auto bits = data->second;
+                if (index == 8 || index == 18) {
+                    cpu.memory().write8(cpu.reg(Rdx), static_cast<std::uint8_t>(bits));
+                } else if (index == 9 || index == 10 || index == 17) {
+                    cpu.memory().write16(cpu.reg(Rdx), static_cast<std::uint16_t>(bits));
+                } else if (index == 11 || index == 12 || index == 15) {
+                    cpu.memory().write32(cpu.reg(Rdx), static_cast<std::uint32_t>(bits));
+                } else {
+                    cpu.memory().write64(cpu.reg(Rdx), bits);
+                }
+                cpu.set_reg(Rax, 0);
             }
-            cpu.set_reg(Rax, cpu.reg(Rdx) == 0 ? 0x80070057U : 0);
         } else {
             cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
         }
@@ -4933,6 +4950,18 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call();
         break;
     }
+    case Api::MsvcpStreamTell: {
+        const auto output = cpu.reg(Rdx);
+        auto *file = stream_file(cpu.reg(Rcx));
+        if (output == 0) {
+            throw Error("basic_istream::tellg received a null return object");
+        }
+        const auto position = file == nullptr ? -1 : _ftelli64(file);
+        cpu.memory().write64(output, static_cast<std::uint64_t>(position));
+        cpu.set_reg(Rax, output);
+        finish_call();
+        break;
+    }
     case Api::MsvcpStreamRead:
     case Api::MsvcpStreamReadSome: {
         auto *stream = stream_file(cpu.reg(Rcx));
@@ -4953,6 +4982,41 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             input_stream_buffers_.erase(stream);
         }
         stream_buffer_files_.erase(cpu.reg(Rcx));
+        cpu.set_reg(Rax, 0);
+        finish_call();
+        break;
+    case Api::MsvcpIosConstruct:
+        ios_states_[cpu.reg(Rcx)] = 0;
+        ios_exception_masks_[cpu.reg(Rcx)] = 0;
+        cpu.set_reg(Rax, cpu.reg(Rcx));
+        finish_call();
+        break;
+    case Api::MsvcpIosClear:
+        ios_states_[cpu.reg(Rcx)] = static_cast<std::uint32_t>(cpu.reg(Rdx));
+        cpu.set_reg(Rax, cpu.reg(Rcx));
+        finish_call();
+        break;
+    case Api::MsvcpIosSetState:
+        ios_states_[cpu.reg(Rcx)] |= static_cast<std::uint32_t>(cpu.reg(Rdx));
+        cpu.set_reg(Rax, cpu.reg(Rcx));
+        finish_call();
+        break;
+    case Api::MsvcpIosGood:
+        cpu.set_reg(Rax, ios_states_[cpu.reg(Rcx)] == 0 ? 1 : 0);
+        finish_call();
+        break;
+    case Api::MsvcpIosFail:
+        cpu.set_reg(Rax, (ios_states_[cpu.reg(Rcx)] & 6U) != 0 ? 1 : 0);
+        finish_call();
+        break;
+    case Api::MsvcpIosExceptions:
+        ios_exception_masks_[cpu.reg(Rcx)] = static_cast<std::uint32_t>(cpu.reg(Rdx));
+        cpu.set_reg(Rax, cpu.reg(Rcx));
+        finish_call();
+        break;
+    case Api::MsvcpIosDestroy:
+        ios_states_.erase(cpu.reg(Rcx));
+        ios_exception_masks_.erase(cpu.reg(Rcx));
         cpu.set_reg(Rax, 0);
         finish_call();
         break;
@@ -4981,6 +5045,54 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call();
         break;
     }
+    case Api::MsvcpScheduleChore: {
+        const auto chore = cpu.reg(Rcx);
+        if (chore == 0) {
+            cpu.set_reg(Rax, EINVAL);
+            finish_call();
+            break;
+        }
+        // MSVC's _Threadpool_chore stores its callback and context at +8 and +16. Native
+        // _Schedule_chore would retain that callback and execute the guest address on a host
+        // thread. Run it cooperatively through the interpreter until CPUEmu has a guest scheduler.
+        const auto callback = cpu.memory().read64(chore + 8);
+        const auto context = cpu.memory().read64(chore + 16);
+        if (callback == 0) {
+            cpu.set_reg(Rax, EINVAL);
+            finish_call();
+            break;
+        }
+        cpu.memory().write64(chore,
+                             1); // Guest-visible scheduled marker, never a host work pointer.
+        static_cast<void>(invoke_guest(cpu, callback, {context, 0, 0, 0}, exit_code, exited));
+        cpu.set_reg(Rax, 0);
+        finish_call();
+        break;
+    }
+    case Api::MsvcpReleaseChore:
+        if (cpu.reg(Rcx) != 0) {
+            cpu.memory().write64(cpu.reg(Rcx), 0);
+        }
+        cpu.set_reg(Rax, 0);
+        finish_call();
+        break;
+    case Api::GuestGetErrorInfo:
+        if (cpu.reg(Rdx) == 0 || cpu.reg(Rcx) != 0) {
+            cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+        } else {
+            // CPUEmu has no pending guest IErrorInfo. Never forward the output pointer to
+            // OLEAUT32: a native IErrorInfo pointer is not a valid guest COM object.
+            cpu.memory().write64(cpu.reg(Rdx), 0);
+            cpu.set_reg(Rax, 1); // S_FALSE
+        }
+        finish_call();
+        break;
+    case Api::GuestSetErrorInfo:
+        // Retaining a guest COM pointer needs AddRef/Release re-entry and per-thread lifetime
+        // tracking. Fail closed until that adapter exists.
+        cpu.set_reg(Rax, cpu.reg(Rcx) == 0 ? 0x80004001U : 0x80070057U); // E_NOTIMPL/E_INVALIDARG
+        finish_call();
+        break;
     case Api::GeographicRegionMethod: {
         const auto index = geographic_region_methods_.at(cpu.rip());
         if (index == 0) {

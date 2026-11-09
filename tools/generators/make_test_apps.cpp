@@ -28,6 +28,9 @@ int main(int argc, char **argv) {
         write_pe(output / "sum.exe", sum);
         make_hello(output / "hello.exe");
         make_winrt_activation(output / "winrt.exe");
+        make_schedule_chore(output / "schedule.exe");
+        make_get_error_info(output / "errorinfo.exe");
+        make_property_value(output / "propertyvalue.exe");
         return 0;
     } catch (const std::exception &error) {
         std::cerr << "make_test_apps: " << error.what() << '\n';

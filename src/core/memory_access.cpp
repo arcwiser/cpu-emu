@@ -74,6 +74,9 @@ std::uint64_t Memory::read64(std::uint64_t address) const {
 }
 
 std::vector<std::uint8_t> Memory::read(std::uint64_t address, std::size_t size) const {
+    if (size == 0) {
+        return {};
+    }
     const auto &region = region_for(address, size, Read);
     const auto offset = static_cast<std::size_t>(address - region.base);
     return {region.data + offset, region.data + offset + size};
@@ -129,6 +132,9 @@ void Memory::write64(std::uint64_t address, std::uint64_t value) {
 }
 
 void Memory::write(std::uint64_t address, std::span<const std::uint8_t> bytes) {
+    if (bytes.empty()) {
+        return;
+    }
     auto &region = region_for(address, bytes.size(), Write);
     const auto offset = static_cast<std::size_t>(address - region.base);
     std::copy(bytes.begin(), bytes.end(), region.data + offset);

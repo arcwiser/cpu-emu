@@ -20,6 +20,9 @@ int main() {
         test_logging();
         test_paint_selftest();
         test_winrt_activation();
+        test_schedule_chore();
+        test_get_error_info();
+        test_property_value();
         std::cout << "all tests passed\n";
         return 0;
     } catch (const std::exception &error) {

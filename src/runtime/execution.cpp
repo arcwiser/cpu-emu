@@ -173,8 +173,9 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     ui_settings_methods_.clear();
     ui_settings3_methods_.clear();
     property_value_statics_proxy_ = 0;
-    property_value_proxy_ = 0;
-    property_value_boolean_ = false;
+    property_value_vtable_ = 0;
+    property_value_types_.clear();
+    property_value_data_.clear();
     property_value_statics_methods_.clear();
     property_value_methods_.clear();
     locale_proxy_ = 0;
@@ -186,6 +187,8 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     stream_buffer_lengths_.clear();
     stream_buffer_files_.clear();
     input_stream_buffers_.clear();
+    ios_states_.clear();
+    ios_exception_masks_.clear();
     pending_guest_file_stream_ = 0;
     for (const auto &[guest_stream, host_stream] : guest_file_streams_) {
         static_cast<void>(guest_stream);

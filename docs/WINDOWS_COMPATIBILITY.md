@@ -71,8 +71,13 @@ escape emulation or retain unsafe guest state:
 CPUEmu constructs guest-owned argument vectors for `__p___argc`, `__p___argv`, and
 `__p___wargv`. MSVC file and input-stream adapters keep native `FILE` pointers in runtime-owned
 maps; guest stream objects contain only guest addresses and opaque handles. Stream initialization,
-seek, read, swap, and destruction are marshaled by the runtime. Unimplemented C++ object methods
-must fail closed rather than invoking host STL code against a guest object layout.
+seek, position queries, read, swap, `basic_ios` state, and destruction are marshaled by the runtime.
+MSVC PPL chores re-enter the interpreter cooperatively; they are never handed to the native thread
+pool. Unimplemented C++ object methods must fail closed rather than invoking host STL code against
+a guest object layout.
+
+OLEAUT error-info outputs and WinRT `PropertyValue` scalars are guest-owned. Native COM interface
+pointers must never be written to a guest output parameter.
 
 See `src/runtime/dispatch.cpp` and `src/runtime/imports.cpp` for the authoritative dispatch and
 resolver implementations. This document is

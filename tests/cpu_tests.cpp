@@ -15,7 +15,8 @@ void test_cpu_loop() {
     memory.map(0x200000000ULL, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
     memory.map(0x300000000ULL, 0x1000, winemu::Read | winemu::Write, "stack");
     const std::uint8_t code[] = {
-        0xb9, 0x0a, 0, 0, 0, 0x31, 0xc0, 0x01, 0xc8, 0x83, 0xe9, 0x01, 0x75, 0xf9, 0xc3,
+        0xb9, 0x0a, 0,    0,    0,    0x31, 0xc0, 0x01, 0xc8, 0x83, 0xe9, 0x01,
+        0x75, 0xf9, 0x0f, 0xae, 0xe8, 0x0f, 0xae, 0xf0, 0x0f, 0xae, 0xf8, 0xc3,
     };
     memory.write(0x200000000ULL, code);
     memory.write64(0x300000ff8ULL, 0xdeadbeef);
@@ -25,6 +26,7 @@ void test_cpu_loop() {
         cpu.step();
     }
     require(cpu.reg(winemu::Rax) == 55, "CPU loop sum result");
+    require(cpu.instructions() == 36, "LFENCE/MFENCE/SFENCE execute as ordered instructions");
 }
 
 void test_cpu_32bit_mode() {

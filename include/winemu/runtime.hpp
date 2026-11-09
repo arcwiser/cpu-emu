@@ -159,8 +159,9 @@ class Runtime {
     std::unordered_map<std::uint64_t, std::uint32_t> ui_settings_methods_;
     std::unordered_map<std::uint64_t, std::uint32_t> ui_settings3_methods_;
     std::uint64_t property_value_statics_proxy_ = 0;
-    std::uint64_t property_value_proxy_ = 0;
-    bool property_value_boolean_ = false;
+    std::uint64_t property_value_vtable_ = 0;
+    std::unordered_map<std::uint64_t, std::uint32_t> property_value_types_;
+    std::unordered_map<std::uint64_t, std::uint64_t> property_value_data_;
     std::unordered_map<std::uint64_t, std::uint32_t> property_value_statics_methods_;
     std::unordered_map<std::uint64_t, std::uint32_t> property_value_methods_;
 
@@ -175,6 +176,8 @@ class Runtime {
     std::unordered_map<std::uint64_t, std::uint64_t> stream_buffer_lengths_;
     std::unordered_map<std::uint64_t, std::uint64_t> stream_buffer_files_;
     std::unordered_map<std::uint64_t, std::uint64_t> input_stream_buffers_;
+    std::unordered_map<std::uint64_t, std::uint32_t> ios_states_;
+    std::unordered_map<std::uint64_t, std::uint32_t> ios_exception_masks_;
     std::unordered_map<std::uint64_t, void *> guest_file_streams_;
     std::uint64_t pending_guest_file_stream_ = 0;
 
