@@ -16,7 +16,8 @@ this file is the companion log of development decisions.
   `GetUInt32`.
 - Added guest-owned MSVC `basic_ios` state/mask adapters and `basic_istream::tellg`, extended the
   stream fixture, associated stream objects with their `basic_ios` state, propagated EOF/fail on
-  short reads, and made zero-length bulk memory reads/writes no-ops.
+  short reads, constructed the complete MSVC `streampos` ABI value, and made zero-length bulk
+  memory reads/writes no-ops.
 - Added `LFENCE`, `MFENCE`, and `SFENCE`; the sequential interpreter already provides their memory
   ordering, and a compact machine-code regression covers all three encodings.
 - Modern packaged Notepad 11.2607.14.0 reached the 1,000,000-instruction probe limit without a

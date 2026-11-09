@@ -4945,8 +4945,21 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     }
     case Api::MsvcpStreamSeek: {
         auto *stream = stream_file(cpu.reg(Rcx));
-        const auto position =
-            cpu.reg(Rdx) == 0 ? -1 : static_cast<std::int64_t>(cpu.memory().read64(cpu.reg(Rdx)));
+        std::int64_t position = -1;
+        if (cpu.reg(Rdx) != 0) {
+            // MSVC streampos is {streamoff _Myoff, fpos_t _Fpos, mbstate_t _Mystate}.
+            // Old basic_filebuf objects may still use _Fpos, so its conversion operator adds both
+            // signed 64-bit fields. The trailing conversion state does not affect a byte seek.
+            const auto offset = static_cast<std::int64_t>(cpu.memory().read64(cpu.reg(Rdx)));
+            const auto file_position =
+                static_cast<std::int64_t>(cpu.memory().read64(cpu.reg(Rdx) + 8));
+            if ((file_position <= 0 ||
+                 offset <= std::numeric_limits<std::int64_t>::max() - file_position) &&
+                (file_position >= 0 ||
+                 offset >= std::numeric_limits<std::int64_t>::min() - file_position)) {
+                position = offset + file_position;
+            }
+        }
         if (stream != nullptr && position >= 0) {
             static_cast<void>(_fseeki64(stream, position, SEEK_SET));
         }
@@ -4961,7 +4974,12 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             throw Error("basic_istream::tellg received a null return object");
         }
         const auto position = file == nullptr ? -1 : _ftelli64(file);
+        // Construct the complete 24-byte MSVC streampos value in guest memory. Hidden return
+        // storage is uninitialized, so leaving the legacy _Fpos field untouched can make the
+        // caller observe an arbitrary offset even when _Myoff is correct.
         cpu.memory().write64(output, static_cast<std::uint64_t>(position));
+        cpu.memory().write64(output + 8, 0);  // fpos_t _Fpos
+        cpu.memory().write64(output + 16, 0); // mbstate_t _Mystate
         cpu.set_reg(Rax, output);
         finish_call();
         break;

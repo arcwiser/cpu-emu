@@ -10,8 +10,14 @@ int main() {
     input.seekg(4);
     char value = 0;
     input.read(&value, 1);
-    if (value != '4' || input.tellg() != 5) {
+    const auto position = input.tellg();
+    if (value != '4' || position != std::streampos(5)) {
         return 1;
+    }
+    input.seekg(position + std::streamoff(1));
+    input.read(&value, 1);
+    if (value != '6') {
+        return 4;
     }
     input.exceptions(std::ios::goodbit);
     input.seekg(10);
