@@ -1,20 +1,28 @@
+#define _CRT_SECURE_NO_WARNINGS
+
 #include "winemu/runtime.hpp"
 
+#include "callbacks.hpp"
+
+#include "winemu/detail/runtime_layout.hpp"
+#include "winemu/detail/runtime_strings.hpp"
 #include "winemu/error.hpp"
 #include "winemu/log.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <cwctype>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <ostream>
 #include <sstream>
-#include <unordered_set>
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
+#include <share.h>
 #include <windows.h>
 
 extern "C" __declspec(dllimport) wchar_t **__stdcall CommandLineToArgvW(const wchar_t *, int *);
@@ -30,39 +38,15 @@ namespace winemu {
 
 namespace {
 
-constexpr std::uint64_t return_thunk64 = 0xffff'0000'0000'0000ULL;
-constexpr std::uint64_t return_thunk32 = 0x7ff0'0000ULL;
-constexpr std::uint64_t callback_return = 0xffff'0000'0000'0080ULL;
-constexpr std::uint64_t callback_return32 = 0x7ff0'0080ULL;
-constexpr std::uint64_t stack_top = 0x0000'0000'7000'0000ULL;
-constexpr std::uint64_t minimum_stack_size = 1024 * 1024;
-constexpr std::uint64_t environment_base = 0x7fc0'0000ULL;
-constexpr std::uint64_t environment_size = 0x0002'0000ULL;
-constexpr std::uint64_t tls_base = 0x7fc2'0000ULL;
-constexpr std::uint64_t tls_size = 0x0002'0000ULL;
-constexpr std::uint64_t teb_base = environment_base + 0xe000;
-constexpr std::uint64_t peb_base = environment_base + 0xf000;
-constexpr std::uint64_t crt_commode = environment_base + 0x1000;
-constexpr std::uint64_t crt_errno = environment_base + 0x1008;
-constexpr std::uint64_t command_line_address = environment_base + 0x2000;
-constexpr std::uint64_t winmain_command_line_address = environment_base + 0x3000;
+using detail::crt_argc;
+using detail::crt_argv;
+using detail::crt_commode;
+using detail::crt_errno;
+using detail::crt_wargv;
 constexpr DWORD sound_async = 0x0001;
 constexpr DWORD sound_memory = 0x0004;
 constexpr DWORD sound_loop = 0x0008;
 constexpr DWORD sound_resource = 0x00040004;
-
-thread_local Runtime *active_runtime = nullptr;
-thread_local Cpu *active_cpu = nullptr;
-thread_local std::uint32_t *active_exit_code = nullptr;
-thread_local bool *active_exited = nullptr;
-thread_local std::exception_ptr callback_exception;
-
-std::string lowercase(std::string value) {
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
-        return static_cast<char>(std::tolower(character));
-    });
-    return value;
-}
 
 std::uint8_t permissions_from_page_protection(std::uint32_t protection) {
     switch (protection & 0xff) {
@@ -95,663 +79,9 @@ std::uint32_t page_protection_from_permissions(std::uint8_t permissions) {
     return (permissions & Read) != 0 ? PAGE_READONLY : PAGE_NOACCESS;
 }
 
-std::string narrow_string(const std::wstring &value) {
-    std::string result;
-    result.reserve(value.size());
-    for (const wchar_t character : value) {
-        result.push_back(character >= 0 && character < 0x80 ? static_cast<char>(character) : '?');
-    }
-    return result;
-}
-
-std::string window_message_name(std::uint32_t message) {
-    switch (message) {
-    case WM_NULL:
-        return "WM_NULL";
-    case WM_CREATE:
-        return "WM_CREATE";
-    case WM_DESTROY:
-        return "WM_DESTROY";
-    case WM_MOVE:
-        return "WM_MOVE";
-    case WM_SIZE:
-        return "WM_SIZE";
-    case WM_ACTIVATE:
-        return "WM_ACTIVATE";
-    case WM_ACTIVATEAPP:
-        return "WM_ACTIVATEAPP";
-    case WM_SETFOCUS:
-        return "WM_SETFOCUS";
-    case WM_KILLFOCUS:
-        return "WM_KILLFOCUS";
-    case WM_ENABLE:
-        return "WM_ENABLE";
-    case WM_SETREDRAW:
-        return "WM_SETREDRAW";
-    case WM_SETTEXT:
-        return "WM_SETTEXT";
-    case WM_GETTEXT:
-        return "WM_GETTEXT";
-    case WM_GETTEXTLENGTH:
-        return "WM_GETTEXTLENGTH";
-    case WM_PAINT:
-        return "WM_PAINT";
-    case WM_CLOSE:
-        return "WM_CLOSE";
-    case WM_QUIT:
-        return "WM_QUIT";
-    case WM_ERASEBKGND:
-        return "WM_ERASEBKGND";
-    case WM_SHOWWINDOW:
-        return "WM_SHOWWINDOW";
-    case WM_SETCURSOR:
-        return "WM_SETCURSOR";
-    case WM_MOUSEACTIVATE:
-        return "WM_MOUSEACTIVATE";
-    case WM_GETICON:
-        return "WM_GETICON";
-    case WM_SETICON:
-        return "WM_SETICON";
-    case WM_KEYDOWN:
-        return "WM_KEYDOWN";
-    case WM_KEYUP:
-        return "WM_KEYUP";
-    case WM_CHAR:
-        return "WM_CHAR";
-    case WM_SYSKEYDOWN:
-        return "WM_SYSKEYDOWN";
-    case WM_SYSKEYUP:
-        return "WM_SYSKEYUP";
-    case WM_SYSCHAR:
-        return "WM_SYSCHAR";
-    case WM_SYSCOMMAND:
-        return "WM_SYSCOMMAND";
-    case WM_COMMAND:
-        return "WM_COMMAND";
-    case WM_TIMER:
-        return "WM_TIMER";
-    case WM_HSCROLL:
-        return "WM_HSCROLL";
-    case WM_VSCROLL:
-        return "WM_VSCROLL";
-    case WM_INITMENU:
-        return "WM_INITMENU";
-    case WM_INITMENUPOPUP:
-        return "WM_INITMENUPOPUP";
-    case WM_MENUSELECT:
-        return "WM_MENUSELECT";
-    case WM_CONTEXTMENU:
-        return "WM_CONTEXTMENU";
-    case WM_MOUSEMOVE:
-        return "WM_MOUSEMOVE";
-    case WM_LBUTTONDOWN:
-        return "WM_LBUTTONDOWN";
-    case WM_LBUTTONUP:
-        return "WM_LBUTTONUP";
-    case WM_LBUTTONDBLCLK:
-        return "WM_LBUTTONDBLCLK";
-    case WM_RBUTTONDOWN:
-        return "WM_RBUTTONDOWN";
-    case WM_RBUTTONUP:
-        return "WM_RBUTTONUP";
-    case WM_MOUSEWHEEL:
-        return "WM_MOUSEWHEEL";
-    case WM_GETMINMAXINFO:
-        return "WM_GETMINMAXINFO";
-    case WM_GETOBJECT:
-        return "WM_GETOBJECT";
-    case WM_NCCREATE:
-        return "WM_NCCREATE";
-    case WM_NCCALCSIZE:
-        return "WM_NCCALCSIZE";
-    case WM_NCHITTEST:
-        return "WM_NCHITTEST";
-    case WM_NCPAINT:
-        return "WM_NCPAINT";
-    case WM_NCACTIVATE:
-        return "WM_NCACTIVATE";
-    case WM_NCDESTROY:
-        return "WM_NCDESTROY";
-    case WM_NCMOUSEMOVE:
-        return "WM_NCMOUSEMOVE";
-    case WM_WINDOWPOSCHANGING:
-        return "WM_WINDOWPOSCHANGING";
-    case WM_WINDOWPOSCHANGED:
-        return "WM_WINDOWPOSCHANGED";
-    case WM_NOTIFY:
-        return "WM_NOTIFY";
-    case WM_STYLECHANGING:
-        return "WM_STYLECHANGING";
-    case WM_STYLECHANGED:
-        return "WM_STYLECHANGED";
-    case WM_SETTINGCHANGE:
-        return "WM_SETTINGCHANGE";
-    case WM_DISPLAYCHANGE:
-        return "WM_DISPLAYCHANGE";
-    case WM_DEVICECHANGE:
-        return "WM_DEVICECHANGE";
-    case WM_CAPTURECHANGED:
-        return "WM_CAPTURECHANGED";
-    case WM_ENTERSIZEMOVE:
-        return "WM_ENTERSIZEMOVE";
-    case WM_EXITSIZEMOVE:
-        return "WM_EXITSIZEMOVE";
-    case WM_IME_SETCONTEXT:
-        return "WM_IME_SETCONTEXT";
-    case WM_IME_NOTIFY:
-        return "WM_IME_NOTIFY";
-    case WM_THEMECHANGED:
-        return "WM_THEMECHANGED";
-    case WM_DPICHANGED:
-        return "WM_DPICHANGED";
-    default:
-        return "message 0x" + log::hex(message);
-    }
-}
-
-std::string cpu_state_dump(const Cpu &cpu) {
-    static constexpr const char *register_names[16] = {"rax", "rcx", "rdx", "rbx", "rsp", "rbp",
-                                                       "rsi", "rdi", "r8",  "r9",  "r10", "r11",
-                                                       "r12", "r13", "r14", "r15"};
-    std::ostringstream stream;
-    for (std::size_t index = 0; index < 16; ++index) {
-        stream << register_names[index] << '=' << log::hex(cpu.reg(static_cast<Register>(index)))
-               << ((index % 4) == 3 ? '\n' : ' ');
-    }
-    stream << "rip history:";
-    for (const auto address : cpu.recent_instructions()) {
-        stream << ' ' << log::hex(address);
-    }
-    return stream.str();
-}
-
-LRESULT CALLBACK window_proc_bridge(HWND window, UINT message, WPARAM word_parameter,
-                                    LPARAM long_parameter) {
-    if (active_runtime == nullptr || active_cpu == nullptr || active_exit_code == nullptr ||
-        active_exited == nullptr) {
-        return DefWindowProcW(window, message, word_parameter, long_parameter);
-    }
-    if (log::enabled(log::Level::Trace)) {
-        log::trace("window", "callback " + window_message_name(message) +
-                                 " window=" + log::hex(reinterpret_cast<std::uint64_t>(window)) +
-                                 " wparam=" + log::hex(word_parameter) +
-                                 " lparam=" + log::hex(static_cast<std::uint64_t>(long_parameter)));
-    }
-    std::intptr_t result = 0;
-    try {
-        result = active_runtime->invoke_window_proc(
-            *active_cpu, reinterpret_cast<std::uint64_t>(window), message, word_parameter,
-            long_parameter, *active_exit_code, *active_exited);
-    } catch (...) {
-        callback_exception = std::current_exception();
-        log::error("window", "guest window procedure faulted on " + window_message_name(message) +
-                                 ", falling back to DefWindowProcW");
-        result = DefWindowProcW(window, message, word_parameter, long_parameter);
-    }
-    if (log::enabled(log::Level::Trace)) {
-        log::trace("window", "callback " + window_message_name(message) + " -> " +
-                                 log::hex(static_cast<std::uint64_t>(result)));
-    }
-    return result;
-}
+using detail::narrow_string;
 
 } // namespace
-
-Runtime::Runtime(std::ostream &output) : output_(output) {
-    thunks_.emplace(return_thunk64, Api::ProcessReturn);
-}
-
-Runtime::~Runtime() {
-    for (const auto &[guest_handle, host_handle] : find_handles_) {
-        static_cast<void>(guest_handle);
-        ::FindClose(static_cast<HANDLE>(host_handle));
-    }
-    for (const auto &[guest_handle, host_handle] : file_handles_) {
-        static_cast<void>(guest_handle);
-        ::CloseHandle(static_cast<HANDLE>(host_handle));
-    }
-    if (host_gdiplus_token_ != 0) {
-        if (const auto library = ::LoadLibraryW(L"gdiplus.dll"); library != nullptr) {
-            using Shutdown = void(WINAPI *)(std::uint64_t);
-            if (const auto shutdown =
-                    reinterpret_cast<Shutdown>(::GetProcAddress(library, "GdiplusShutdown"));
-                shutdown != nullptr) {
-                shutdown(host_gdiplus_token_);
-            }
-        }
-    }
-    if (resource_module_ != nullptr) {
-        FreeLibrary(static_cast<HMODULE>(resource_module_));
-    }
-}
-
-std::uint64_t Runtime::allocate_data_import(const std::string &module, const std::string &name) {
-    // CRT variables are data exports: the guest reads and writes the value at the address
-    // in its import table, so each one needs a real mapped slot rather than a code thunk.
-    constexpr std::uint64_t slot_size = 0x400;
-    constexpr std::uint64_t first_slot = environment_base + 0x4000;
-    if (data_import_next_ == 0) {
-        data_import_next_ = first_slot;
-    }
-    if (data_import_next_ + slot_size > teb_base) {
-        throw Error("CRT data import space exhausted at " + module + "!" + name);
-    }
-    const auto address = data_import_next_;
-    data_import_next_ += slot_size;
-    data_import_slots_.emplace(name, address);
-    log::trace("imports", module + "!" + name + " -> data slot " + log::hex(address));
-    return address;
-}
-
-std::uint64_t Runtime::resolve_import(const std::string &module, const std::string &name) {
-    static const std::unordered_set<std::string> data_imports{
-        "_fmode",    "_commode",  "_wcmdln",   "_acmdln", "_environ",
-        "_wenviron", "_winmajor", "_winminor", "_osver",  "_winver",
-    };
-    if (data_imports.contains(name)) {
-        return allocate_data_import(module, name);
-    }
-    const auto normalized_module = lowercase(module);
-    const bool kernel_module = normalized_module == "kernel32.dll" ||
-                               normalized_module == "kernelbase.dll" ||
-                               normalized_module.starts_with("api-ms-win-core-");
-    Api api;
-    if ((kernel_module && name == "ExitProcess") || name == "CorExitProcess") {
-        api = Api::ExitProcess;
-    } else if (kernel_module && name == "GetStdHandle") {
-        api = Api::GetStdHandle;
-    } else if (kernel_module && name == "SetHandleCount") {
-        api = Api::SetHandleCount;
-    } else if (kernel_module && name == "GetFileType") {
-        api = Api::GuestFileType;
-    } else if (kernel_module && (name == "GetConsoleCP" || name == "GetConsoleOutputCP" ||
-                                 name == "GetACP" || name == "GetOEMCP")) {
-        api = Api::ConsoleCodePage;
-    } else if (kernel_module && name == "GetCPInfo") {
-        api = Api::GuestCodePageInfo;
-    } else if (kernel_module && name == "IsValidCodePage") {
-        api = Api::ValidateCodePage;
-    } else if (kernel_module && (name == "GetConsoleMode" || name == "SetConsoleMode")) {
-        api = Api::ConsoleMode;
-    } else if (kernel_module && name == "GetConsoleWindow") {
-        api = Api::ConsoleWindow;
-    } else if (kernel_module && (name == "GetCurrentProcess" || name == "GetCurrentThread")) {
-        api = Api::CurrentPseudoHandle;
-    } else if (name == "IsProcessorFeaturePresent") {
-        api = Api::ProcessorFeature;
-    } else if (kernel_module && (name == "SetConsoleCtrlHandler" || name == "SetStdHandle")) {
-        api = Api::SimpleHandleSuccess;
-    } else if (kernel_module && (name == "CreateFileA" || name == "CreateFileW")) {
-        api = Api::GuestCreateFile;
-    } else if (kernel_module && name == "ReadFile") {
-        api = Api::GuestReadFile;
-    } else if (kernel_module &&
-               (name == "SetFilePointer" || name == "GetFileSize" || name == "SetEndOfFile")) {
-        api = Api::GuestFilePosition;
-    } else if (kernel_module && name == "WriteFile") {
-        api = Api::WriteFile;
-    } else if (kernel_module && name == "CloseHandle") {
-        api = Api::GuestCloseHandle;
-    } else if (kernel_module && name == "GetLastError") {
-        api = Api::GetLastError;
-    } else if (kernel_module && name == "SetLastError") {
-        api = Api::SetLastError;
-    } else if (kernel_module && name == "GetSystemTimeAsFileTime") {
-        api = Api::GetSystemTimeAsFileTime;
-    } else if (kernel_module &&
-               (name == "FileTimeToLocalFileTime" || name == "LocalFileTimeToFileTime" ||
-                name == "FileTimeToSystemTime" || name == "SystemTimeToFileTime")) {
-        api = Api::TimeConversion;
-    } else if (kernel_module && name == "GetTimeZoneInformation") {
-        api = Api::TimeZoneInformation;
-    } else if (kernel_module && name == "GetCurrentProcessId") {
-        api = Api::GetCurrentProcessId;
-    } else if (kernel_module && name == "GetCurrentThreadId") {
-        api = Api::GetCurrentThreadId;
-    } else if (kernel_module && (name == "GetStartupInfoA" || name == "GetStartupInfoW")) {
-        api = Api::StartupInfo;
-    } else if (kernel_module && (name == "InitializeCriticalSection" ||
-                                 name == "InitializeCriticalSectionAndSpinCount")) {
-        api = Api::CriticalSectionInitialize;
-    } else if (kernel_module && (name == "EnterCriticalSection" || name == "LeaveCriticalSection" ||
-                                 name == "DeleteCriticalSection")) {
-        api = Api::CriticalSectionOperation;
-    } else if (kernel_module && name == "TryEnterCriticalSection") {
-        api = Api::CriticalSectionTry;
-    } else if (kernel_module &&
-               (name == "InterlockedIncrement" || name == "InterlockedDecrement" ||
-                name == "InterlockedExchange" || name == "InterlockedExchangeAdd" ||
-                name == "InterlockedCompareExchange" || name == "InterlockedAnd" ||
-                name == "InterlockedOr" || name == "InterlockedXor" ||
-                name == "InterlockedExchangePointer" ||
-                name == "InterlockedCompareExchangePointer" || name == "InterlockedIncrement64" ||
-                name == "InterlockedDecrement64" || name == "InterlockedExchange64" ||
-                name == "InterlockedExchangeAdd64" || name == "InterlockedCompareExchange64" ||
-                name == "InterlockedAnd64" || name == "InterlockedOr64" ||
-                name == "InterlockedXor64")) {
-        api = Api::InterlockedOperation;
-    } else if (name == "GetProcessWindowStation") {
-        api = Api::GetProcessWindowStation;
-    } else if (name == "GetUserObjectInformationA" || name == "GetUserObjectInformationW") {
-        api = Api::UserObjectInformation;
-    } else if (name == "GetSystemMetrics") {
-        api = Api::SystemMetrics;
-    } else if (name == "AdjustWindowRect" || name == "AdjustWindowRectEx") {
-        api = Api::WindowRectAdjustment;
-    } else if (name == "GetClientRect" || name == "GetWindowRect") {
-        api = Api::WindowRectQuery;
-    } else if (name == "DefWindowProcA" || name == "DefWindowProcW") {
-        api = Api::GuestDefWindowProc;
-    } else if (name == "SetWindowTextA" || name == "SetWindowTextW" || name == "GetWindowTextA" ||
-               name == "GetWindowTextW" || name == "GetWindowTextLengthA" ||
-               name == "GetWindowTextLengthW") {
-        api = Api::GuestWindowText;
-    } else if (name == "SendMessageA" || name == "SendMessageW") {
-        api = Api::GuestSendMessage;
-    } else if (name == "SetCursor" || name == "ShowCursor") {
-        api = Api::GuestCursor;
-    } else if (name == "EnumDisplaySettingsA" || name == "EnumDisplaySettingsW" ||
-               name == "EnumDisplaySettingsExA" || name == "EnumDisplaySettingsExW") {
-        api = Api::GuestDisplaySettings;
-    } else if (name == "MessageBoxA" || name == "MessageBoxW") {
-        api = Api::GuestMessageBox;
-    } else if (name == "PeekMessageA" || name == "PeekMessageW" || name == "GetMessageA" ||
-               name == "GetMessageW" || name == "TranslateMessage" || name == "DispatchMessageA" ||
-               name == "DispatchMessageW" || name == "PostQuitMessage") {
-        api = Api::GuestMessageLoop;
-    } else if (name == "GetOpenFileNameA" || name == "GetOpenFileNameW" ||
-               name == "GetSaveFileNameA" || name == "GetSaveFileNameW" ||
-               name == "CommDlgExtendedError") {
-        api = Api::GuestFileDialog;
-    } else if (name == "InitCommonControlsEx") {
-        api = Api::CommonControlsInitialize;
-    } else if (name == "GdiplusStartup") {
-        api = Api::GdiplusStartup;
-    } else if (name == "GdiplusShutdown") {
-        api = Api::GdiplusShutdown;
-    } else if (name == "SteamAPI_RestartAppIfNecessary") {
-        api = Api::SteamRestartApp;
-    } else if (name == "SteamAPI_Init" || name == "SteamAPI_InitSafe") {
-        api = Api::SteamInitialize;
-    } else if (kernel_module && name == "OutputDebugStringA") {
-        api = Api::OutputDebugStringA;
-    } else if (kernel_module && name == "Beep") {
-        api = Api::Beep;
-    } else if (name == "MessageBeep") {
-        api = Api::MessageBeep;
-    } else if (name == "PlaySoundA") {
-        api = Api::PlaySoundA;
-    } else if (name == "PlaySoundW") {
-        api = Api::PlaySoundW;
-    } else if (name == "sndPlaySoundA") {
-        api = Api::SndPlaySoundA;
-    } else if (name == "sndPlaySoundW") {
-        api = Api::SndPlaySoundW;
-    } else if (kernel_module && name == "GetTickCount") {
-        api = Api::GetTickCount;
-    } else if (kernel_module && name == "GetTickCount64") {
-        api = Api::GetTickCount64;
-    } else if (kernel_module && name == "QueryPerformanceCounter") {
-        api = Api::QueryPerformanceCounter;
-    } else if (kernel_module && name == "QueryPerformanceFrequency") {
-        api = Api::QueryPerformanceFrequency;
-    } else if (kernel_module && name == "Sleep") {
-        api = Api::Sleep;
-    } else if (name == "timeGetTime") {
-        api = Api::TimeGetTime;
-    } else if (name == "timeBeginPeriod") {
-        api = Api::TimeBeginPeriod;
-    } else if (name == "timeEndPeriod") {
-        api = Api::TimeEndPeriod;
-    } else if (name == "_initterm") {
-        api = Api::InitTerm;
-    } else if (name == "_initterm_e") {
-        api = Api::InitTermE;
-    } else if (name == "_register_thread_local_exe_atexit_callback" || name == "_crt_atexit" ||
-               name == "_o__crt_atexit") {
-        // Exit callbacks must stay guest-side; forwarding them would place guest code
-        // pointers on the host's atexit list.
-        api = Api::ReturnZero;
-    } else if (name == "_initialize_onexit_table") {
-        api = Api::InitializeOnexitTable;
-    } else if (name == "_register_onexit_function") {
-        api = Api::RegisterOnexitFunction;
-    } else if (name == "_execute_onexit_table") {
-        api = Api::ExecuteOnexitTable;
-    } else if (name == "_o___p__commode" || name == "__p__commode") {
-        api = Api::CommodePointer;
-    } else if (name == "_o__errno" || name == "_errno") {
-        api = Api::ErrnoPointer;
-    } else if (name == "SetUnhandledExceptionFilter") {
-        api = Api::SetUnhandledExceptionFilter;
-    } else if (name == "GetCommandLineA") {
-        api = Api::GetCommandLineA;
-    } else if (name == "GetCommandLineW") {
-        api = Api::GetCommandLineW;
-    } else if (name == "WideCharToMultiByte") {
-        api = Api::WideCharConversion;
-    } else if (name == "MultiByteToWideChar") {
-        api = Api::MultiByteConversion;
-    } else if (name == "GetStringTypeA" || name == "GetStringTypeW") {
-        api = Api::GuestStringType;
-    } else if (name == "LCMapStringA" || name == "LCMapStringW") {
-        api = Api::GuestMapString;
-    } else if (name == "CommandLineToArgvW") {
-        api = Api::CommandLineToArgvW;
-    } else if (name == "GetSecurityInfo") {
-        api = Api::GetSecurityInfo;
-    } else if (name == "MapViewOfFile") {
-        api = Api::MapViewOfFile;
-    } else if (name == "GetEnvironmentStringsW") {
-        api = Api::EnvironmentStringsW;
-    } else if (name == "GetEnvironmentStringsA" || name == "GetEnvironmentStrings") {
-        api = Api::EnvironmentStringsA;
-    } else if (name == "GetEnvironmentVariableA" || name == "GetEnvironmentVariableW") {
-        api = Api::EnvironmentVariable;
-    } else if (name == "ExpandEnvironmentStringsA" || name == "ExpandEnvironmentStringsW") {
-        api = Api::EnvironmentExpansion;
-    } else if (name == "GetFullPathNameA" || name == "GetFullPathNameW") {
-        api = Api::FullPathName;
-    } else if (name == "GetCurrentDirectoryA" || name == "GetCurrentDirectoryW" ||
-               name == "SetCurrentDirectoryA" || name == "SetCurrentDirectoryW") {
-        api = Api::CurrentDirectory;
-    } else if (name == "GetFileAttributesA" || name == "GetFileAttributesW" ||
-               name == "SetFileAttributesA" || name == "SetFileAttributesW") {
-        api = Api::FileAttributes;
-    } else if (name == "FreeEnvironmentStringsW" || name == "FreeEnvironmentStringsA") {
-        api = Api::ReturnOne;
-    } else if (name == "_o__get_wide_winmain_command_line") {
-        api = Api::WinMainCommandLine;
-    } else if (name == "EventRegister") {
-        api = Api::EventRegister;
-    } else if (name == "EventUnregister" || name == "EventWriteTransfer" ||
-               name == "EventSetInformation") {
-        api = Api::ReturnZero;
-    } else if (name == "DwmEnableMMCSS") {
-        api = Api::ReturnZero;
-    } else if (name == "VirtualAlloc") {
-        api = Api::VirtualAlloc;
-    } else if (name == "VirtualFree") {
-        api = Api::VirtualFree;
-    } else if (name == "VirtualProtect") {
-        api = Api::VirtualProtect;
-    } else if (name == "VirtualQuery") {
-        api = Api::VirtualQuery;
-    } else if (name == "TlsAlloc") {
-        api = Api::TlsAlloc;
-    } else if (name == "TlsFree") {
-        api = Api::TlsFree;
-    } else if (name == "TlsGetValue") {
-        api = Api::TlsGetValue;
-    } else if (name == "TlsSetValue") {
-        api = Api::TlsSetValue;
-    } else if (name == "FlsAlloc") {
-        api = Api::FlsAlloc;
-    } else if (name == "FlsFree") {
-        api = Api::FlsFree;
-    } else if (name == "FlsGetValue") {
-        api = Api::FlsGetValue;
-    } else if (name == "FlsSetValue") {
-        api = Api::FlsSetValue;
-    } else if (name == "InitOnceExecuteOnce") {
-        api = Api::InitOnceExecuteOnce;
-    } else if (name == "_o_malloc" || name == "malloc" || name == "CoTaskMemAlloc") {
-        api = Api::AllocateRcx;
-    } else if (name == "LocalAlloc" || name == "GlobalAlloc") {
-        api = Api::AllocateRdx;
-    } else if (name == "HeapAlloc") {
-        api = Api::AllocateR8;
-    } else if (name == "HeapCreate" || name == "GetProcessHeap") {
-        api = Api::ProcessHeap;
-    } else if (name == "HeapDestroy") {
-        api = Api::HeapDestroy;
-    } else if (name == "LocalReAlloc" || name == "HeapReAlloc") {
-        api = Api::Reallocate;
-    } else if (name == "_o_free" || name == "free" || name == "CoTaskMemFree" ||
-               name == "LocalFree" || name == "GlobalFree") {
-        api = Api::FreeRcx;
-    } else if (name == "HeapFree") {
-        api = Api::HeapFree;
-    } else if (name == "LocalSize" || name == "HeapSize") {
-        api = Api::AllocationSize;
-    } else if (name == "LocalLock" || name == "GlobalLock") {
-        api = Api::IdentityRcx;
-    } else if (kernel_module && (name == "EncodePointer" || name == "DecodePointer")) {
-        api = Api::IdentityRcx;
-    } else if (name == "LocalUnlock" || name == "GlobalUnlock") {
-        api = Api::ReturnZero;
-    } else if (name == "HeapSetInformation") {
-        api = Api::ReturnOne;
-    } else if (name == "_o_exit" || name == "_o__exit" || name == "_exit" || name == "exit" ||
-               name == "_amsg_exit") {
-        api = Api::ExitProcess;
-    } else if (name == "_o__cexit" || name == "_o__c_exit" || name == "_c_exit") {
-        api = Api::ReturnZero;
-    } else if (name == "TerminateProcess") {
-        api = Api::TerminateProcess;
-    } else if (name == "GetModuleHandleW" || name == "GetModuleHandleA") {
-        api = Api::GuestModuleHandle;
-    } else if (name == "LoadLibraryA" || name == "LoadLibraryW") {
-        api = Api::ModuleLoad;
-    } else if (name == "FreeLibrary") {
-        api = Api::ModuleFree;
-    } else if (name == "FindFirstFileA" || name == "FindFirstFileW") {
-        api = Api::GuestFindFirstFile;
-    } else if (name == "FindNextFileA" || name == "FindNextFileW") {
-        api = Api::GuestFindNextFile;
-    } else if (name == "FindClose") {
-        api = Api::GuestFindClose;
-    } else if (name == "GetModuleHandleExW") {
-        api = Api::GetModuleHandleExW;
-    } else if (name == "GetModuleFileNameW") {
-        api = Api::GetModuleFileNameW;
-    } else if (name == "GetModuleFileNameA") {
-        api = Api::GetModuleFileNameA;
-    } else if (name == "GetProcAddress") {
-        api = Api::GetProcAddress;
-    } else if (name == "LoadStringW") {
-        api = Api::LoadStringW;
-    } else if (name == "LoadCursorW") {
-        api = Api::LoadCursorW;
-    } else if (name == "LoadIconW") {
-        api = Api::LoadIconW;
-    } else if (name == "LoadImageW") {
-        api = Api::LoadImageW;
-    } else if (name == "LoadAcceleratorsW") {
-        api = Api::LoadAcceleratorsW;
-    } else if (name == "RegisterClassExW") {
-        api = Api::RegisterClassExW;
-    } else if (name == "CreateWindowExW") {
-        api = Api::CreateWindowExW;
-    } else if (name == "DirectInput8Create") {
-        api = Api::DirectInputCreate;
-    } else if (name == "ResolveDelayLoadedAPI") {
-        api = Api::ResolveDelayLoadedAPI;
-    } else if (name == "SHGetKnownFolderPath") {
-        api = Api::SHGetKnownFolderPath;
-    } else if (name == "CoCreateInstance") {
-        api = Api::CoCreateInstance;
-    } else if (name == "RoGetActivationFactory") {
-        api = Api::RoGetActivationFactory;
-    } else if (name == "CreateThreadpoolTimer") {
-        api = Api::CreateThreadpoolTimer;
-    } else if (name == "SetThreadpoolTimer" || name == "WaitForThreadpoolTimerCallbacks" ||
-               name == "CloseThreadpoolTimer") {
-        api = Api::ReturnZero;
-    } else if (name == "SetWinEventHook" || name == "UnhookWinEvent") {
-        api = Api::ReturnOne;
-    } else if (name == "_beginthreadex" || name == "_o__beginthreadex" || name == "_beginthread" ||
-               name == "_o__beginthread") {
-        // Guest callbacks cannot run on a native CRT-created thread. Report creation failure until
-        // the emulator has a scheduler that can give each guest thread its own CPU state.
-        api = Api::ReturnZero;
-    } else if (name == "CreateThread" || name == "CreateRemoteThread" ||
-               name == "CreateRemoteThreadEx" || name == "QueueUserWorkItem" ||
-               name == "RegisterWaitForSingleObject" || name == "CreateThreadpoolWork" ||
-               name == "CreateThreadpoolWait" || name == "CreateThreadpoolIo") {
-        // These APIs retain a callback address and may invoke it on another native thread.
-        // Passing guest code to the host would bypass the interpreter and fault (or worse).
-        api = Api::ReturnZero;
-    } else if (name == "SubmitThreadpoolWork" || name == "SetThreadpoolWait" ||
-               name == "CloseThreadpoolWork" || name == "CloseThreadpoolWait" ||
-               name == "CloseThreadpoolIo") {
-        api = Api::ReturnZero;
-    } else if (name == "CreateProcessW" || name == "CreateProcessA" ||
-               name == "CreateProcessAsUserW" || name == "CreateProcessAsUserA") {
-        // A child must be loaded as another guest process. Native forwarding here would silently
-        // escape emulation, so fail until multi-process guest scheduling is implemented.
-        api = Api::ReturnZero;
-    } else if (name == "AddVectoredExceptionHandler" || name == "AddVectoredContinueHandler") {
-        api = Api::ReturnZero;
-    } else if (name == "RemoveVectoredExceptionHandler" ||
-               name == "RemoveVectoredContinueHandler") {
-        api = Api::ReturnOne;
-    } else {
-        static const std::unordered_set<std::string> unsafe_calls{
-            "SetUnhandledExceptionFilter",
-            "UnhandledExceptionFilter",
-            "RaiseException",
-            "_CxxThrowException",
-            "__CxxFrameHandler3",
-            "__C_specific_handler",
-            "RegisterClassExW",
-            "DialogBoxParamW",
-            "CreateDialogParamW",
-            "CreateDialogIndirectParamW",
-            "EnumFontsW",
-            "SetAbortProc",
-            "GetProcAddress",
-            "ResolveDelayLoadedAPI",
-        };
-        void *function = nullptr;
-        if (guest_is_64_bit_ && !unsafe_calls.contains(name)) {
-            if (const auto library = LoadLibraryA(module.c_str()); library != nullptr) {
-                if (name.starts_with('#')) {
-                    const auto ordinal = static_cast<WORD>(std::stoul(name.substr(1)));
-                    function = reinterpret_cast<void *>(
-                        GetProcAddress(library, MAKEINTRESOURCEA(ordinal)));
-                } else {
-                    function = reinterpret_cast<void *>(GetProcAddress(library, name.c_str()));
-                }
-            }
-        }
-        api = function == nullptr ? Api::Unsupported : Api::Native;
-        if (function != nullptr) {
-            native_functions_.emplace(next_thunk_, function);
-        }
-    }
-    const auto address = next_thunk_;
-    next_thunk_ += 0x100;
-    thunks_.emplace(address, api);
-    thunk_names_.emplace(address, module + "!" + name);
-    if (log::enabled(log::Level::Trace)) {
-        log::trace("imports",
-                   module + "!" + name + " -> " + log::hex(address) +
-                       (api == Api::Unsupported ? " (unimplemented; calling it will stop the guest)"
-                                                : ""));
-    }
-    return address;
-}
 
 bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     const auto found = thunks_.find(cpu.rip());
@@ -793,6 +123,46 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         heap_sizes_.emplace(address, size);
         return address;
     };
+    const auto ensure_locale = [&] {
+        if (locale_proxy_ != 0) {
+            return;
+        }
+        constexpr std::uint64_t facet_capacity = 128;
+        constexpr std::uint32_t facet_method_count = 10;
+        locale_facet_vtable_ = allocate(facet_method_count * 8);
+        const auto facets = allocate(facet_capacity * 8);
+        const auto name = allocate(2);
+        locale_proxy_ = allocate(0x38);
+        cpu.memory().write8(name, '*');
+        cpu.memory().write8(name + 1, 0);
+        cpu.memory().write64(locale_proxy_, locale_facet_vtable_);
+        cpu.memory().write32(locale_proxy_ + 8, 1);
+        cpu.memory().write64(locale_proxy_ + 0x10, facets);
+        cpu.memory().write64(locale_proxy_ + 0x18, facet_capacity);
+        cpu.memory().write32(locale_proxy_ + 0x20, 0);
+        cpu.memory().write8(locale_proxy_ + 0x24, 0);
+        cpu.memory().write64(locale_proxy_ + 0x28, name);
+        for (std::uint32_t index = 0; index < facet_method_count; ++index) {
+            const auto thunk = next_thunk_;
+            next_thunk_ += 0x100;
+            thunks_.emplace(thunk, Api::LocaleFacetMethod);
+            thunk_names_.emplace(thunk, "locale::facet#" + std::to_string(index));
+            locale_facet_methods_.emplace(thunk, index);
+            cpu.memory().write64(locale_facet_vtable_ + index * 8, thunk);
+        }
+    };
+    const auto stream_file = [&](std::uint64_t stream_object) -> FILE * {
+        const auto buffer = input_stream_buffers_.find(stream_object);
+        if (buffer == input_stream_buffers_.end()) {
+            return nullptr;
+        }
+        const auto file = stream_buffer_files_.find(buffer->second);
+        if (file == stream_buffer_files_.end()) {
+            return nullptr;
+        }
+        const auto host = guest_file_streams_.find(file->second);
+        return host == guest_file_streams_.end() ? nullptr : static_cast<FILE *>(host->second);
+    };
     switch (found->second) {
     case Api::ProcessReturn:
         exit_code = static_cast<std::uint32_t>(cpu.reg(Rax));
@@ -802,6 +172,8 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         exit_code = static_cast<std::uint32_t>(argument(0));
         exited = true;
         break;
+    case Api::AbortProcess:
+        throw Error("guest called abort from " + log::hex(cpu.memory().read64(cpu.reg(Rsp))));
     case Api::TerminateProcess:
         exit_code = static_cast<std::uint32_t>(argument(1));
         exited = true;
@@ -1013,11 +385,175 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             result = ::CloseHandle(static_cast<HANDLE>(found->second)) != FALSE;
             file_handles_.erase(found);
         }
+        if (const auto sync = sync_handles_.find(argument(0)); sync != sync_handles_.end()) {
+            result = ::CloseHandle(static_cast<HANDLE>(sync->second)) != FALSE;
+            sync_handles_.erase(sync);
+        }
         if (!result) {
             last_error_ = ERROR_INVALID_HANDLE;
         }
         cpu.set_reg(Rax, result ? 1 : 0);
         finish_call(1);
+        break;
+    }
+    case Api::GuestSrwLock: {
+        if (argument(0) == 0) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, 0);
+            finish_call(1);
+            break;
+        }
+        if (thunk_name.ends_with("!InitializeSRWLock")) {
+            if (guest_is_64_bit_) {
+                cpu.memory().write64(argument(0), 0);
+            } else {
+                cpu.memory().write32(argument(0), 0);
+            }
+        }
+        // CPUEmu currently has one guest thread. Under that scheduler an SRW lock cannot
+        // contend, so acquire/release are state-free and try-acquire always succeeds.
+        cpu.set_reg(Rax, thunk_name.find("!TryAcquireSRWLock") != std::string::npos ? 1 : 0);
+        finish_call(1);
+        break;
+    }
+    case Api::GuestSynchronization: {
+        auto isolate_name = [&](std::uint64_t address) -> std::wstring {
+            if (address == 0) {
+                return {};
+            }
+            const auto guest_name = cpu.memory().read_wide_string(address, 32767);
+            std::wostringstream isolated;
+            isolated << synchronization_namespace_ << std::hex
+                     << std::hash<std::wstring>{}(guest_name);
+            return isolated.str();
+        };
+        auto add_handle = [&](HANDLE host_handle) -> std::uint64_t {
+            if (host_handle == nullptr) {
+                last_error_ = ::GetLastError();
+                return 0;
+            }
+            const auto guest_handle = next_sync_handle_++;
+            sync_handles_.emplace(guest_handle, host_handle);
+            return guest_handle;
+        };
+        auto find_handle = [&](std::uint64_t guest_handle) -> HANDLE {
+            const auto found = sync_handles_.find(guest_handle);
+            return found == sync_handles_.end() ? nullptr : static_cast<HANDLE>(found->second);
+        };
+
+        if (thunk_name.ends_with("!CreateMutexExW")) {
+            if (argument(0) != 0) {
+                last_error_ = ERROR_NOT_SUPPORTED;
+                cpu.set_reg(Rax, 0);
+            } else {
+                const auto name = isolate_name(argument(1));
+                ::SetLastError(ERROR_SUCCESS);
+                const auto handle = ::CreateMutexExW(nullptr, name.empty() ? nullptr : name.c_str(),
+                                                     static_cast<DWORD>(argument(2)),
+                                                     static_cast<DWORD>(argument(3)));
+                cpu.set_reg(Rax, add_handle(handle));
+                if (handle != nullptr) {
+                    last_error_ = ::GetLastError();
+                }
+            }
+            finish_call(4);
+            break;
+        }
+        if (thunk_name.ends_with("!CreateSemaphoreExW")) {
+            if (argument(0) != 0) {
+                last_error_ = ERROR_NOT_SUPPORTED;
+                cpu.set_reg(Rax, 0);
+            } else {
+                const auto name = isolate_name(argument(3));
+                ::SetLastError(ERROR_SUCCESS);
+                const auto handle = ::CreateSemaphoreExW(
+                    nullptr, static_cast<LONG>(argument(1)), static_cast<LONG>(argument(2)),
+                    name.empty() ? nullptr : name.c_str(), static_cast<DWORD>(argument(4)),
+                    static_cast<DWORD>(argument(5)));
+                cpu.set_reg(Rax, add_handle(handle));
+                if (handle != nullptr) {
+                    last_error_ = ::GetLastError();
+                }
+            }
+            finish_call(6);
+            break;
+        }
+        if (thunk_name.ends_with("!OpenSemaphoreW")) {
+            const auto name = isolate_name(argument(2));
+            const auto handle = name.empty() ? nullptr
+                                             : ::OpenSemaphoreW(static_cast<DWORD>(argument(0)),
+                                                                argument(1) != 0, name.c_str());
+            if (name.empty()) {
+                ::SetLastError(ERROR_INVALID_NAME);
+            }
+            cpu.set_reg(Rax, add_handle(handle));
+            finish_call(3);
+            break;
+        }
+        if (thunk_name.ends_with("!CreateEventExW")) {
+            if (argument(0) != 0) {
+                last_error_ = ERROR_NOT_SUPPORTED;
+                cpu.set_reg(Rax, 0);
+            } else {
+                const auto name = isolate_name(argument(1));
+                ::SetLastError(ERROR_SUCCESS);
+                const auto handle = ::CreateEventExW(nullptr, name.empty() ? nullptr : name.c_str(),
+                                                     static_cast<DWORD>(argument(2)),
+                                                     static_cast<DWORD>(argument(3)));
+                cpu.set_reg(Rax, add_handle(handle));
+                if (handle != nullptr) {
+                    last_error_ = ::GetLastError();
+                }
+            }
+            finish_call(4);
+            break;
+        }
+
+        const auto host_handle = find_handle(argument(0));
+        if (host_handle == nullptr) {
+            last_error_ = ERROR_INVALID_HANDLE;
+            cpu.set_reg(Rax, thunk_name.find("!WaitForSingleObject") != std::string::npos
+                                 ? WAIT_FAILED
+                                 : 0);
+        } else if (thunk_name.ends_with("!WaitForSingleObject") ||
+                   thunk_name.ends_with("!WaitForSingleObjectEx")) {
+            const auto result =
+                thunk_name.ends_with("Ex")
+                    ? ::WaitForSingleObjectEx(host_handle, static_cast<DWORD>(argument(1)),
+                                              argument(2) != 0)
+                    : ::WaitForSingleObject(host_handle, static_cast<DWORD>(argument(1)));
+            if (result == WAIT_FAILED) {
+                last_error_ = ::GetLastError();
+            }
+            cpu.set_reg(Rax, result);
+        } else if (thunk_name.ends_with("!ReleaseSemaphore")) {
+            LONG previous = 0;
+            const auto result = ::ReleaseSemaphore(host_handle, static_cast<LONG>(argument(1)),
+                                                   argument(2) == 0 ? nullptr : &previous);
+            if (result != FALSE && argument(2) != 0) {
+                cpu.memory().write32(argument(2), static_cast<std::uint32_t>(previous));
+            } else if (result == FALSE) {
+                last_error_ = ::GetLastError();
+            }
+            cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+        } else {
+            BOOL result = FALSE;
+            if (thunk_name.ends_with("!ReleaseMutex")) {
+                result = ::ReleaseMutex(host_handle);
+            } else if (thunk_name.ends_with("!SetEvent")) {
+                result = ::SetEvent(host_handle);
+            } else if (thunk_name.ends_with("!ResetEvent")) {
+                result = ::ResetEvent(host_handle);
+            }
+            if (result == FALSE) {
+                last_error_ = ::GetLastError();
+            }
+            cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+        }
+        finish_call(thunk_name.ends_with("!WaitForSingleObjectEx") ? 3
+                    : thunk_name.ends_with("!ReleaseSemaphore")    ? 3
+                    : thunk_name.ends_with("!WaitForSingleObject") ? 2
+                                                                   : 1);
         break;
     }
     case Api::WriteFile: {
@@ -1483,12 +1019,10 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         if (!supported) {
             last_error_ = ERROR_NOT_SUPPORTED;
-            log::warn("window",
-                      thunk_name + " refused pointer-bearing " + window_message_name(message));
+            log::warn("window", thunk_name + " refused pointer-bearing " +
+                                    detail::window_message_name(message));
         }
-        if (callback_exception != nullptr) {
-            auto exception = callback_exception;
-            callback_exception = nullptr;
+        if (auto exception = detail::take_callback_exception(); exception != nullptr) {
             std::rethrow_exception(exception);
         }
         cpu.set_reg(Rax, static_cast<std::uint64_t>(result));
@@ -1637,9 +1171,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             const auto message = read_message(message_address);
             const auto result = thunk_name.ends_with("W") ? ::DispatchMessageW(&message)
                                                           : ::DispatchMessageA(&message);
-            if (callback_exception != nullptr) {
-                auto exception = callback_exception;
-                callback_exception = nullptr;
+            if (auto exception = detail::take_callback_exception(); exception != nullptr) {
                 std::rethrow_exception(exception);
             }
             cpu.set_reg(Rax, static_cast<std::uint64_t>(result));
@@ -1983,6 +1515,18 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         cpu.set_reg(Rax, crt_errno);
         finish_call();
         break;
+    case Api::ArgcPointer:
+        cpu.set_reg(Rax, crt_argc);
+        finish_call();
+        break;
+    case Api::ArgvPointer:
+        cpu.set_reg(Rax, crt_argv);
+        finish_call();
+        break;
+    case Api::WideArgvPointer:
+        cpu.set_reg(Rax, crt_wargv);
+        finish_call();
+        break;
     case Api::SetUnhandledExceptionFilter: {
         const auto previous = guest_exception_filter_;
         guest_exception_filter_ = argument(0);
@@ -2081,6 +1625,197 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
         finish_call(6);
+        break;
+    }
+    case Api::GuestFormatMessage: {
+        const bool ansi = thunk_name.ends_with("FormatMessageA");
+        const auto flags = static_cast<DWORD>(argument(0));
+        const auto source_address = argument(1);
+        const auto output_address = argument(4);
+        const auto output_size = static_cast<DWORD>(argument(5));
+        const auto arguments_address = argument(6);
+        if (ansi) {
+            std::string source;
+            const char *host_source = nullptr;
+            if ((flags & FORMAT_MESSAGE_FROM_STRING) != 0) {
+                if (source_address == 0) {
+                    last_error_ = ERROR_INVALID_PARAMETER;
+                    cpu.set_reg(Rax, 0);
+                    finish_call(7);
+                    break;
+                }
+                source = cpu.memory().read_c_string(source_address, 32767);
+                host_source = source.c_str();
+            } else if ((flags & FORMAT_MESSAGE_FROM_SYSTEM) == 0) {
+                last_error_ = ERROR_NOT_SUPPORTED;
+                cpu.set_reg(Rax, 0);
+                finish_call(7);
+                break;
+            }
+            if ((flags & FORMAT_MESSAGE_IGNORE_INSERTS) == 0 && arguments_address != 0) {
+                last_error_ = ERROR_NOT_SUPPORTED;
+                cpu.set_reg(Rax, 0);
+                finish_call(7);
+                break;
+            }
+            std::vector<char> buffer(32768);
+            ::SetLastError(ERROR_SUCCESS);
+            const auto length =
+                ::FormatMessageA(flags & ~FORMAT_MESSAGE_ALLOCATE_BUFFER, host_source,
+                                 static_cast<DWORD>(argument(2)), static_cast<DWORD>(argument(3)),
+                                 buffer.data(), static_cast<DWORD>(buffer.size()), nullptr);
+            if (length == 0) {
+                last_error_ = ::GetLastError();
+                cpu.set_reg(Rax, 0);
+                finish_call(7);
+                break;
+            }
+            if ((flags & FORMAT_MESSAGE_ALLOCATE_BUFFER) != 0) {
+                if (output_address == 0) {
+                    last_error_ = ERROR_INVALID_PARAMETER;
+                    cpu.set_reg(Rax, 0);
+                    finish_call(7);
+                    break;
+                }
+                const auto guest_buffer = allocate(static_cast<std::uint64_t>(length) + 1);
+                cpu.memory().write(
+                    guest_buffer,
+                    std::span<const std::uint8_t>(
+                        reinterpret_cast<const std::uint8_t *>(buffer.data()), length + 1));
+                if (guest_is_64_bit_) {
+                    cpu.memory().write64(output_address, guest_buffer);
+                } else {
+                    cpu.memory().write32(output_address, static_cast<std::uint32_t>(guest_buffer));
+                }
+            } else {
+                if (output_address == 0 || output_size <= length) {
+                    last_error_ = ERROR_INSUFFICIENT_BUFFER;
+                    cpu.set_reg(Rax, 0);
+                    finish_call(7);
+                    break;
+                }
+                cpu.memory().write(
+                    output_address,
+                    std::span<const std::uint8_t>(
+                        reinterpret_cast<const std::uint8_t *>(buffer.data()), length + 1));
+            }
+            cpu.set_reg(Rax, length);
+            finish_call(7);
+            break;
+        }
+        std::wstring source;
+        const wchar_t *host_source = nullptr;
+        if ((flags & FORMAT_MESSAGE_FROM_STRING) != 0) {
+            if (source_address == 0) {
+                last_error_ = ERROR_INVALID_PARAMETER;
+                cpu.set_reg(Rax, 0);
+                finish_call(7);
+                break;
+            }
+            source = cpu.memory().read_wide_string(source_address, 32767);
+            host_source = source.c_str();
+        } else if ((flags & FORMAT_MESSAGE_FROM_SYSTEM) == 0) {
+            // Guest module handles and host HMODULE values are intentionally not interchangeable.
+            last_error_ = ERROR_NOT_SUPPORTED;
+            cpu.set_reg(Rax, 0);
+            finish_call(7);
+            break;
+        }
+
+        std::array<std::uint64_t, 99> host_arguments{};
+        std::array<std::wstring, 99> host_strings{};
+        unsigned maximum_insert = 0;
+        if ((flags & FORMAT_MESSAGE_IGNORE_INSERTS) == 0) {
+            for (std::size_t index = 0; index < source.size(); ++index) {
+                if (source[index] != L'%' || index + 1 >= source.size() ||
+                    !std::iswdigit(source[index + 1])) {
+                    continue;
+                }
+                std::size_t cursor = index + 1;
+                unsigned insert = 0;
+                while (cursor < source.size() && std::iswdigit(source[cursor])) {
+                    insert = insert * 10 + static_cast<unsigned>(source[cursor] - L'0');
+                    ++cursor;
+                }
+                if (insert == 0 || insert > host_arguments.size()) {
+                    last_error_ = ERROR_INVALID_PARAMETER;
+                    cpu.set_reg(Rax, 0);
+                    finish_call(7);
+                    return true;
+                }
+                maximum_insert = std::max(maximum_insert, insert);
+                bool string_insert = true;
+                if (cursor < source.size() && source[cursor] == L'!') {
+                    const auto end = source.find(L'!', cursor + 1);
+                    if (end != std::wstring::npos) {
+                        const auto format = source.substr(cursor + 1, end - cursor - 1);
+                        string_insert = format.find(L's') != std::wstring::npos ||
+                                        format.find(L'S') != std::wstring::npos;
+                    }
+                }
+                if (arguments_address == 0) {
+                    last_error_ = ERROR_INVALID_PARAMETER;
+                    cpu.set_reg(Rax, 0);
+                    finish_call(7);
+                    return true;
+                }
+                const auto value = guest_is_64_bit_
+                                       ? cpu.memory().read64(arguments_address + (insert - 1) * 8)
+                                       : cpu.memory().read32(arguments_address + (insert - 1) * 4);
+                host_arguments[insert - 1] = value;
+                if (string_insert && value != 0) {
+                    host_strings[insert - 1] = cpu.memory().read_wide_string(value, 32767);
+                    host_arguments[insert - 1] =
+                        reinterpret_cast<std::uint64_t>(host_strings[insert - 1].c_str());
+                }
+                index = cursor - 1;
+            }
+        }
+
+        std::vector<wchar_t> buffer(32768);
+        ::SetLastError(ERROR_SUCCESS);
+        const auto native_flags = flags & ~FORMAT_MESSAGE_ALLOCATE_BUFFER;
+        const auto length = ::FormatMessageW(
+            native_flags, host_source, static_cast<DWORD>(argument(2)),
+            static_cast<DWORD>(argument(3)), buffer.data(), static_cast<DWORD>(buffer.size()),
+            maximum_insert == 0 ? nullptr : reinterpret_cast<va_list *>(host_arguments.data()));
+        if (length == 0) {
+            last_error_ = ::GetLastError();
+            cpu.set_reg(Rax, 0);
+            finish_call(7);
+            break;
+        }
+        if ((flags & FORMAT_MESSAGE_ALLOCATE_BUFFER) != 0) {
+            if (output_address == 0) {
+                last_error_ = ERROR_INVALID_PARAMETER;
+                cpu.set_reg(Rax, 0);
+                finish_call(7);
+                break;
+            }
+            const auto guest_buffer = allocate((static_cast<std::uint64_t>(length) + 1) * 2);
+            for (std::size_t index = 0; index <= length; ++index) {
+                cpu.memory().write16(guest_buffer + index * 2,
+                                     static_cast<std::uint16_t>(buffer[index]));
+            }
+            if (guest_is_64_bit_) {
+                cpu.memory().write64(output_address, guest_buffer);
+            } else {
+                cpu.memory().write32(output_address, static_cast<std::uint32_t>(guest_buffer));
+            }
+        } else {
+            if (output_address == 0 || output_size <= length) {
+                last_error_ = ERROR_INSUFFICIENT_BUFFER;
+                cpu.set_reg(Rax, 0);
+                finish_call(7);
+                break;
+            }
+            for (std::size_t index = 0; index <= length; ++index) {
+                cpu.memory().write16(output_address + index * 2,
+                                     static_cast<std::uint16_t>(buffer[index]));
+            }
+        }
+        cpu.set_reg(Rax, length);
+        finish_call(7);
         break;
     }
     case Api::GuestStringType: {
@@ -2540,6 +2275,49 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         cpu.set_reg(Rax, allocate(8));
         finish_call();
         break;
+    case Api::GuestThreadCreate: {
+        const auto entry = cpu.reg(R8);
+        const auto parameter = cpu.reg(R9);
+        if (entry == 0) {
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+        // Run cooperatively on the current interpreted CPU. This preserves guest/host isolation;
+        // a scheduler can later provide independent CPU state without changing the ABI adapter.
+        const auto result = invoke_guest(cpu, entry, {parameter, 0, 0, 0}, exit_code, exited);
+        if (argument(5) != 0) {
+            if (guest_is_64_bit_) {
+                cpu.memory().write32(argument(5), GetCurrentThreadId());
+            } else {
+                cpu.memory().write32(argument(5), GetCurrentThreadId());
+            }
+        }
+        cpu.set_reg(Rax, result == 0 ? 1 : result);
+        finish_call();
+        break;
+    }
+    case Api::GuestAtomicWait: {
+        const auto storage = cpu.reg(Rcx);
+        const auto comparand = cpu.reg(Rdx);
+        const auto width = cpu.reg(R8);
+        if (storage != 0 && comparand != 0) {
+            if (width == 1) {
+                cpu.memory().write8(storage,
+                                    static_cast<std::uint8_t>(cpu.memory().read8(comparand) + 1));
+            } else if (width == 2) {
+                cpu.memory().write16(
+                    storage, static_cast<std::uint16_t>(cpu.memory().read16(comparand) + 1));
+            } else if (width == 4) {
+                cpu.memory().write32(storage, cpu.memory().read32(comparand) + 1);
+            } else if (width == 8) {
+                cpu.memory().write64(storage, cpu.memory().read64(comparand) + 1);
+            }
+        }
+        cpu.set_reg(Rax, 0);
+        finish_call();
+        break;
+    }
     case Api::VirtualAlloc: {
         const auto requested = cpu.reg(Rcx);
         const auto requested_size = cpu.reg(Rdx);
@@ -2743,6 +2521,18 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         cpu.set_reg(Rax, allocate(argument(0)));
         finish_call(1);
         break;
+    case Api::AllocateProduct: {
+        const auto count = argument(0);
+        const auto element_size = argument(1);
+        if (count != 0 && element_size > std::numeric_limits<std::uint64_t>::max() / count) {
+            last_error_ = ERROR_NOT_ENOUGH_MEMORY;
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, allocate(count * element_size));
+        }
+        finish_call(2);
+        break;
+    }
     case Api::AllocateRdx:
         cpu.set_reg(Rax, allocate(argument(1)));
         finish_call(2);
@@ -2753,6 +2543,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     case Api::Reallocate: {
         const bool heap_reallocate = thunk_name.ends_with("HeapReAlloc");
+        const bool local_reallocate = thunk_name.ends_with("LocalReAlloc");
         const auto old_address = argument(heap_reallocate ? 2 : 0);
         const auto new_size = argument(heap_reallocate ? 3 : 1);
         const auto new_address = allocate(new_size);
@@ -2762,7 +2553,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             cpu.memory().write(new_address, bytes);
         }
         cpu.set_reg(Rax, new_address);
-        finish_call(heap_reallocate ? 4 : 3);
+        finish_call(heap_reallocate ? 4 : local_reallocate ? 3 : 2);
         break;
     }
     case Api::FreeRcx:
@@ -2808,13 +2599,14 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                                        ? cpu.memory().read_c_string(argument(0))
                                        : narrow_string(cpu.memory().read_wide_string(argument(0)));
             const auto filename = guest_executable_.filename().string();
-            if (lowercase(requested) == lowercase(filename)) {
+            if (detail::lowercase(requested) == detail::lowercase(filename)) {
                 cpu.set_reg(Rax, guest_image_base_);
             } else {
-                const auto normalized = lowercase(requested);
+                const auto normalized = detail::lowercase(requested);
                 const auto existing = std::find_if(
-                    guest_modules_.begin(), guest_modules_.end(),
-                    [&](const auto &entry) { return lowercase(entry.second) == normalized; });
+                    guest_modules_.begin(), guest_modules_.end(), [&](const auto &entry) {
+                        return detail::lowercase(entry.second) == normalized;
+                    });
                 if (existing != guest_modules_.end()) {
                     cpu.set_reg(Rax, existing->first);
                 } else {
@@ -2831,10 +2623,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         const auto requested = thunk_name.ends_with("LoadLibraryA")
                                    ? cpu.memory().read_c_string(argument(0))
                                    : narrow_string(cpu.memory().read_wide_string(argument(0)));
-        const auto normalized = lowercase(requested);
+        const auto normalized = detail::lowercase(requested);
         const auto existing =
-            std::find_if(guest_modules_.begin(), guest_modules_.end(),
-                         [&](const auto &entry) { return lowercase(entry.second) == normalized; });
+            std::find_if(guest_modules_.begin(), guest_modules_.end(), [&](const auto &entry) {
+                return detail::lowercase(entry.second) == normalized;
+            });
         if (existing != guest_modules_.end()) {
             cpu.set_reg(Rax, existing->first);
         } else {
@@ -2860,24 +2653,41 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     }
     case Api::GuestFindFirstFile: {
-        const bool ansi = thunk_name.ends_with("FindFirstFileA");
+        const bool ansi = thunk_name.ends_with('A');
+        const bool extended = thunk_name.find("FindFirstFileEx") != std::string::npos;
+        const auto data_argument = extended ? 2 : 1;
         HANDLE host_handle = INVALID_HANDLE_VALUE;
         if (ansi) {
             WIN32_FIND_DATAA data{};
-            host_handle = ::FindFirstFileA(cpu.memory().read_c_string(argument(0)).c_str(), &data);
+            const auto path = cpu.memory().read_c_string(argument(0));
+            log::api("api", "guest file search path '" + path + "'");
+            host_handle =
+                extended
+                    ? ::FindFirstFileExA(path.c_str(), static_cast<FINDEX_INFO_LEVELS>(argument(1)),
+                                         &data, static_cast<FINDEX_SEARCH_OPS>(argument(3)),
+                                         nullptr, static_cast<DWORD>(argument(5)))
+                    : ::FindFirstFileA(path.c_str(), &data);
             if (host_handle != INVALID_HANDLE_VALUE) {
                 cpu.memory().write(
-                    argument(1), std::span<const std::uint8_t>(
-                                     reinterpret_cast<const std::uint8_t *>(&data), sizeof(data)));
+                    argument(data_argument),
+                    std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(&data),
+                                                  sizeof(data)));
             }
         } else {
             WIN32_FIND_DATAW data{};
+            const auto path = cpu.memory().read_wide_string(argument(0));
+            log::api("api", "guest file search path '" + narrow_string(path) + "'");
             host_handle =
-                ::FindFirstFileW(cpu.memory().read_wide_string(argument(0)).c_str(), &data);
+                extended
+                    ? ::FindFirstFileExW(path.c_str(), static_cast<FINDEX_INFO_LEVELS>(argument(1)),
+                                         &data, static_cast<FINDEX_SEARCH_OPS>(argument(3)),
+                                         nullptr, static_cast<DWORD>(argument(5)))
+                    : ::FindFirstFileW(path.c_str(), &data);
             if (host_handle != INVALID_HANDLE_VALUE) {
                 cpu.memory().write(
-                    argument(1), std::span<const std::uint8_t>(
-                                     reinterpret_cast<const std::uint8_t *>(&data), sizeof(data)));
+                    argument(data_argument),
+                    std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(&data),
+                                                  sizeof(data)));
             }
         }
         if (host_handle == INVALID_HANDLE_VALUE) {
@@ -2888,7 +2698,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             find_handles_.emplace(guest_handle, host_handle);
             cpu.set_reg(Rax, guest_handle);
         }
-        finish_call(2);
+        finish_call(extended ? 6 : 2);
         break;
     }
     case Api::GuestFindNextFile: {
@@ -3120,7 +2930,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         WNDCLASSEXW host_class{};
         host_class.cbSize = sizeof(host_class);
         host_class.style = cpu.memory().read32(structure + 4);
-        host_class.lpfnWndProc = window_proc_bridge;
+        host_class.lpfnWndProc = detail::window_proc_bridge;
         host_class.cbClsExtra =
             static_cast<int>(cpu.memory().read32(structure + (guest_is_64_bit_ ? 16 : 12)));
         host_class.cbWndExtra =
@@ -3178,9 +2988,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             reinterpret_cast<HMENU>(static_cast<std::uintptr_t>(argument(9))),
             GetModuleHandleW(nullptr),
             reinterpret_cast<void *>(static_cast<std::uintptr_t>(argument(11))));
-        if (callback_exception != nullptr) {
-            auto exception = callback_exception;
-            callback_exception = nullptr;
+        if (auto exception = detail::take_callback_exception(); exception != nullptr) {
             std::rethrow_exception(exception);
         }
         log::api("window",
@@ -3376,40 +3184,690 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call();
         break;
     }
-    case Api::CoCreateInstance:
+    case Api::CoCreateInstance: {
+        const auto class_id = cpu.reg(Rcx);
+        const auto interface_id = cpu.reg(R9);
+        const auto output = argument(4);
+        const auto guid_is = [&](std::uint64_t address, std::uint64_t low, std::uint64_t high) {
+            return address != 0 && cpu.memory().read64(address) == low &&
+                   cpu.memory().read64(address + 8) == high;
+        };
+        const bool acc_prop_services = class_id != 0 && interface_id != 0 &&
+                                       cpu.memory().read32(class_id) == 0xb5f8350bU &&
+                                       cpu.memory().read16(class_id + 4) == 0x0548U &&
+                                       cpu.memory().read16(class_id + 6) == 0x48b1U &&
+                                       cpu.memory().read32(interface_id) == 0x6e26e776U &&
+                                       cpu.memory().read16(interface_id + 4) == 0x04f0U &&
+                                       cpu.memory().read16(interface_id + 6) == 0x495dU;
+        if (acc_prop_services && output != 0) {
+            if (acc_prop_services_proxy_ == 0) {
+                const auto vtable = allocate(18 * 8);
+                acc_prop_services_proxy_ = allocate(8);
+                cpu.memory().write64(acc_prop_services_proxy_, vtable);
+                for (std::uint32_t index = 0; index < 18; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::AccPropServicesMethod);
+                    thunk_names_.emplace(thunk, "IAccPropServices#" + std::to_string(index));
+                    acc_prop_services_methods_.emplace(thunk, index);
+                    cpu.memory().write64(vtable + index * 8, thunk);
+                }
+            }
+            cpu.memory().write64(output, acc_prop_services_proxy_);
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+        const bool application_document_lists =
+            guid_is(class_id, 0x47e030f286bec222ULL, 0x285cd71cd160259fULL) &&
+            guid_is(interface_id, 0x47a19f303c594f9fULL, 0x060a3d3de8c99a97ULL);
+        if (application_document_lists && output != 0) {
+            if (application_document_lists_proxy_ == 0) {
+                const auto vtable = allocate(5 * 8);
+                application_document_lists_proxy_ = allocate(8);
+                cpu.memory().write64(application_document_lists_proxy_, vtable);
+                for (std::uint32_t index = 0; index < 5; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::ApplicationDocumentListsMethod);
+                    thunk_names_.emplace(thunk,
+                                         "IApplicationDocumentLists#" + std::to_string(index));
+                    application_document_lists_methods_.emplace(thunk, index);
+                    cpu.memory().write64(vtable + index * 8, thunk);
+                }
+            }
+            cpu.memory().write64(output, application_document_lists_proxy_);
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
         // A native COM object exposes a host vtable, which guest code cannot execute directly.
         // Until individual interfaces have guest-side proxies, report an unavailable class so
         // applications can take their documented optional-feature fallback paths.
-        if (cpu.reg(R9) != 0) {
-            cpu.memory().write64(cpu.reg(R9), 0);
+        if (output != 0) {
+            cpu.memory().write64(output, 0);
         }
         cpu.set_reg(Rax, 0x80040154U); // REGDB_E_CLASSNOTREG
         finish_call();
         break;
-    case Api::RoGetActivationFactory:
-        if (log::enabled(log::Level::Api)) {
-            using GetRawBuffer = const wchar_t *(WINAPI *)(void *, std::uint32_t *);
-            const auto combase = GetModuleHandleW(L"combase.dll");
-            const auto get_raw_buffer = reinterpret_cast<GetRawBuffer>(
-                combase == nullptr ? nullptr
-                                   : GetProcAddress(combase, "WindowsGetStringRawBuffer"));
-            std::uint32_t length = 0;
-            const auto text = get_raw_buffer == nullptr
-                                  ? nullptr
-                                  : get_raw_buffer(reinterpret_cast<void *>(cpu.reg(Rcx)), &length);
-            std::string description =
-                text == nullptr ? "<unknown>" : narrow_string(std::wstring(text, length));
-            const auto *iid = reinterpret_cast<const GUID *>(cpu.reg(Rdx));
-            if (iid != nullptr) {
-                std::ostringstream stream;
-                stream << std::hex << iid->Data1 << '-' << iid->Data2 << '-' << iid->Data3 << '-';
-                for (const auto byte : iid->Data4) {
-                    stream << static_cast<unsigned>(byte);
-                }
-                description += " iid=" + stream.str();
+    }
+    case Api::AccPropServicesMethod: {
+        const auto index = acc_prop_services_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
             }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if ((index >= 3 && index <= 9) || (index >= 12 && index <= 15)) {
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::ApplicationDocumentListsMethod: {
+        const auto index = application_document_lists_methods_.at(cpu.rip());
+        if (index == 0) {
+            const auto iid = cpu.reg(Rdx);
+            const auto output = cpu.reg(R8);
+            const bool supported =
+                iid != 0 && ((cpu.memory().read64(iid) == 0x0000000000000000ULL &&
+                              cpu.memory().read64(iid + 8) == 0x46000000000000c0ULL) ||
+                             (cpu.memory().read64(iid) == 0x47a19f303c594f9fULL &&
+                              cpu.memory().read64(iid + 8) == 0x060a3d3de8c99a97ULL));
+            if (output != 0) {
+                cpu.memory().write64(output, supported ? application_document_lists_proxy_ : 0);
+            }
+            cpu.set_reg(Rax, output == 0 ? 0x80070057U : (supported ? 0 : 0x80004002U));
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 3) {
+            cpu.set_reg(Rax, cpu.reg(Rdx) == 0 ? 0x80070057U : 0);
+        } else if (index == 4) {
+            const auto iid = cpu.reg(R9);
+            const auto output = argument(4);
+            const bool wants_object_array = iid != 0 &&
+                                            cpu.memory().read64(iid) == 0x4bba562292ca9dcdULL &&
+                                            cpu.memory().read64(iid + 8) == 0xc9d81b549f5e05a8ULL;
+            if (output != 0) {
+                cpu.memory().write64(output, 0);
+            }
+            if (output == 0 || iid == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else if (!wants_object_array) {
+                cpu.set_reg(Rax, 0x80004002U); // E_NOINTERFACE
+            } else {
+                if (empty_object_array_proxy_ == 0) {
+                    const auto vtable = allocate(5 * 8);
+                    empty_object_array_proxy_ = allocate(8);
+                    cpu.memory().write64(empty_object_array_proxy_, vtable);
+                    for (std::uint32_t method = 0; method < 5; ++method) {
+                        const auto thunk = next_thunk_;
+                        next_thunk_ += 0x100;
+                        thunks_.emplace(thunk, Api::ObjectArrayMethod);
+                        thunk_names_.emplace(thunk, "IObjectArray#" + std::to_string(method));
+                        object_array_methods_.emplace(thunk, method);
+                        cpu.memory().write64(vtable + method * 8, thunk);
+                    }
+                }
+                cpu.memory().write64(output, empty_object_array_proxy_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::ObjectArrayMethod: {
+        const auto index = object_array_methods_.at(cpu.rip());
+        if (index == 0) {
+            const auto iid = cpu.reg(Rdx);
+            const auto output = cpu.reg(R8);
+            const bool supported =
+                iid != 0 && ((cpu.memory().read64(iid) == 0x0000000000000000ULL &&
+                              cpu.memory().read64(iid + 8) == 0x46000000000000c0ULL) ||
+                             (cpu.memory().read64(iid) == 0x4bba562292ca9dcdULL &&
+                              cpu.memory().read64(iid + 8) == 0xc9d81b549f5e05a8ULL));
+            if (output != 0) {
+                cpu.memory().write64(output, supported ? empty_object_array_proxy_ : 0);
+            }
+            cpu.set_reg(Rax, output == 0 ? 0x80070057U : (supported ? 0 : 0x80004002U));
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 3) {
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write32(cpu.reg(Rdx), 0);
+            }
+            cpu.set_reg(Rax, cpu.reg(Rdx) == 0 ? 0x80070057U : 0);
+        } else if (index == 4) {
+            const auto output = cpu.reg(R9);
+            if (output != 0) {
+                cpu.memory().write64(output, 0);
+            }
+            cpu.set_reg(Rax, output == 0 ? 0x80070057U : 0x8000000bU); // E_BOUNDS
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::WindowsCreateString: {
+        const auto source = cpu.reg(Rcx);
+        const auto length = static_cast<std::uint32_t>(cpu.reg(Rdx));
+        const auto output = cpu.reg(R8);
+        if (output == 0 || (length != 0 && source == 0)) {
+            cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            finish_call();
+            break;
+        }
+        const auto handle = allocate(28 + (static_cast<std::uint64_t>(length) + 1) * 2);
+        cpu.memory().write32(handle, 0);
+        cpu.memory().write32(handle + 4, length);
+        cpu.memory().write64(handle + 8, 0);
+        cpu.memory().write64(handle + 16, handle + 28);
+        cpu.memory().write32(handle + 24, 1);
+        for (std::uint32_t index = 0; index < length; ++index) {
+            cpu.memory().write16(handle + 28 + index * 2, cpu.memory().read16(source + index * 2));
+        }
+        cpu.memory().write16(handle + 28 + static_cast<std::uint64_t>(length) * 2, 0);
+        cpu.memory().write64(output, handle);
+        cpu.set_reg(Rax, 0);
+        finish_call();
+        break;
+    }
+    case Api::WindowsCreateStringReference: {
+        const auto source = cpu.reg(Rcx);
+        const auto length = static_cast<std::uint32_t>(cpu.reg(Rdx));
+        const auto header = cpu.reg(R8);
+        const auto output = cpu.reg(R9);
+        if (header == 0 || output == 0 || (length != 0 && source == 0)) {
+            cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            finish_call();
+            break;
+        }
+        cpu.memory().write32(header, 1);
+        cpu.memory().write32(header + 4, length);
+        cpu.memory().write64(header + 8, 0);
+        cpu.memory().write64(header + 16, source);
+        cpu.memory().write64(output, header);
+        cpu.set_reg(Rax, 0);
+        finish_call();
+        break;
+    }
+    case Api::WindowsDeleteString: {
+        const auto handle = cpu.reg(Rcx);
+        if (handle != 0 && (cpu.memory().read32(handle) & 1U) == 0) {
+            const auto references = cpu.memory().read32(handle + 24);
+            if (references != 0) {
+                cpu.memory().write32(handle + 24, references - 1);
+            }
+        }
+        // Guest heap mappings live for the process lifetime, so reaching zero does not unmap the
+        // backing allocation. The reference count still matters because C++/WinRT may update it
+        // inline and treats underflow as corruption.
+        cpu.set_reg(Rax, 0);
+        finish_call();
+        break;
+    }
+    case Api::WindowsDuplicateString: {
+        const auto handle = cpu.reg(Rcx);
+        const auto output = cpu.reg(Rdx);
+        if (output == 0) {
+            cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+        } else {
+            if (handle != 0 && (cpu.memory().read32(handle) & 1U) == 0) {
+                cpu.memory().write32(handle + 24, cpu.memory().read32(handle + 24) + 1);
+            }
+            cpu.memory().write64(output, handle);
+            cpu.set_reg(Rax, 0);
+        }
+        finish_call();
+        break;
+    }
+    case Api::WindowsGetStringRawBuffer: {
+        const auto handle = cpu.reg(Rcx);
+        if (cpu.reg(Rdx) != 0) {
+            cpu.memory().write32(cpu.reg(Rdx), handle == 0 ? 0 : cpu.memory().read32(handle + 4));
+        }
+        cpu.set_reg(Rax, handle == 0 ? 0 : cpu.memory().read64(handle + 16));
+        finish_call();
+        break;
+    }
+    case Api::RoGetActivationFactory: {
+        const auto class_handle = cpu.reg(Rcx);
+        const auto length = class_handle == 0 ? 0 : cpu.memory().read32(class_handle + 4);
+        const auto text = class_handle == 0 ? 0 : cpu.memory().read64(class_handle + 16);
+        std::wstring class_name;
+        class_name.reserve(length);
+        for (std::uint32_t index = 0; index < length; ++index) {
+            class_name.push_back(static_cast<wchar_t>(cpu.memory().read16(text + index * 2)));
+        }
+        std::string description = class_name.empty() ? "<unknown>" : narrow_string(class_name);
+        const auto iid_address = cpu.reg(Rdx);
+        if (iid_address != 0) {
+            std::ostringstream stream;
+            stream << std::hex << std::setfill('0') << std::setw(8)
+                   << cpu.memory().read32(iid_address) << '-' << std::setw(4)
+                   << cpu.memory().read16(iid_address + 4) << '-' << std::setw(4)
+                   << cpu.memory().read16(iid_address + 6) << '-';
+            for (std::uint64_t offset = 8; offset < 16; ++offset) {
+                stream << std::setw(2)
+                       << static_cast<unsigned>(cpu.memory().read8(iid_address + offset));
+            }
+            description += " iid=" + stream.str();
+        }
+        if (log::enabled(log::Level::Api)) {
             log::api("api", "WinRT activation " + description);
         }
+
+        const bool activation_factory_iid = iid_address != 0 &&
+                                            cpu.memory().read32(iid_address) == 0x35 &&
+                                            cpu.memory().read16(iid_address + 4) == 0 &&
+                                            cpu.memory().read16(iid_address + 6) == 0 &&
+                                            cpu.memory().read8(iid_address + 8) == 0xc0 &&
+                                            cpu.memory().read8(iid_address + 15) == 0x46;
+
+        if (class_name == L"Windows.Globalization.GeographicRegion" && activation_factory_iid) {
+            if (winrt_activation_factory_proxy_ == 0) {
+                const auto vtable = allocate(7 * 8);
+                winrt_activation_factory_proxy_ = allocate(8);
+                cpu.memory().write64(winrt_activation_factory_proxy_, vtable);
+                for (std::uint32_t index = 0; index < 7; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::WinrtActivationFactoryMethod);
+                    thunk_names_.emplace(thunk, "IActivationFactory#" + std::to_string(index));
+                    winrt_activation_factory_methods_.emplace(thunk, index);
+                    cpu.memory().write64(vtable + index * 8, thunk);
+                }
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), winrt_activation_factory_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
+        if (class_name == L"Windows.Storage.ApplicationData") {
+            if (application_data_statics_proxy_ == 0) {
+                const auto vtable = allocate(7 * 8);
+                application_data_statics_proxy_ = allocate(8);
+                cpu.memory().write64(application_data_statics_proxy_, vtable);
+                for (std::uint32_t index = 0; index < 7; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::ApplicationDataStaticsMethod);
+                    thunk_names_.emplace(thunk, "IApplicationDataStatics#" + std::to_string(index));
+                    application_data_statics_methods_.emplace(thunk, index);
+                    cpu.memory().write64(vtable + index * 8, thunk);
+                }
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), application_data_statics_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
+        if (class_name == L"Windows.Storage.AppDataPaths") {
+            if (app_data_paths_statics_proxy_ == 0) {
+                const auto paths_vtable = allocate(15 * 8);
+                app_data_paths_proxy_ = allocate(8);
+                cpu.memory().write64(app_data_paths_proxy_, paths_vtable);
+                for (std::uint32_t index = 0; index < 15; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::AppDataPathsMethod);
+                    thunk_names_.emplace(thunk, "IAppDataPaths#" + std::to_string(index));
+                    app_data_paths_methods_.emplace(thunk, index);
+                    cpu.memory().write64(paths_vtable + index * 8, thunk);
+                }
+
+                const auto statics_vtable = allocate(8 * 8);
+                app_data_paths_statics_proxy_ = allocate(8);
+                cpu.memory().write64(app_data_paths_statics_proxy_, statics_vtable);
+                for (std::uint32_t index = 0; index < 8; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::AppDataPathsStaticsMethod);
+                    thunk_names_.emplace(thunk, "IAppDataPathsStatics#" + std::to_string(index));
+                    app_data_paths_statics_methods_.emplace(thunk, index);
+                    cpu.memory().write64(statics_vtable + index * 8, thunk);
+                }
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), app_data_paths_statics_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
+        if (class_name == L"NotepadXamlUI.XamlResourceFactory") {
+            if (xaml_resource_factory_proxy_ == 0) {
+                const auto vtable = allocate(32 * 8);
+                xaml_resource_factory_proxy_ = allocate(8);
+                cpu.memory().write64(xaml_resource_factory_proxy_, vtable);
+                for (std::uint32_t index = 0; index < 32; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::XamlResourceFactoryMethod);
+                    thunk_names_.emplace(thunk, "IXamlResourceFactory#" + std::to_string(index));
+                    xaml_resource_factory_methods_.emplace(thunk, index);
+                    cpu.memory().write64(vtable + index * 8, thunk);
+                }
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), xaml_resource_factory_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
+        if (class_name == L"Microsoft.UI.Xaml.Application") {
+            if (xaml_application_statics_proxy_ == 0) {
+                const auto vtable = allocate(7 * 8);
+                xaml_application_statics_proxy_ = allocate(8);
+                cpu.memory().write64(xaml_application_statics_proxy_, vtable);
+                for (std::uint32_t index = 0; index < 7; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::XamlApplicationStaticsMethod);
+                    thunk_names_.emplace(thunk, "IXamlApplicationStatics#" + std::to_string(index));
+                    xaml_application_statics_methods_.emplace(thunk, index);
+                    cpu.memory().write64(vtable + index * 8, thunk);
+                }
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), xaml_application_statics_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
+        if (class_name == L"Microsoft.UI.Dispatching.DispatcherQueueController") {
+            if (dispatcher_queue_controller_statics_proxy_ == 0) {
+                const auto vtable = allocate(8 * 8);
+                dispatcher_queue_controller_statics_proxy_ = allocate(8);
+                cpu.memory().write64(dispatcher_queue_controller_statics_proxy_, vtable);
+                for (std::uint32_t index = 0; index < 8; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::DispatcherQueueControllerStaticsMethod);
+                    thunk_names_.emplace(thunk, "IDispatcherQueueControllerStatics#" +
+                                                    std::to_string(index));
+                    dispatcher_queue_controller_statics_methods_.emplace(thunk, index);
+                    cpu.memory().write64(vtable + index * 8, thunk);
+                }
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), dispatcher_queue_controller_statics_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
+        if (class_name == L"NotepadXamlUI.App" && activation_factory_iid) {
+            if (xaml_app_factory_proxy_ == 0) {
+                const auto app_vtable = allocate(12 * 8);
+                xaml_app_proxy_ = allocate(8);
+                cpu.memory().write64(xaml_app_proxy_, app_vtable);
+                for (std::uint32_t index = 0; index < 12; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::XamlAppMethod);
+                    thunk_names_.emplace(thunk, "NotepadXamlUI.IApp#" + std::to_string(index));
+                    xaml_app_methods_.emplace(thunk, index);
+                    cpu.memory().write64(app_vtable + index * 8, thunk);
+                }
+
+                const auto factory_vtable = allocate(7 * 8);
+                xaml_app_factory_proxy_ = allocate(8);
+                cpu.memory().write64(xaml_app_factory_proxy_, factory_vtable);
+                for (std::uint32_t index = 0; index < 7; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::XamlAppFactoryMethod);
+                    thunk_names_.emplace(thunk,
+                                         "NotepadXamlUI.AppFactory#" + std::to_string(index));
+                    xaml_app_factory_methods_.emplace(thunk, index);
+                    cpu.memory().write64(factory_vtable + index * 8, thunk);
+                }
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), xaml_app_factory_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
+        if (class_name == L"Windows.ApplicationModel.Resources.Core.ResourceManager") {
+            if (resource_manager_statics_proxy_ == 0) {
+                const auto candidate_vtable = allocate(15 * 8);
+                resource_candidate_proxy_ = allocate(8);
+                cpu.memory().write64(resource_candidate_proxy_, candidate_vtable);
+                for (std::uint32_t index = 0; index < 15; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::ResourceCandidateMethod);
+                    thunk_names_.emplace(thunk, "IResourceCandidate#" + std::to_string(index));
+                    resource_candidate_methods_.emplace(thunk, index);
+                    cpu.memory().write64(candidate_vtable + index * 8, thunk);
+                }
+
+                const auto map_vtable = allocate(10 * 8);
+                resource_map_proxy_ = allocate(8);
+                cpu.memory().write64(resource_map_proxy_, map_vtable);
+                for (std::uint32_t index = 0; index < 10; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::ResourceMapMethod);
+                    thunk_names_.emplace(thunk, "IResourceMap#" + std::to_string(index));
+                    resource_map_methods_.emplace(thunk, index);
+                    cpu.memory().write64(map_vtable + index * 8, thunk);
+                }
+
+                const auto manager_vtable = allocate(13 * 8);
+                resource_manager_proxy_ = allocate(8);
+                cpu.memory().write64(resource_manager_proxy_, manager_vtable);
+                for (std::uint32_t index = 0; index < 13; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::ResourceManagerMethod);
+                    thunk_names_.emplace(thunk, "IResourceManager#" + std::to_string(index));
+                    resource_manager_methods_.emplace(thunk, index);
+                    cpu.memory().write64(manager_vtable + index * 8, thunk);
+                }
+
+                const auto statics_vtable = allocate(8 * 8);
+                resource_manager_statics_proxy_ = allocate(8);
+                cpu.memory().write64(resource_manager_statics_proxy_, statics_vtable);
+                for (std::uint32_t index = 0; index < 8; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::ResourceManagerStaticsMethod);
+                    thunk_names_.emplace(thunk, "IResourceManagerStatics#" + std::to_string(index));
+                    resource_manager_statics_methods_.emplace(thunk, index);
+                    cpu.memory().write64(statics_vtable + index * 8, thunk);
+                }
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), resource_manager_statics_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
+        if (class_name == L"Windows.ApplicationModel.Resources.Core.ResourceContext") {
+            if (resource_context_statics_proxy_ == 0) {
+                const auto context_vtable = allocate(13 * 8);
+                resource_context_proxy_ = allocate(8);
+                cpu.memory().write64(resource_context_proxy_, context_vtable);
+                for (std::uint32_t index = 0; index < 13; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::ResourceContextMethod);
+                    thunk_names_.emplace(thunk, "IResourceContext#" + std::to_string(index));
+                    resource_context_methods_.emplace(thunk, index);
+                    cpu.memory().write64(context_vtable + index * 8, thunk);
+                }
+
+                const auto statics_vtable = allocate(11 * 8);
+                resource_context_statics_proxy_ = allocate(8);
+                cpu.memory().write64(resource_context_statics_proxy_, statics_vtable);
+                for (std::uint32_t index = 0; index < 11; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::ResourceContextStaticsMethod);
+                    thunk_names_.emplace(thunk, "IResourceContextStatics#" + std::to_string(index));
+                    resource_context_statics_methods_.emplace(thunk, index);
+                    cpu.memory().write64(statics_vtable + index * 8, thunk);
+                }
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), resource_context_statics_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
+        if (class_name == L"Windows.UI.ViewManagement.UISettings" && activation_factory_iid) {
+            if (ui_settings_factory_proxy_ == 0) {
+                const auto settings3_vtable = allocate(9 * 8);
+                ui_settings3_proxy_ = allocate(8);
+                cpu.memory().write64(ui_settings3_proxy_, settings3_vtable);
+                for (std::uint32_t index = 0; index < 9; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::UISettings3Method);
+                    thunk_names_.emplace(thunk, "IUISettings3#" + std::to_string(index));
+                    ui_settings3_methods_.emplace(thunk, index);
+                    cpu.memory().write64(settings3_vtable + index * 8, thunk);
+                }
+
+                const auto settings_vtable = allocate(19 * 8);
+                ui_settings_proxy_ = allocate(8);
+                cpu.memory().write64(ui_settings_proxy_, settings_vtable);
+                for (std::uint32_t index = 0; index < 19; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::UISettingsMethod);
+                    thunk_names_.emplace(thunk, "IUISettings#" + std::to_string(index));
+                    ui_settings_methods_.emplace(thunk, index);
+                    cpu.memory().write64(settings_vtable + index * 8, thunk);
+                }
+
+                const auto factory_vtable = allocate(7 * 8);
+                ui_settings_factory_proxy_ = allocate(8);
+                cpu.memory().write64(ui_settings_factory_proxy_, factory_vtable);
+                for (std::uint32_t index = 0; index < 7; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::UISettingsFactoryMethod);
+                    thunk_names_.emplace(thunk, "UISettingsFactory#" + std::to_string(index));
+                    ui_settings_factory_methods_.emplace(thunk, index);
+                    cpu.memory().write64(factory_vtable + index * 8, thunk);
+                }
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), ui_settings_factory_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
+        if (class_name == L"Windows.Foundation.PropertyValue") {
+            if (property_value_statics_proxy_ == 0) {
+                const auto value_vtable = allocate(45 * 8);
+                property_value_proxy_ = allocate(8);
+                cpu.memory().write64(property_value_proxy_, value_vtable);
+                for (std::uint32_t index = 0; index < 45; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::PropertyValueMethod);
+                    thunk_names_.emplace(thunk, "IPropertyValue#" + std::to_string(index));
+                    property_value_methods_.emplace(thunk, index);
+                    cpu.memory().write64(value_vtable + index * 8, thunk);
+                }
+
+                const auto statics_vtable = allocate(45 * 8);
+                property_value_statics_proxy_ = allocate(8);
+                cpu.memory().write64(property_value_statics_proxy_, statics_vtable);
+                for (std::uint32_t index = 0; index < 45; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::PropertyValueStaticsMethod);
+                    thunk_names_.emplace(thunk, "IPropertyValueStatics#" + std::to_string(index));
+                    property_value_statics_methods_.emplace(thunk, index);
+                    cpu.memory().write64(statics_vtable + index * 8, thunk);
+                }
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), property_value_statics_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
+        // Any other class activated through IActivationFactory still needs a factory whose
+        // ActivateInstance writes a guest-owned object. Returning the generic statics proxy here
+        // made such calls report success while leaving the out parameter untouched, so the guest
+        // dereferenced a null instance. One factory and one instance per class keeps them distinct.
+        if (activation_factory_iid) {
+            auto factory = winrt_generic_factories_.find(class_name);
+            if (factory == winrt_generic_factories_.end()) {
+                const auto instance_vtable = allocate(16 * 8);
+                const auto instance = allocate(8);
+                cpu.memory().write64(instance, instance_vtable);
+                for (std::uint32_t method = 0; method < 16; ++method) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::WinrtInspectableMethod);
+                    thunk_names_.emplace(thunk, "IInspectable#" + std::to_string(method));
+                    winrt_inspectable_methods_.emplace(thunk, method);
+                    cpu.memory().write64(instance_vtable + method * 8, thunk);
+                }
+                const auto factory_vtable = allocate(7 * 8);
+                factory = winrt_generic_factories_.emplace(class_name, allocate(8)).first;
+                cpu.memory().write64(factory->second, factory_vtable);
+                for (std::uint32_t index = 0; index < 7; ++index) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::WinrtGenericFactoryMethod);
+                    thunk_names_.emplace(thunk, "IActivationFactory#" + std::to_string(index));
+                    winrt_generic_factory_methods_.emplace(thunk, index);
+                    cpu.memory().write64(factory_vtable + index * 8, thunk);
+                }
+                winrt_factory_instances_.emplace(factory->second, instance);
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), factory->second);
+            }
+            cpu.set_reg(Rax, 0);
+            finish_call();
+            break;
+        }
+
         if (protection_policy_proxy_ == 0) {
             const auto vtable = allocate(15 * 8);
             protection_policy_proxy_ = allocate(8);
@@ -3430,6 +3888,1217 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         cpu.set_reg(Rax, 0);
         finish_call();
         break;
+    }
+    case Api::WinrtActivationFactoryMethod: {
+        const auto index = winrt_activation_factory_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            if (geographic_region_proxy_ == 0) {
+                const auto vtable = allocate(13 * 8);
+                geographic_region_proxy_ = allocate(8);
+                cpu.memory().write64(geographic_region_proxy_, vtable);
+                for (std::uint32_t method = 0; method < 13; ++method) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::GeographicRegionMethod);
+                    thunk_names_.emplace(thunk, "IGeographicRegion#" + std::to_string(method));
+                    geographic_region_methods_.emplace(thunk, method);
+                    cpu.memory().write64(vtable + method * 8, thunk);
+                }
+            }
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), geographic_region_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::WinrtGenericFactoryMethod: {
+        const auto index = winrt_generic_factory_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            // IActivationFactory::ActivateInstance returns the class's guest-owned instance.
+            const auto instance = winrt_factory_instances_.find(cpu.reg(Rcx));
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), instance == winrt_factory_instances_.end()
+                                                       ? 0
+                                                       : instance->second);
+            }
+            cpu.set_reg(Rax, instance == winrt_factory_instances_.end() ? 0x80004005U : 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::WinrtInspectableMethod: {
+        const auto index = winrt_inspectable_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 3) {
+            // GetIids: no interfaces beyond IInspectable, so the caller sees an empty list.
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write32(cpu.reg(Rdx), 0);
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), 0);
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 4) {
+            // GetRuntimeClassName returns an empty guest-owned HSTRING; never a host pointer.
+            const auto handle = allocate(28);
+            cpu.memory().write32(handle, 0);
+            cpu.memory().write32(handle + 4, 0);
+            cpu.memory().write64(handle + 8, 0);
+            cpu.memory().write64(handle + 16, handle + 28);
+            cpu.memory().write32(handle + 24, 1);
+            cpu.memory().write16(handle + 28, 0);
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), handle);
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 5) {
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write32(cpu.reg(Rdx), 0); // BaseTrust
+            }
+            cpu.set_reg(Rax, 0);
+        } else {
+            // Fail closed so the guest takes its error path instead of using a fabricated result.
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::ApplicationDataContainerMethod: {
+        const auto index = application_data_container_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 7) {
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write32(cpu.reg(Rdx), 0);
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 8) {
+            if (property_set_proxy_ == 0) {
+                const auto vtable = allocate(13 * 8);
+                property_set_proxy_ = allocate(8);
+                cpu.memory().write64(property_set_proxy_, vtable);
+                for (std::uint32_t method = 0; method < 13; ++method) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::PropertySetMethod);
+                    thunk_names_.emplace(thunk, "IPropertySet#" + std::to_string(method));
+                    property_set_methods_.emplace(thunk, method);
+                    cpu.memory().write64(vtable + method * 8, thunk);
+                }
+            }
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), property_set_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U);
+        }
+        finish_call();
+        break;
+    }
+    case Api::PropertySetMethod: {
+        const auto index = property_set_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 7) {
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write32(cpu.reg(Rdx), 0);
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 8) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write8(cpu.reg(R8), 0);
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 10) {
+            if (cpu.reg(R9) != 0) {
+                cpu.memory().write8(cpu.reg(R9), 0);
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 11 || index == 12) {
+            cpu.set_reg(Rax, 0);
+        } else if (index == 6) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), 0);
+            }
+            // An absent setting is represented as an empty inspectable so the guest can use its
+            // normal default-value path without requiring emulated language exceptions.
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U);
+        }
+        finish_call();
+        break;
+    }
+    case Api::AppDataPathsStaticsMethod: {
+        const auto index = app_data_paths_statics_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, cpu.reg(R8) == 0 ? 0x80070057U : 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), app_data_paths_proxy_);
+            }
+            cpu.set_reg(Rax, cpu.reg(R8) == 0 ? 0x80070057U : 0);
+        } else if (index == 7) {
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), app_data_paths_proxy_);
+            }
+            cpu.set_reg(Rax, cpu.reg(Rdx) == 0 ? 0x80070057U : 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::AppDataPathsMethod: {
+        const auto index = app_data_paths_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, cpu.reg(R8) == 0 ? 0x80070057U : 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index >= 6 && index <= 14) {
+            const auto output = cpu.reg(Rdx);
+            if (output == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+                finish_call();
+                break;
+            }
+            const auto path_index = static_cast<std::size_t>(index - 6);
+            if (app_data_path_strings_[path_index] == 0) {
+                const auto environment_path = [](const wchar_t *name) {
+                    std::wstring value(32768, L'\0');
+                    const auto length = GetEnvironmentVariableW(name, value.data(),
+                                                                static_cast<DWORD>(value.size()));
+                    value.resize(length < value.size() ? length : 0);
+                    return value;
+                };
+                const auto user_profile = environment_path(L"USERPROFILE");
+                const auto local_app_data = environment_path(L"LOCALAPPDATA");
+                const auto roaming_app_data = environment_path(L"APPDATA");
+                const auto program_data = environment_path(L"PROGRAMDATA");
+                auto package_install_root = guest_executable_.parent_path();
+                while (!package_install_root.empty() &&
+                       !std::filesystem::exists(package_install_root / L"AppxManifest.xml")) {
+                    const auto parent = package_install_root.parent_path();
+                    if (parent == package_install_root) {
+                        package_install_root.clear();
+                        break;
+                    }
+                    package_install_root = parent;
+                }
+                std::wstring package_data_root;
+                if (!package_install_root.empty()) {
+                    const auto package_full_name = package_install_root.filename().wstring();
+                    const auto first_separator = package_full_name.find(L'_');
+                    const auto last_separator = package_full_name.rfind(L'_');
+                    if (first_separator != std::wstring::npos &&
+                        last_separator != std::wstring::npos && first_separator != last_separator) {
+                        const auto family_name = package_full_name.substr(0, first_separator) +
+                                                 L"_" +
+                                                 package_full_name.substr(last_separator + 1);
+                        package_data_root = local_app_data + L"\\Packages\\" + family_name;
+                    }
+                }
+                const auto isolated_local = package_data_root.empty()
+                                                ? local_app_data
+                                                : package_data_root + L"\\LocalState";
+                const auto isolated_roaming = package_data_root.empty()
+                                                  ? roaming_app_data
+                                                  : package_data_root + L"\\RoamingState";
+                const std::array<std::wstring, 9> paths = {
+                    local_app_data + L"\\Microsoft\\Windows\\INetCookies",
+                    user_profile + L"\\Desktop",
+                    user_profile + L"\\Documents",
+                    user_profile + L"\\Favorites",
+                    local_app_data + L"\\Microsoft\\Windows\\History",
+                    local_app_data + L"\\Microsoft\\Windows\\INetCache",
+                    isolated_local,
+                    program_data,
+                    isolated_roaming,
+                };
+                const auto &path = paths[path_index];
+                const auto handle = allocate(28 + (path.size() + 1) * 2);
+                cpu.memory().write32(handle, 0);
+                cpu.memory().write32(handle + 4, static_cast<std::uint32_t>(path.size()));
+                cpu.memory().write64(handle + 8, 0);
+                cpu.memory().write64(handle + 16, handle + 28);
+                cpu.memory().write32(handle + 24, 0);
+                for (std::size_t character = 0; character < path.size(); ++character) {
+                    cpu.memory().write16(handle + 28 + character * 2,
+                                         static_cast<std::uint16_t>(path[character]));
+                }
+                cpu.memory().write16(handle + 28 + path.size() * 2, 0);
+                app_data_path_strings_[path_index] = handle;
+            }
+            cpu.memory().write32(app_data_path_strings_[path_index] + 24,
+                                 cpu.memory().read32(app_data_path_strings_[path_index] + 24) + 1);
+            cpu.memory().write64(output, app_data_path_strings_[path_index]);
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::XamlResourceFactoryMethod: {
+        const auto index = xaml_resource_factory_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else {
+            if (xaml_resource_proxy_ == 0) {
+                const auto vtable = allocate(32 * 8);
+                xaml_resource_proxy_ = allocate(8);
+                cpu.memory().write64(xaml_resource_proxy_, vtable);
+                for (std::uint32_t method = 0; method < 32; ++method) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::XamlResourceMethod);
+                    thunk_names_.emplace(thunk, "IXamlResource#" + std::to_string(method));
+                    xaml_resource_methods_.emplace(thunk, method);
+                    cpu.memory().write64(vtable + method * 8, thunk);
+                }
+            }
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), xaml_resource_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+        }
+        finish_call();
+        break;
+    }
+    case Api::XamlResourceMethod: {
+        const auto index = xaml_resource_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else {
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), 0);
+            }
+            cpu.set_reg(Rax, 0);
+        }
+        finish_call();
+        break;
+    }
+    case Api::XamlApplicationStaticsMethod: {
+        const auto index = xaml_application_statics_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            if (xaml_resource_proxy_ == 0) {
+                const auto vtable = allocate(32 * 8);
+                xaml_resource_proxy_ = allocate(8);
+                cpu.memory().write64(xaml_resource_proxy_, vtable);
+                for (std::uint32_t method = 0; method < 32; ++method) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::XamlResourceMethod);
+                    thunk_names_.emplace(thunk, "IXamlApplication#" + std::to_string(method));
+                    xaml_resource_methods_.emplace(thunk, method);
+                    cpu.memory().write64(vtable + method * 8, thunk);
+                }
+            }
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), xaml_resource_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U);
+        }
+        finish_call();
+        break;
+    }
+    case Api::XamlAppFactoryMethod: {
+        const auto index = xaml_app_factory_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            if (cpu.reg(Rdx) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                cpu.memory().write64(cpu.reg(Rdx), xaml_app_proxy_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::XamlAppMethod: {
+        const auto index = xaml_app_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            cpu.set_reg(Rax, 0);
+        } else if (index == 7) {
+            if (cpu.reg(Rdx) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                cpu.memory().write64(cpu.reg(Rdx), xaml_app_drag_verifier_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else if (index == 8) {
+            xaml_app_drag_verifier_ = cpu.reg(Rdx);
+            cpu.set_reg(Rax, 0);
+        } else if (index == 11) {
+            xaml_app_localized_key_storage_ = cpu.reg(Rdx);
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::DispatcherQueueControllerStaticsMethod: {
+        const auto index = dispatcher_queue_controller_statics_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6 || index == 7) {
+            if (dispatcher_queue_controller_proxy_ == 0) {
+                const auto vtable = allocate(8 * 8);
+                dispatcher_queue_controller_proxy_ = allocate(8);
+                cpu.memory().write64(dispatcher_queue_controller_proxy_, vtable);
+                for (std::uint32_t method = 0; method < 8; ++method) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::DispatcherQueueControllerMethod);
+                    thunk_names_.emplace(thunk,
+                                         "IDispatcherQueueController#" + std::to_string(method));
+                    dispatcher_queue_controller_methods_.emplace(thunk, method);
+                    cpu.memory().write64(vtable + method * 8, thunk);
+                }
+            }
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), dispatcher_queue_controller_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U);
+        }
+        finish_call();
+        break;
+    }
+    case Api::DispatcherQueueControllerMethod: {
+        const auto index = dispatcher_queue_controller_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U);
+        }
+        finish_call();
+        break;
+    }
+    case Api::ResourceManagerStaticsMethod: {
+        const auto index = resource_manager_statics_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            if (cpu.reg(Rdx) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                cpu.memory().write64(cpu.reg(Rdx), resource_manager_proxy_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else if (index == 7) {
+            if (cpu.reg(R8) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                cpu.memory().write8(cpu.reg(R8), 0);
+                cpu.set_reg(Rax, 0);
+            }
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::ResourceManagerMethod: {
+        const auto index = resource_manager_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            if (cpu.reg(Rdx) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                cpu.memory().write64(cpu.reg(Rdx), resource_map_proxy_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::ResourceMapMethod: {
+        const auto index = resource_map_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 7) {
+            if (cpu.reg(R8) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                resource_candidate_value_ = cpu.reg(Rdx);
+                cpu.memory().write64(cpu.reg(R8), resource_candidate_proxy_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else if (index == 8) {
+            if (cpu.reg(R9) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                resource_candidate_value_ = cpu.reg(Rdx);
+                cpu.memory().write64(cpu.reg(R9), resource_candidate_proxy_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::ResourceContextStaticsMethod: {
+        const auto index = resource_context_statics_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 7 || index == 10) {
+            if (cpu.reg(Rdx) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                cpu.memory().write64(cpu.reg(Rdx), resource_context_proxy_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::ResourceContextMethod: {
+        const auto index = resource_context_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::ResourceCandidateMethod: {
+        const auto index = resource_candidate_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 10) {
+            if (cpu.reg(Rdx) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                if (resource_candidate_value_ != 0 &&
+                    (cpu.memory().read32(resource_candidate_value_) & 1U) == 0) {
+                    cpu.memory().write32(resource_candidate_value_ + 24,
+                                         cpu.memory().read32(resource_candidate_value_ + 24) + 1);
+                }
+                cpu.memory().write64(cpu.reg(Rdx), resource_candidate_value_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else if (index == 12) {
+            if (cpu.reg(R8) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                if (resource_candidate_language_ == 0) {
+                    constexpr std::u16string_view language = u"en-US";
+                    resource_candidate_language_ = allocate(28 + (language.size() + 1) * 2);
+                    cpu.memory().write32(resource_candidate_language_, 0);
+                    cpu.memory().write32(resource_candidate_language_ + 4,
+                                         static_cast<std::uint32_t>(language.size()));
+                    cpu.memory().write64(resource_candidate_language_ + 8, 0);
+                    cpu.memory().write64(resource_candidate_language_ + 16,
+                                         resource_candidate_language_ + 28);
+                    cpu.memory().write32(resource_candidate_language_ + 24, 0);
+                    for (std::size_t character = 0; character < language.size(); ++character) {
+                        cpu.memory().write16(resource_candidate_language_ + 28 + character * 2,
+                                             language[character]);
+                    }
+                    cpu.memory().write16(resource_candidate_language_ + 28 + language.size() * 2,
+                                         0);
+                }
+                cpu.memory().write32(resource_candidate_language_ + 24,
+                                     cpu.memory().read32(resource_candidate_language_ + 24) + 1);
+                cpu.memory().write64(cpu.reg(R8), resource_candidate_language_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::UISettingsFactoryMethod: {
+        const auto index = ui_settings_factory_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            if (cpu.reg(Rdx) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                cpu.memory().write64(cpu.reg(Rdx), ui_settings_proxy_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::UISettingsMethod:
+    case Api::UISettings3Method: {
+        const bool settings3 = found->second == Api::UISettings3Method;
+        const auto index =
+            settings3 ? ui_settings3_methods_.at(cpu.rip()) : ui_settings_methods_.at(cpu.rip());
+        if (index == 0) {
+            const auto iid = cpu.reg(Rdx);
+            auto result = settings3 ? ui_settings3_proxy_ : ui_settings_proxy_;
+            if (iid != 0 && cpu.memory().read32(iid) == 0x03021be4U &&
+                cpu.memory().read16(iid + 4) == 0x5254U &&
+                cpu.memory().read16(iid + 6) == 0x4781U) {
+                result = ui_settings3_proxy_;
+            } else if (iid != 0 && cpu.memory().read32(iid) == 0x85361600U &&
+                       cpu.memory().read16(iid + 4) == 0x1c63U &&
+                       cpu.memory().read16(iid + 6) == 0x4627U) {
+                result = ui_settings_proxy_;
+            }
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), result);
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (settings3 && index == 6) {
+            if (cpu.reg(R8) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                cpu.memory().write8(cpu.reg(R8), 0xff);
+                cpu.memory().write8(cpu.reg(R8) + 1, 0);
+                cpu.memory().write8(cpu.reg(R8) + 2, 0);
+                cpu.memory().write8(cpu.reg(R8) + 3, 0);
+                cpu.set_reg(Rax, 0);
+            }
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::PropertyValueStaticsMethod: {
+        const auto index = property_value_statics_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 17) {
+            if (cpu.reg(R8) == 0) {
+                cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
+            } else {
+                property_value_boolean_ = (cpu.reg(Rdx) & 0xffU) != 0;
+                cpu.memory().write64(cpu.reg(R8), property_value_proxy_);
+                cpu.set_reg(Rax, 0);
+            }
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::PropertyValueMethod: {
+        const auto index = property_value_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write32(cpu.reg(Rdx), 11); // PropertyType::Boolean
+            }
+            cpu.set_reg(Rax, cpu.reg(Rdx) == 0 ? 0x80070057U : 0);
+        } else if (index == 7) {
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write8(cpu.reg(Rdx), 0);
+            }
+            cpu.set_reg(Rax, cpu.reg(Rdx) == 0 ? 0x80070057U : 0);
+        } else if (index == 18) {
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write8(cpu.reg(Rdx), property_value_boolean_ ? 1 : 0);
+            }
+            cpu.set_reg(Rax, cpu.reg(Rdx) == 0 ? 0x80070057U : 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::MsvcpStreamBufferConstruct: {
+        const auto object = cpu.reg(Rcx);
+        const auto storage = allocate(4096);
+        stream_buffer_storage_[object] = storage;
+        stream_buffer_lengths_[object] = 0;
+        cpu.memory().write64(object + 0x18, object + 0x90);
+        cpu.memory().write64(object + 0x20, object + 0x78);
+        cpu.memory().write64(object + 0x38, object + 0x88);
+        cpu.memory().write64(object + 0x40, object + 0x80);
+        cpu.memory().write64(object + 0x50, object + 0xa0);
+        cpu.memory().write64(object + 0x58, object + 0xa8);
+        cpu.memory().write64(object + 0x68, storage + 4096);
+        cpu.memory().write32(object + 0x70, 0);
+        cpu.memory().write64(object + 0x78, storage);
+        cpu.memory().write64(object + 0x80, storage);
+        cpu.memory().write64(object + 0x88, storage);
+        cpu.memory().write64(object + 0x90, storage);
+        cpu.memory().write32(object + 0xa0, 0);
+        cpu.memory().write32(object + 0xa8, 0);
+        cpu.set_reg(Rax, object);
+        finish_call();
+        break;
+    }
+    case Api::MsvcpStreamBufferInit: {
+        const auto stream_buffer = cpu.reg(Rcx);
+        const auto guest_file = cpu.reg(Rdx);
+        if (guest_file != 0 && guest_file_streams_.contains(guest_file)) {
+            stream_buffer_files_[stream_buffer] = guest_file;
+            if (pending_guest_file_stream_ == guest_file) {
+                pending_guest_file_stream_ = 0;
+            }
+        } else if (pending_guest_file_stream_ != 0) {
+            // The parameterless MSVC streambuf initializer follows _Fiopen in the filebuf
+            // constructor. Carry that guest-owned handle explicitly instead of depending on a
+            // stale value in RDX, which is volatile under the x64 ABI.
+            stream_buffer_files_[stream_buffer] = pending_guest_file_stream_;
+            pending_guest_file_stream_ = 0;
+        } else {
+            stream_buffer_files_.erase(stream_buffer);
+        }
+        cpu.set_reg(Rax, stream_buffer);
+        finish_call();
+        break;
+    }
+    case Api::MsvcpStreamGetLocale: {
+        const auto output = cpu.reg(Rdx);
+        if (output == 0) {
+            throw Error("basic_streambuf::getloc received a null output object");
+        }
+        ensure_locale();
+        cpu.memory().write32(locale_proxy_ + 8, cpu.memory().read32(locale_proxy_ + 8) + 1);
+        cpu.memory().write64(output, locale_proxy_);
+        // The MSVC x64 return object used by this overload carries its _Locimp pointer in the
+        // second pointer-sized field; callers pass that wrapper directly to use_facet.
+        cpu.memory().write64(output + 8, locale_proxy_);
+        cpu.set_reg(Rax, output);
+        finish_call();
+        break;
+    }
+    case Api::MsvcpFileOpen: {
+        const auto path = cpu.memory().read_wide_string(cpu.reg(Rcx));
+        const auto mode = static_cast<std::uint32_t>(cpu.reg(Rdx));
+        constexpr std::uint32_t open_in = 0x01;
+        constexpr std::uint32_t open_out = 0x02;
+        constexpr std::uint32_t open_at_end = 0x04;
+        constexpr std::uint32_t open_append = 0x08;
+        constexpr std::uint32_t open_truncate = 0x10;
+        constexpr std::uint32_t open_binary = 0x20;
+        const bool input = (mode & open_in) != 0;
+        const bool output = (mode & open_out) != 0;
+        const bool binary = (mode & open_binary) != 0;
+        std::wstring native_mode;
+        if (input && output) {
+            native_mode = (mode & open_truncate) != 0 ? L"w+" : L"r+";
+        } else if (output) {
+            native_mode = (mode & open_append) != 0 ? L"a" : L"w";
+        } else {
+            native_mode = L"r";
+        }
+        if (binary) {
+            native_mode.push_back(L'b');
+        }
+        FILE *stream = _wfsopen(path.c_str(), native_mode.c_str(), static_cast<int>(cpu.reg(R8)));
+        const auto open_error = stream == nullptr ? errno : 0;
+        if (log::enabled(log::Level::Api)) {
+            log::api("api", "guest file open path '" + narrow_string(path) +
+                                "' mode=" + narrow_string(native_mode) +
+                                " result=" + std::to_string(open_error));
+        }
+        if (stream == nullptr && input && output && (mode & open_truncate) == 0) {
+            // ios::in|ios::out does not create a missing file, matching the standard mode table.
+            cpu.set_reg(Rax, 0);
+        } else if (stream == nullptr) {
+            cpu.set_reg(Rax, 0);
+        } else {
+            if ((mode & open_at_end) != 0) {
+                static_cast<void>(_fseeki64(stream, 0, SEEK_END));
+            }
+            const auto guest_stream = allocate(0x40);
+            for (std::uint64_t offset = 0; offset < 0x40; offset += 8) {
+                cpu.memory().write64(guest_stream + offset, 0);
+            }
+            guest_file_streams_.emplace(guest_stream, stream);
+            pending_guest_file_stream_ = guest_stream;
+            cpu.set_reg(Rax, guest_stream);
+        }
+        finish_call();
+        break;
+    }
+    case Api::GuestFileMethod: {
+        if (thunk_name.ends_with("_get_stream_buffer_pointers")) {
+            const auto found = guest_file_streams_.find(cpu.reg(Rcx));
+            if (found == guest_file_streams_.end()) {
+                cpu.set_reg(Rax, EINVAL);
+            } else {
+                if (cpu.reg(Rdx) != 0) {
+                    cpu.memory().write64(cpu.reg(Rdx), cpu.reg(Rcx));
+                }
+                if (cpu.reg(R8) != 0) {
+                    cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx) + 8);
+                }
+                if (cpu.reg(R9) != 0) {
+                    cpu.memory().write64(cpu.reg(R9), cpu.reg(Rcx) + 16);
+                }
+                cpu.set_reg(Rax, 0);
+            }
+            finish_call();
+            break;
+        }
+        const auto stream_argument =
+            thunk_name.ends_with("fread") || thunk_name.ends_with("fwrite")
+                ? cpu.reg(R9)
+                : (thunk_name.ends_with("fputc") ? cpu.reg(Rdx) : cpu.reg(Rcx));
+        const auto found = guest_file_streams_.find(stream_argument);
+        if (found == guest_file_streams_.end()) {
+            cpu.set_reg(Rax, thunk_name.ends_with("fgetc") ? static_cast<std::uint32_t>(EOF) : 0);
+            finish_call();
+            break;
+        }
+        auto *stream = static_cast<FILE *>(found->second);
+        if (thunk_name.ends_with("fread") || thunk_name.ends_with("fwrite")) {
+            const auto size = cpu.reg(Rdx);
+            const auto count = cpu.reg(R8);
+            if (size != 0 && count > (64ULL * 1024 * 1024) / size) {
+                cpu.set_reg(Rax, 0);
+            } else {
+                std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size * count));
+                if (thunk_name.ends_with("fwrite")) {
+                    bytes = cpu.memory().read(cpu.reg(Rcx), bytes.size());
+                    cpu.set_reg(Rax, std::fwrite(bytes.data(), static_cast<std::size_t>(size),
+                                                 static_cast<std::size_t>(count), stream));
+                } else {
+                    const auto read = std::fread(bytes.data(), static_cast<std::size_t>(size),
+                                                 static_cast<std::size_t>(count), stream);
+                    cpu.memory().write(cpu.reg(Rcx),
+                                       std::span<const std::uint8_t>(bytes.data(), read * size));
+                    cpu.set_reg(Rax, read);
+                }
+            }
+        } else if (thunk_name.ends_with("fclose")) {
+            cpu.set_reg(Rax, std::fclose(stream));
+            if (pending_guest_file_stream_ == stream_argument) {
+                pending_guest_file_stream_ = 0;
+            }
+            guest_file_streams_.erase(found);
+        } else if (thunk_name.ends_with("fflush")) {
+            cpu.set_reg(Rax, std::fflush(stream));
+        } else if (thunk_name.ends_with("fgetpos")) {
+            const auto position = _ftelli64(stream);
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), static_cast<std::uint64_t>(position));
+            }
+            cpu.set_reg(Rax, position < 0 ? -1 : 0);
+        } else if (thunk_name.ends_with("fsetpos")) {
+            const auto position =
+                cpu.reg(Rdx) == 0 ? -1
+                                  : static_cast<std::int64_t>(cpu.memory().read64(cpu.reg(Rdx)));
+            cpu.set_reg(Rax, position < 0 ? -1 : _fseeki64(stream, position, SEEK_SET));
+        } else if (thunk_name.ends_with("_fseeki64")) {
+            cpu.set_reg(Rax, _fseeki64(stream, static_cast<std::int64_t>(cpu.reg(Rdx)),
+                                       static_cast<int>(cpu.reg(R8))));
+        } else if (thunk_name.ends_with("fgetc")) {
+            cpu.set_reg(Rax, std::fgetc(stream));
+        } else if (thunk_name.ends_with("fputc")) {
+            cpu.set_reg(Rax, std::fputc(static_cast<int>(cpu.reg(Rcx)), stream));
+        }
+        finish_call();
+        break;
+    }
+    case Api::MsvcpInputStreamConstruct:
+        input_stream_buffers_[cpu.reg(Rcx)] = cpu.reg(Rdx);
+        cpu.set_reg(Rax, cpu.reg(Rcx));
+        finish_call();
+        break;
+    case Api::MsvcpStreamSwap: {
+        const auto left = input_stream_buffers_.find(cpu.reg(Rcx));
+        const auto right = input_stream_buffers_.find(cpu.reg(Rdx));
+        if (left != input_stream_buffers_.end() && right != input_stream_buffers_.end()) {
+            const auto left_file = stream_buffer_files_.find(left->second);
+            const auto right_file = stream_buffer_files_.find(right->second);
+            const auto left_handle =
+                left_file == stream_buffer_files_.end() ? 0 : left_file->second;
+            const auto right_handle =
+                right_file == stream_buffer_files_.end() ? 0 : right_file->second;
+            if (right_handle == 0) {
+                stream_buffer_files_.erase(left->second);
+            } else {
+                stream_buffer_files_[left->second] = right_handle;
+            }
+            if (left_handle == 0) {
+                stream_buffer_files_.erase(right->second);
+            } else {
+                stream_buffer_files_[right->second] = left_handle;
+            }
+        }
+        cpu.set_reg(Rax, cpu.reg(Rcx));
+        finish_call();
+        break;
+    }
+    case Api::MsvcpStreamSeek: {
+        auto *stream = stream_file(cpu.reg(Rcx));
+        const auto position =
+            cpu.reg(Rdx) == 0 ? -1 : static_cast<std::int64_t>(cpu.memory().read64(cpu.reg(Rdx)));
+        if (stream != nullptr && position >= 0) {
+            static_cast<void>(_fseeki64(stream, position, SEEK_SET));
+        }
+        cpu.set_reg(Rax, cpu.reg(Rcx));
+        finish_call();
+        break;
+    }
+    case Api::MsvcpStreamRead:
+    case Api::MsvcpStreamReadSome: {
+        auto *stream = stream_file(cpu.reg(Rcx));
+        const auto requested = static_cast<std::int64_t>(cpu.reg(R8));
+        std::size_t count = 0;
+        if (stream != nullptr && requested > 0 && requested <= 64LL * 1024 * 1024) {
+            std::vector<std::uint8_t> bytes(static_cast<std::size_t>(requested));
+            count = std::fread(bytes.data(), 1, bytes.size(), stream);
+            cpu.memory().write(cpu.reg(Rdx), std::span<const std::uint8_t>(bytes.data(), count));
+        }
+        cpu.set_reg(Rax, found->second == Api::MsvcpStreamReadSome ? count : cpu.reg(Rcx));
+        finish_call();
+        break;
+    }
+    case Api::MsvcpStreamDestroy:
+        if (const auto stream = input_stream_buffers_.find(cpu.reg(Rcx));
+            stream != input_stream_buffers_.end()) {
+            input_stream_buffers_.erase(stream);
+        }
+        stream_buffer_files_.erase(cpu.reg(Rcx));
+        cpu.set_reg(Rax, 0);
+        finish_call();
+        break;
+    case Api::MsvcpOutputStreamConstruct:
+        output_stream_buffers_[cpu.reg(Rcx)] = cpu.reg(Rdx);
+        cpu.set_reg(Rax, cpu.reg(Rcx));
+        finish_call();
+        break;
+    case Api::MsvcpStreamWrite: {
+        const auto found = output_stream_buffers_.find(cpu.reg(Rcx));
+        if (found != output_stream_buffers_.end()) {
+            const auto stream_buffer = found->second;
+            const auto storage = stream_buffer_storage_.at(stream_buffer);
+            auto &length = stream_buffer_lengths_.at(stream_buffer);
+            const auto count = std::min<std::uint64_t>(cpu.reg(R8), 4095 - length);
+            for (std::uint64_t index = 0; index < count; ++index) {
+                cpu.memory().write8(storage + length + index,
+                                    cpu.memory().read8(cpu.reg(Rdx) + index));
+            }
+            length += count;
+            cpu.memory().write8(storage + length, 0);
+            cpu.memory().write64(stream_buffer + 0x80, storage + length);
+            cpu.memory().write64(stream_buffer + 0x88, storage + length);
+        }
+        cpu.set_reg(Rax, cpu.reg(Rcx));
+        finish_call();
+        break;
+    }
+    case Api::GeographicRegionMethod: {
+        const auto index = geographic_region_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index >= 6 && index <= 10) {
+            wchar_t region[16] = {};
+            if (GetLocaleInfoEx(LOCALE_NAME_USER_DEFAULT, LOCALE_SISO3166CTRYNAME, region,
+                                static_cast<int>(std::size(region))) == 0) {
+                region[0] = L'U';
+                region[1] = L'S';
+            }
+            const auto length = static_cast<std::uint32_t>(std::wcslen(region));
+            const auto result = allocate(28 + (static_cast<std::uint64_t>(length) + 1) * 2);
+            cpu.memory().write32(result, 0);
+            cpu.memory().write32(result + 4, length);
+            cpu.memory().write64(result + 8, 0);
+            cpu.memory().write64(result + 16, result + 28);
+            cpu.memory().write32(result + 24, 1);
+            for (std::uint32_t character = 0; character <= length; ++character) {
+                cpu.memory().write16(result + 28 + character * 2,
+                                     static_cast<std::uint16_t>(region[character]));
+            }
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), result);
+            }
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U); // E_NOTIMPL
+        }
+        finish_call();
+        break;
+    }
+    case Api::ApplicationDataStaticsMethod: {
+        const auto index = application_data_statics_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            if (application_data_proxy_ == 0) {
+                const auto vtable = allocate(24 * 8);
+                application_data_proxy_ = allocate(8);
+                cpu.memory().write64(application_data_proxy_, vtable);
+                for (std::uint32_t method = 0; method < 24; ++method) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::ApplicationDataMethod);
+                    thunk_names_.emplace(thunk, "IApplicationData#" + std::to_string(method));
+                    application_data_methods_.emplace(thunk, method);
+                    cpu.memory().write64(vtable + method * 8, thunk);
+                }
+            }
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), application_data_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.set_reg(Rax, 0x80004001U);
+        }
+        finish_call();
+        break;
+    }
+    case Api::ApplicationDataMethod: {
+        const auto index = application_data_methods_.at(cpu.rip());
+        if (index == 0) {
+            if (cpu.reg(R8) != 0) {
+                cpu.memory().write64(cpu.reg(R8), cpu.reg(Rcx));
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 1) {
+            cpu.set_reg(Rax, 2);
+        } else if (index == 2) {
+            cpu.set_reg(Rax, 1);
+        } else if (index == 6) {
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write32(cpu.reg(Rdx), 0);
+            }
+            cpu.set_reg(Rax, 0);
+        } else if (index == 10) {
+            if (application_data_container_proxy_ == 0) {
+                const auto vtable = allocate(12 * 8);
+                application_data_container_proxy_ = allocate(8);
+                cpu.memory().write64(application_data_container_proxy_, vtable);
+                for (std::uint32_t method = 0; method < 12; ++method) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::ApplicationDataContainerMethod);
+                    thunk_names_.emplace(thunk,
+                                         "IApplicationDataContainer#" + std::to_string(method));
+                    application_data_container_methods_.emplace(thunk, method);
+                    cpu.memory().write64(vtable + method * 8, thunk);
+                }
+            }
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), application_data_container_proxy_);
+            }
+            cpu.set_reg(Rax, 0);
+        } else {
+            if (cpu.reg(Rdx) != 0) {
+                cpu.memory().write64(cpu.reg(Rdx), 0);
+            }
+            cpu.set_reg(Rax, 0x80004001U);
+        }
+        finish_call();
+        break;
+    }
     case Api::ProtectionPolicyMethod: {
         const auto index = protection_policy_methods_.at(cpu.rip());
         switch (index) {
@@ -3508,6 +5177,70 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call();
         break;
     }
+    case Api::MsvcpLocale: {
+        ensure_locale();
+        if (thunk_name.find("?_Init@locale") != std::string::npos && argument(0) != 0) {
+            cpu.memory().write32(locale_proxy_ + 8, cpu.memory().read32(locale_proxy_ + 8) + 1);
+        }
+        cpu.set_reg(Rax, locale_proxy_);
+        finish_call(thunk_name.find("?_Init@locale") != std::string::npos ? 1 : 0);
+        break;
+    }
+    case Api::MsvcpFacetFactory: {
+        std::uint32_t category = 0;
+        if (thunk_name.find("collate@") != std::string::npos) {
+            category = 1;
+        } else if (thunk_name.find("ctype@") != std::string::npos ||
+                   thunk_name.find("codecvt@") != std::string::npos) {
+            category = 2;
+        } else if (thunk_name.find("money") != std::string::npos) {
+            category = 4;
+        } else if (thunk_name.find("num") != std::string::npos) {
+            category = 8;
+        } else if (thunk_name.find("time_") != std::string::npos) {
+            category = 0x10;
+        } else if (thunk_name.find("messages@") != std::string::npos) {
+            category = 0x20;
+        }
+        if (argument(0) != 0) {
+            auto &facet = locale_facets_[cpu.rip()];
+            if (facet == 0) {
+                if (locale_facet_vtable_ == 0) {
+                    throw Error("locale facet factory called before locale initialization");
+                }
+                facet = allocate(0x10);
+                cpu.memory().write64(facet, locale_facet_vtable_);
+                cpu.memory().write32(facet + 8, 1);
+            }
+            cpu.memory().write64(argument(0), facet);
+        }
+        cpu.set_reg(Rax, category);
+        finish_call(2);
+        break;
+    }
+    case Api::LocaleFacetMethod: {
+        const auto method = locale_facet_methods_.at(cpu.rip());
+        const auto object = argument(0);
+        if (object == 0) {
+            throw Error("locale facet method received a null object");
+        }
+        if (method == 1) {
+            cpu.memory().write32(object + 8, cpu.memory().read32(object + 8) + 1);
+            cpu.set_reg(Rax, 0);
+        } else if (method == 2) {
+            const auto references = cpu.memory().read32(object + 8);
+            cpu.memory().write32(object + 8, references > 1 ? references - 1 : 1);
+            cpu.set_reg(Rax, 0);
+        } else if (method == 3) {
+            // codecvt<char, char, mbstate_t>::do_always_noconv: narrow file streams copy bytes
+            // directly and therefore never pass guest buffers through native conversion code.
+            cpu.set_reg(Rax, 1);
+        } else {
+            cpu.set_reg(Rax, object);
+        }
+        finish_call(1);
+        break;
+    }
     case Api::Native: {
         using NativeFunction =
             std::uint64_t(WINAPI *)(std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t,
@@ -3523,9 +5256,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             function(cpu.reg(Rcx), cpu.reg(Rdx), cpu.reg(R8), cpu.reg(R9), argument(0), argument(1),
                      argument(2), argument(3), argument(4), argument(5), argument(6), argument(7),
                      argument(8), argument(9), argument(10), argument(11));
-        if (callback_exception != nullptr) {
-            auto exception = callback_exception;
-            callback_exception = nullptr;
+        if (auto exception = detail::take_callback_exception(); exception != nullptr) {
             std::rethrow_exception(exception);
         }
         cpu.set_reg(Rax, result);
@@ -3549,468 +5280,6 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     }
     return true;
-}
-
-std::uint64_t Runtime::invoke_guest(Cpu &cpu, std::uint64_t target,
-                                    const std::array<std::uint64_t, 4> &arguments,
-                                    std::uint32_t &exit_code, bool &exited) {
-    const auto outer_stack = cpu.reg(Rsp);
-    const auto outer_rip = cpu.rip();
-    const auto callback_stack = outer_stack - (guest_is_64_bit_ ? 0x30 : 0x20);
-    const auto return_address = guest_is_64_bit_ ? callback_return : callback_return32;
-    if (guest_is_64_bit_) {
-        cpu.set_reg(Rcx, arguments[0]);
-        cpu.set_reg(Rdx, arguments[1]);
-        cpu.set_reg(R8, arguments[2]);
-        cpu.set_reg(R9, arguments[3]);
-        cpu.memory().write64(callback_stack, return_address);
-    } else {
-        cpu.memory().write32(callback_stack, static_cast<std::uint32_t>(return_address));
-        for (std::size_t index = 0; index < arguments.size(); ++index) {
-            cpu.memory().write32(callback_stack + 4 + index * 4,
-                                 static_cast<std::uint32_t>(arguments[index]));
-        }
-    }
-    cpu.set_reg(Rsp, callback_stack);
-    cpu.set_rip(target);
-    try {
-        while (!exited && cpu.rip() != return_address) {
-            if (!dispatch(cpu, exit_code, exited)) {
-                cpu.step();
-            }
-        }
-    } catch (...) {
-        cpu.set_reg(Rsp, outer_stack);
-        cpu.set_rip(outer_rip);
-        throw;
-    }
-    const auto result = cpu.reg(Rax);
-    cpu.set_reg(Rsp, outer_stack);
-    cpu.set_rip(outer_rip);
-    return result;
-}
-
-std::intptr_t Runtime::invoke_window_proc(Cpu &cpu, std::uint64_t window, std::uint32_t message,
-                                          std::uint64_t word_parameter, std::int64_t long_parameter,
-                                          std::uint32_t &exit_code, bool &exited) {
-    auto found = window_procedures_.find(window);
-    if (found == window_procedures_.end() && creating_window_procedure_ != 0) {
-        found = window_procedures_.emplace(window, creating_window_procedure_).first;
-    }
-    if (found == window_procedures_.end()) {
-        return DefWindowProcW(reinterpret_cast<HWND>(window), message, word_parameter,
-                              long_parameter);
-    }
-    static constexpr std::uint32_t notable_messages[] = {
-        WM_CREATE,     WM_NCCREATE, WM_DESTROY, WM_NCDESTROY,  WM_CLOSE,         WM_COMMAND,
-        WM_SYSCOMMAND, WM_QUIT,     WM_SIZE,    WM_SHOWWINDOW, WM_INITMENUPOPUP, WM_TIMER,
-    };
-    if (log::enabled(log::Level::Api) &&
-        std::find(std::begin(notable_messages), std::end(notable_messages), message) !=
-            std::end(notable_messages)) {
-        log::api("window", window_message_name(message) + " window=" + log::hex(window) +
-                               " wparam=" + log::hex(word_parameter) +
-                               " lparam=" + log::hex(static_cast<std::uint64_t>(long_parameter)));
-    }
-    std::size_t pointer_size = 0;
-    switch (message) {
-    case WM_SETTEXT:
-        if (long_parameter != 0) {
-            pointer_size = (std::wcslen(reinterpret_cast<const wchar_t *>(long_parameter)) + 1) *
-                           sizeof(wchar_t);
-        }
-        break;
-    case WM_GETTEXT:
-        pointer_size = static_cast<std::size_t>(word_parameter) * sizeof(wchar_t);
-        break;
-    case WM_GETMINMAXINFO:
-        pointer_size = sizeof(MINMAXINFO);
-        break;
-    case WM_CREATE:
-    case WM_NCCREATE:
-        pointer_size = sizeof(CREATESTRUCTW);
-        break;
-    case WM_WINDOWPOSCHANGING:
-    case WM_WINDOWPOSCHANGED:
-        pointer_size = sizeof(WINDOWPOS);
-        break;
-    case WM_NCCALCSIZE:
-        pointer_size = word_parameter == 0 ? sizeof(RECT) : sizeof(NCCALCSIZE_PARAMS);
-        break;
-    case WM_DPICHANGED:
-    case WM_SIZING:
-    case WM_MOVING:
-        pointer_size = sizeof(RECT);
-        break;
-    case WM_STYLECHANGING:
-    case WM_STYLECHANGED:
-        pointer_size = sizeof(STYLESTRUCT);
-        break;
-    default:
-        break;
-    }
-    auto guest_long_parameter = static_cast<std::uint64_t>(long_parameter);
-    std::uint64_t scratch = 0;
-    bool copy_back_raw = false;
-    if (pointer_size != 0 && long_parameter != 0) {
-        if (callback_depth_ >= 16 || pointer_size > 0x1000) {
-            throw Error("window callback scratch space exhausted");
-        }
-        scratch = environment_base + 0x10000 + callback_depth_ * 0x1000;
-        guest_long_parameter = scratch;
-        if (message == WM_CREATE || message == WM_NCCREATE) {
-            const auto *native = reinterpret_cast<const CREATESTRUCTW *>(long_parameter);
-            const auto write_pointer = [&](std::uint32_t offset32, std::uint32_t offset64,
-                                           std::uint64_t value) {
-                if (guest_is_64_bit_) {
-                    cpu.memory().write64(scratch + offset64, value);
-                } else {
-                    cpu.memory().write32(scratch + offset32, static_cast<std::uint32_t>(value));
-                }
-            };
-            const auto marshal_string = [&](const wchar_t *value, std::uint64_t address) {
-                if (value == nullptr || reinterpret_cast<std::uintptr_t>(value) <= 0xffff) {
-                    return static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(value));
-                }
-                const std::wstring text(value);
-                if ((text.size() + 1) * 2 > 0x300) {
-                    throw Error("window callback string exceeds scratch space");
-                }
-                for (std::size_t index = 0; index <= text.size(); ++index) {
-                    cpu.memory().write16(address + index * 2,
-                                         static_cast<std::uint16_t>(text[index]));
-                }
-                return address;
-            };
-            cpu.memory().write(scratch, std::vector<std::uint8_t>(guest_is_64_bit_ ? 80U : 48U));
-            write_pointer(0, 0, reinterpret_cast<std::uint64_t>(native->lpCreateParams));
-            write_pointer(4, 8, guest_image_base_);
-            write_pointer(8, 16, reinterpret_cast<std::uint64_t>(native->hMenu));
-            write_pointer(12, 24, reinterpret_cast<std::uint64_t>(native->hwndParent));
-            const auto integer_offset = guest_is_64_bit_ ? 32U : 16U;
-            cpu.memory().write32(scratch + integer_offset, static_cast<std::uint32_t>(native->cy));
-            cpu.memory().write32(scratch + integer_offset + 4,
-                                 static_cast<std::uint32_t>(native->cx));
-            cpu.memory().write32(scratch + integer_offset + 8,
-                                 static_cast<std::uint32_t>(native->y));
-            cpu.memory().write32(scratch + integer_offset + 12,
-                                 static_cast<std::uint32_t>(native->x));
-            cpu.memory().write32(scratch + integer_offset + 16, native->style);
-            write_pointer(36, 56, marshal_string(native->lpszName, scratch + 0x200));
-            write_pointer(40, 64, marshal_string(native->lpszClass, scratch + 0x600));
-            cpu.memory().write32(scratch + (guest_is_64_bit_ ? 72U : 44U), native->dwExStyle);
-        } else if (!guest_is_64_bit_ &&
-                   (message == WM_WINDOWPOSCHANGING || message == WM_WINDOWPOSCHANGED)) {
-            const auto *native = reinterpret_cast<const WINDOWPOS *>(long_parameter);
-            cpu.memory().write32(scratch, static_cast<std::uint32_t>(
-                                              reinterpret_cast<std::uintptr_t>(native->hwnd)));
-            cpu.memory().write32(scratch + 4,
-                                 static_cast<std::uint32_t>(
-                                     reinterpret_cast<std::uintptr_t>(native->hwndInsertAfter)));
-            cpu.memory().write32(scratch + 8, static_cast<std::uint32_t>(native->x));
-            cpu.memory().write32(scratch + 12, static_cast<std::uint32_t>(native->y));
-            cpu.memory().write32(scratch + 16, static_cast<std::uint32_t>(native->cx));
-            cpu.memory().write32(scratch + 20, static_cast<std::uint32_t>(native->cy));
-            cpu.memory().write32(scratch + 24, native->flags);
-        } else {
-            cpu.memory().write(
-                scratch, std::span<const std::uint8_t>(
-                             reinterpret_cast<const std::uint8_t *>(long_parameter), pointer_size));
-            copy_back_raw = message != WM_SETTEXT;
-        }
-        callback_long_parameters_[scratch] = long_parameter;
-    }
-    ++callback_depth_;
-    std::uint64_t result = 0;
-    try {
-        result = invoke_guest(cpu, found->second,
-                              {window, message, word_parameter, guest_long_parameter}, exit_code,
-                              exited);
-    } catch (...) {
-        if (scratch != 0) {
-            callback_long_parameters_.erase(scratch);
-        }
-        --callback_depth_;
-        throw;
-    }
-    --callback_depth_;
-    if (scratch != 0) {
-        callback_long_parameters_.erase(scratch);
-    }
-    if (scratch != 0 && !guest_is_64_bit_ &&
-        (message == WM_WINDOWPOSCHANGING || message == WM_WINDOWPOSCHANGED)) {
-        auto *native = reinterpret_cast<WINDOWPOS *>(long_parameter);
-        native->hwnd = reinterpret_cast<HWND>(cpu.memory().read32(scratch));
-        native->hwndInsertAfter = reinterpret_cast<HWND>(cpu.memory().read32(scratch + 4));
-        native->x = static_cast<int>(cpu.memory().read32(scratch + 8));
-        native->y = static_cast<int>(cpu.memory().read32(scratch + 12));
-        native->cx = static_cast<int>(cpu.memory().read32(scratch + 16));
-        native->cy = static_cast<int>(cpu.memory().read32(scratch + 20));
-        native->flags = cpu.memory().read32(scratch + 24);
-    } else if (scratch != 0 && copy_back_raw) {
-        const auto bytes = cpu.memory().read(scratch, pointer_size);
-        std::memcpy(reinterpret_cast<void *>(long_parameter), bytes.data(), bytes.size());
-    }
-    if (message == WM_NCDESTROY) {
-        window_procedures_.erase(found);
-    }
-    return static_cast<std::intptr_t>(result);
-}
-
-RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t instruction_limit,
-                       const std::wstring &arguments) {
-    log::info("runtime", "loading guest '" + executable.string() + "'");
-    Memory memory;
-    thunks_.clear();
-    thunk_names_.clear();
-    native_functions_.clear();
-    bool format_initialized = false;
-    const auto configure_format = [&](bool is_64_bit) {
-        if (!format_initialized) {
-            guest_is_64_bit_ = is_64_bit;
-            const auto return_thunk = is_64_bit ? return_thunk64 : return_thunk32;
-            thunks_.emplace(return_thunk, Api::ProcessReturn);
-            next_thunk_ = return_thunk + 0x100;
-            format_initialized = true;
-        } else if (guest_is_64_bit_ != is_64_bit) {
-            throw Error("PE architecture changed while resolving imports");
-        }
-    };
-    data_import_next_ = 0;
-    data_import_slots_.clear();
-    last_error_ = 0;
-    guest_exception_filter_ = 0;
-    heap_next_ = 0x0000'0006'0000'0000ULL;
-    heap_sizes_.clear();
-    next_module_handle_ = 0x7fe0'0000ULL;
-    guest_modules_.clear();
-    for (const auto &[guest_handle, host_handle] : find_handles_) {
-        static_cast<void>(guest_handle);
-        ::FindClose(static_cast<HANDLE>(host_handle));
-    }
-    find_handles_.clear();
-    next_find_handle_ = 0x300;
-    for (const auto &[guest_handle, host_handle] : file_handles_) {
-        static_cast<void>(guest_handle);
-        ::CloseHandle(static_cast<HANDLE>(host_handle));
-    }
-    file_handles_.clear();
-    next_file_handle_ = 0x400;
-    class_window_procedures_.clear();
-    atom_window_procedures_.clear();
-    window_procedures_.clear();
-    creating_window_procedure_ = 0;
-    quit_message_pending_ = false;
-    quit_message_code_ = 0;
-    callback_long_parameters_.clear();
-    callback_depth_ = 0;
-    direct_input_proxy_ = 0;
-    direct_input_device_proxy_ = 0;
-    direct_input_methods_.clear();
-    protection_policy_proxy_ = 0;
-    protection_policy_methods_.clear();
-    next_tls_index_ = 1;
-    next_fls_index_ = 1;
-    tls_values_.clear();
-    fls_values_.clear();
-    const auto image = PeLoader::load(executable, memory,
-                                      [&](const auto &module, const auto &name, bool is_64_bit) {
-                                          configure_format(is_64_bit);
-                                          return resolve_import(module, name);
-                                      });
-    configure_format(image.is_64_bit);
-    heap_next_ = image.is_64_bit ? 0x0000'0006'0000'0000ULL : 0x1000'0000ULL;
-    guest_image_base_ = image.base;
-    guest_executable_ = std::filesystem::absolute(executable);
-    if (resource_module_ != nullptr) {
-        FreeLibrary(static_cast<HMODULE>(resource_module_));
-    }
-    resource_module_ =
-        LoadLibraryExW(guest_executable_.c_str(), nullptr,
-                       LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE | LOAD_LIBRARY_AS_IMAGE_RESOURCE);
-    const auto requested_stack = std::max(image.stack_reserve, minimum_stack_size);
-    if (requested_stack > std::numeric_limits<std::uint64_t>::max() - 0xffff) {
-        throw Error("guest stack reserve is too large");
-    }
-    const auto stack_size = (requested_stack + 0xffff) & ~0xffffULL;
-    if (stack_size >= stack_top) {
-        throw Error("guest stack reserve is too large");
-    }
-    const auto stack_base = stack_top - stack_size;
-    memory.map(stack_base, stack_size, Read | Write, "main stack");
-    memory.map(environment_base, environment_size, Read | Write, "process environment");
-    // KUSER_SHARED_DATA is mapped read-only into every Windows process; alias the host's own
-    // page so guest code reading tick counts and system time sees real values.
-    memory.map_existing(
-        0x7ffe0000ULL, 0x1000, Read, "kuser shared data",
-        reinterpret_cast<std::uint8_t *>(static_cast<std::uintptr_t>(0x7ffe0000ULL)));
-    const auto stack_entry_size = image.is_64_bit ? 8U : 4U;
-    const auto initial_rsp = stack_base + stack_size - 0x1000 - stack_entry_size;
-    const auto return_thunk = image.is_64_bit ? return_thunk64 : return_thunk32;
-    if (image.is_64_bit) {
-        memory.write64(initial_rsp, return_thunk);
-    } else {
-        memory.write32(initial_rsp, static_cast<std::uint32_t>(return_thunk));
-    }
-    if (image.is_64_bit) {
-        memory.write64(teb_base + 0x08, stack_base + stack_size);
-        memory.write64(teb_base + 0x10, stack_base);
-        memory.write64(teb_base + 0x30, teb_base);
-        memory.write64(teb_base + 0x40, 1);
-        memory.write64(teb_base + 0x48, 1);
-        memory.write64(teb_base + 0x60, peb_base);
-    } else {
-        memory.write32(teb_base + 0x04, static_cast<std::uint32_t>(stack_base + stack_size));
-        memory.write32(teb_base + 0x08, static_cast<std::uint32_t>(stack_base));
-        memory.write32(teb_base + 0x18, static_cast<std::uint32_t>(teb_base));
-        memory.write32(teb_base + 0x20, 1);
-        memory.write32(teb_base + 0x24, 1);
-        memory.write32(teb_base + 0x30, static_cast<std::uint32_t>(peb_base));
-    }
-    if (image.tls_start != 0 || image.tls_index != 0 || !image.tls_callbacks.empty()) {
-        const auto template_size = image.tls_end - image.tls_start;
-        if (template_size > tls_size - 0x1000) {
-            throw Error("guest TLS template is too large");
-        }
-        memory.map(tls_base, tls_size, Read | Write, "main thread TLS");
-        const auto tls_block = tls_base + 0x1000;
-        if (image.is_64_bit) {
-            memory.write64(teb_base + 0x58, tls_base);
-            memory.write64(tls_base, tls_block);
-        } else {
-            memory.write32(teb_base + 0x2c, static_cast<std::uint32_t>(tls_base));
-            memory.write32(tls_base, static_cast<std::uint32_t>(tls_block));
-        }
-        if (template_size != 0) {
-            memory.write(tls_block,
-                         memory.read(image.tls_start, static_cast<std::size_t>(template_size)));
-        }
-        if (image.tls_index != 0) {
-            memory.write32(image.tls_index, 0);
-        }
-    }
-    if (arguments.size() > 1000) {
-        throw Error("guest command line arguments too long");
-    }
-    std::wstring full_command_line = L"\"" + executable.wstring() + L"\"";
-    if (!arguments.empty()) {
-        full_command_line += L' ';
-        full_command_line += arguments;
-    }
-    if (full_command_line.size() > 2047) {
-        throw Error("guest command line too long");
-    }
-    for (std::size_t index = 0; index < full_command_line.size(); ++index) {
-        memory.write16(command_line_address + index * 2,
-                       static_cast<std::uint16_t>(full_command_line[index]));
-    }
-    memory.write16(command_line_address + full_command_line.size() * 2, 0);
-    for (std::size_t index = 0; index < arguments.size(); ++index) {
-        memory.write16(winmain_command_line_address + index * 2,
-                       static_cast<std::uint16_t>(arguments[index]));
-    }
-    memory.write16(winmain_command_line_address + arguments.size() * 2, 0);
-    guest_command_line_ = command_line_address;
-    guest_winmain_command_line_ = winmain_command_line_address;
-    std::string narrow_command_line;
-    narrow_command_line.reserve(full_command_line.size());
-    for (const wchar_t character : full_command_line) {
-        narrow_command_line.push_back(character < 0x80 ? static_cast<char>(character) : '_');
-    }
-    for (std::size_t index = 0; index < narrow_command_line.size(); ++index) {
-        memory.write8(environment_base + 0x3800 + index,
-                      static_cast<std::uint8_t>(narrow_command_line[index]));
-    }
-    memory.write8(environment_base + 0x3800 + narrow_command_line.size(), 0);
-    guest_command_line_a_ = environment_base + 0x3800;
-    const auto data_slot = [&](const char *name) {
-        const auto found = data_import_slots_.find(name);
-        return found == data_import_slots_.end() ? 0 : found->second;
-    };
-    const auto write_guest_pointer = [&](std::uint64_t address, std::uint64_t value) {
-        if (image.is_64_bit) {
-            memory.write64(address, value);
-        } else {
-            memory.write32(address, static_cast<std::uint32_t>(value));
-        }
-    };
-    if (const auto slot = data_slot("_wcmdln"); slot != 0) {
-        write_guest_pointer(slot, command_line_address);
-    }
-    if (const auto slot = data_slot("_acmdln"); slot != 0) {
-        write_guest_pointer(slot, environment_base + 0x3800);
-    }
-    // An empty environment is a single NULL pointer entry.
-    if (const auto slot = data_slot("_environ"); slot != 0) {
-        const auto pointer_size = image.is_64_bit ? 8U : 4U;
-        write_guest_pointer(slot, slot + pointer_size);
-    }
-    if (const auto slot = data_slot("_wenviron"); slot != 0) {
-        const auto pointer_size = image.is_64_bit ? 8U : 4U;
-        write_guest_pointer(slot, slot + pointer_size);
-    }
-    if (const auto slot = data_slot("_winmajor"); slot != 0) {
-        memory.write32(slot, 10);
-    }
-    if (const auto slot = data_slot("_winminor"); slot != 0) {
-        memory.write32(slot, 0);
-    }
-    if (const auto slot = data_slot("_osver"); slot != 0) {
-        memory.write32(slot, 0);
-    }
-    if (const auto slot = data_slot("_winver"); slot != 0) {
-        memory.write32(slot, 0x0A00);
-    }
-    log::info("runtime", "guest command line: " + narrow_string(full_command_line));
-
-    Cpu cpu(memory);
-    cpu.reset(image.entry, initial_rsp, image.is_64_bit);
-    if (image.is_64_bit) {
-        cpu.set_gs_base(teb_base);
-    } else {
-        cpu.set_fs_base(teb_base);
-    }
-    std::uint32_t exit_code = 0;
-    bool exited = false;
-    active_runtime = this;
-    active_cpu = &cpu;
-    active_exit_code = &exit_code;
-    active_exited = &exited;
-    callback_exception = nullptr;
-    log::info("runtime", "starting guest at entry " + log::hex(image.entry));
-    try {
-        for (const auto callback : image.tls_callbacks) {
-            log::trace("runtime", "calling TLS callback " + log::hex(callback));
-            static_cast<void>(invoke_guest(cpu, callback, {image.base, DLL_PROCESS_ATTACH, 0, 0},
-                                           exit_code, exited));
-            if (exited) {
-                break;
-            }
-        }
-        while (!exited) {
-            if (cpu.instructions() >= instruction_limit) {
-                throw Error("instruction limit exceeded");
-            }
-            if (!dispatch(cpu, exit_code, exited)) {
-                cpu.step();
-            }
-        }
-    } catch (const std::exception &) {
-        log::error("cpu",
-                   "guest stopped after " + std::to_string(cpu.instructions()) + " instructions");
-        log::error("cpu", cpu_state_dump(cpu));
-        active_runtime = nullptr;
-        active_cpu = nullptr;
-        active_exit_code = nullptr;
-        active_exited = nullptr;
-        throw;
-    }
-    active_runtime = nullptr;
-    active_cpu = nullptr;
-    active_exit_code = nullptr;
-    active_exited = nullptr;
-    log::info("runtime", "guest finished cleanly");
-    return {exit_code, cpu.instructions()};
 }
 
 } // namespace winemu

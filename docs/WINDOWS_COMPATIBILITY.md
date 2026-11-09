@@ -66,5 +66,14 @@ escape emulation or retain unsafe guest state:
 5. Add success, failure, invalid-pointer, output-pointer, and lifetime tests where the fixture
    system permits them.
 
-See `src/runtime.cpp` for the authoritative resolver and dispatch implementation. This document is
+## MSVC runtime ownership
+
+CPUEmu constructs guest-owned argument vectors for `__p___argc`, `__p___argv`, and
+`__p___wargv`. MSVC file and input-stream adapters keep native `FILE` pointers in runtime-owned
+maps; guest stream objects contain only guest addresses and opaque handles. Stream initialization,
+seek, read, swap, and destruction are marshaled by the runtime. Unimplemented C++ object methods
+must fail closed rather than invoking host STL code against a guest object layout.
+
+See `src/runtime/dispatch.cpp` and `src/runtime/imports.cpp` for the authoritative dispatch and
+resolver implementations. This document is
 an overview, not a promise that every flag and structure variant of a named API is complete.

@@ -4,6 +4,52 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-09 — Guest-safe MSVC input streams
+
+- Added guest-owned `argc`/`argv`/wide-`argv` tables so MSVC startup code never receives host
+  process pointers.
+- Added adapters for the MSVC character stream-buffer initializer, input-stream construction,
+  swapping, seeking, reading, partial reading, and destruction. Host `FILE` pointers remain in
+  runtime-owned maps and are never written into guest C++ objects.
+- Made the file-to-stream-buffer constructor handoff explicit runtime state instead of depending
+  on a stale volatile argument register. Added the `stream.exe` regression for binary seek/read.
+- This removes the native-host `basic_istream::seekg` ABI mismatch seen in the modern Notepad
+  startup probe. It does not claim that packaged Notepad creates a window; a fresh probe is still
+  required to identify and record the next blocker.
+
+## 2026-11-09 — Implementation-level modularization
+
+- Extracted real CPU state/stack, operand decoding, and flag implementations from the instruction
+  execution state machine; `cpu_execute.cpp` now owns only execution-specific helpers and
+  `Cpu::step`.
+- Split guest memory into mapping ownership, checked access, and virtual-memory state/query
+  modules without changing the public `Memory` interface.
+- Split runtime import resolution, lifecycle, process execution, callback re-entry, and shared
+  string/layout support from the Win32/CRT/COM dispatch state machine.
+- Split regressions by CPU, memory, and runtime responsibility, and separated deterministic PE
+  serialization from the guest-program fixture builders.
+- Kept the remaining single-function CPU execution, API dispatch, and PE loading state machines
+  intact because further separation would require control-flow redesign rather than moving
+  existing definitions.
+
+## 2026-11-09 — Generic WinRT activation factories
+
+- Fixed the adapter contract for `RoGetActivationFactory` calls that use the `IActivationFactory`
+  IID on a class without a dedicated adapter. The generic fallback returned `S_OK` while writing
+  its result to `R9`, but `ActivateInstance` returns the instance through the out parameter in
+  `RDX`, so the guest received success plus a null object and faulted dereferencing it.
+- Unknown classes now receive a factory-shaped proxy whose `ActivateInstance` writes a
+  guest-owned, `IInspectable`-conformant instance into `RDX`. Factories and instances are cached
+  per WinRT class name so distinct classes cannot alias one another. Methods beyond
+  `IInspectable` fail closed with `E_NOTIMPL` instead of fabricating a result.
+- Added the `winrt.exe` fixture, which activates an unknown class and verifies the instance is
+  non-null, and the `test_winrt_activation` regression.
+- Modern packaged Notepad probe (11.2607.14.0, `--limit 200000 -v`): advanced from 73,885 to
+  74,024 interpreted instructions. Startup now creates and uses the application instance and its
+  resource lookup (vtable slot 8) is the first unsupported method; because it fails closed, the
+  guest raises a WinRT language exception that the emulator cannot yet unwind. Packaged Notepad
+  still does not reach window creation, and no editor window or typing is claimed.
+
 ## 2026-11-08 — Catalog-backed atlas and verified UI captures
 
 - Replaced the decorative instruction texture with a generated 200-cell catalog dashboard. Every
@@ -238,7 +284,7 @@ development.
 
 ### Added
 
-- **Leveled logger** (`include/winemu/log.hpp`, `src/log.cpp`). Every log line is
+- **Leveled logger** (`include/winemu/log.hpp`, `src/core/log.cpp`). Every log line is
   `[HH:MM:SS.mmm] [level] component: message`. Levels are `error` < `warn` < `info` < `api` <
   `trace`. Logs go to stderr so the guest program keeps stdout to itself; `--log-file`
   mirrors every line into a file. Expensive message building is gated behind

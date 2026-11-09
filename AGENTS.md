@@ -20,12 +20,14 @@ constant to make a probe advance.
 
 ## Repository map
 
-- `src/cpu.cpp`: decoding, execution, registers, flags, x87/XMM state.
-- `src/memory.cpp`: checked mappings, permissions, and virtual-memory bookkeeping.
-- `src/pe.cpp`: PE32/PE32+ validation, sections, imports, TLS, and stack metadata.
-- `src/runtime.cpp`: process setup, ABI adapters, Win32 marshaling, guest callbacks/interfaces.
-- `tests/tests.cpp`: machine-code regressions and end-to-end fixture tests.
-- `tools/guest/paint.cpp`: interactive/headless GDI smoke guest.
+- `src/core/cpu_execute.cpp`: instruction execution, including tightly coupled x87/XMM cases.
+- `src/core/cpu_decode.cpp`, `cpu_flags.cpp`, `cpu_state.cpp`: decoding, flags, and CPU state.
+- `src/core/memory.cpp`, `memory_access.cpp`, `memory_virtual.cpp`: mapping ownership, checked
+  access, and virtual-memory state.
+- `src/loader/pe.cpp`: PE32/PE32+ validation, sections, imports, TLS, and stack metadata.
+- `src/runtime/`: import resolution, lifecycle/execution, callbacks, and Win32/CRT/COM dispatch.
+- `tests/cpu_tests.cpp`, `memory_tests.cpp`, `runtime_case_tests.cpp`: focused regressions.
+- `tools/guests/paint.cpp`: interactive/headless GDI smoke guest.
 - `docs/`: compatibility evidence, coverage, roadmap, structure, and milestones.
 - `README.md`: user-facing overview; `CONTRIBUTING.md`: PR requirements.
 

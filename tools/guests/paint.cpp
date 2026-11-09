@@ -4,6 +4,7 @@
 //   build-release\cpuemu.exe build\test-apps\paint.exe                interactive window
 //   build-release\cpuemu.exe build\test-apps\paint.exe -- --selftest  headless verification
 //   build-release\cpuemu.exe build\test-apps\paint.exe -- --screenshot stable visual probe
+//   build-release\cpuemu.exe build\test-apps\paint.exe -- --sync-selftest Win32 sync verification
 //
 // The interactive mode exercises the guest window-procedure bridge: the window is a real
 // host window whose messages are interpreted by the emulated CPU, and all drawing goes
@@ -393,9 +394,103 @@ int run_selftest() {
     return ok ? 0 : 1;
 }
 
+int run_sync_selftest() {
+    bool ok = true;
+    const auto check = [&](bool condition, const char *failure) {
+        if (!condition) {
+            write_stdout(failure);
+            write_stdout("\r\n");
+            ok = false;
+        }
+    };
+
+    const HANDLE missing =
+        OpenSemaphoreW(SEMAPHORE_ALL_ACCESS, FALSE, L"CPUEmu synchronization missing object");
+    check(missing == nullptr && GetLastError() == ERROR_FILE_NOT_FOUND,
+          "sync selftest: missing named semaphore result");
+
+    const HANDLE semaphore = CreateSemaphoreExW(nullptr, 0, 1, L"CPUEmu synchronization semaphore",
+                                                0, SEMAPHORE_ALL_ACCESS);
+    check(semaphore != nullptr, "sync selftest: semaphore creation");
+    const HANDLE opened =
+        OpenSemaphoreW(SEMAPHORE_ALL_ACCESS, FALSE, L"CPUEmu synchronization semaphore");
+    check(opened != nullptr, "sync selftest: semaphore open");
+    if (semaphore != nullptr && opened != nullptr) {
+        check(WaitForSingleObject(opened, 0) == WAIT_TIMEOUT,
+              "sync selftest: unsignaled semaphore wait");
+        LONG previous = -1;
+        check(ReleaseSemaphore(semaphore, 1, &previous) != FALSE && previous == 0,
+              "sync selftest: semaphore release count");
+        check(WaitForSingleObject(opened, 0) == WAIT_OBJECT_0,
+              "sync selftest: signaled semaphore wait");
+    }
+
+    const HANDLE mutex = CreateMutexExW(nullptr, L"CPUEmu synchronization mutex",
+                                        CREATE_MUTEX_INITIAL_OWNER, MUTEX_ALL_ACCESS);
+    check(mutex != nullptr, "sync selftest: mutex creation");
+    if (mutex != nullptr) {
+        check(ReleaseMutex(mutex) != FALSE, "sync selftest: mutex release");
+    }
+
+    const HANDLE event =
+        CreateEventExW(nullptr, L"CPUEmu synchronization event", 0, EVENT_ALL_ACCESS);
+    check(event != nullptr, "sync selftest: event creation");
+    if (event != nullptr) {
+        check(WaitForSingleObject(event, 0) == WAIT_TIMEOUT,
+              "sync selftest: unsignaled event wait");
+        check(SetEvent(event) != FALSE, "sync selftest: set event");
+        check(WaitForSingleObject(event, 0) == WAIT_OBJECT_0, "sync selftest: signaled event wait");
+        check(ResetEvent(event) != FALSE, "sync selftest: reset event");
+    }
+
+    SRWLOCK lock{};
+    InitializeSRWLock(&lock);
+    AcquireSRWLockExclusive(&lock);
+    ReleaseSRWLockExclusive(&lock);
+    check(TryAcquireSRWLockShared(&lock) != FALSE, "sync selftest: SRW try acquire");
+    ReleaseSRWLockShared(&lock);
+
+    const ULONG_PTR message_arguments[] = {reinterpret_cast<ULONG_PTR>(L"guest"), 7};
+    wchar_t *formatted = nullptr;
+    const DWORD formatted_length = FormatMessageW(
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_STRING | FORMAT_MESSAGE_ARGUMENT_ARRAY,
+        L"%1 synchronization value %2!u!", 0, 0, reinterpret_cast<wchar_t *>(&formatted), 0,
+        reinterpret_cast<va_list *>(const_cast<ULONG_PTR *>(message_arguments)));
+    check(formatted_length != 0 && formatted != nullptr &&
+              lstrcmpW(formatted, L"guest synchronization value 7") == 0,
+          "sync selftest: FormatMessageW guest allocation");
+    if (formatted != nullptr) {
+        LocalFree(formatted);
+    }
+
+    check(WaitForSingleObject(reinterpret_cast<HANDLE>(0xdead), 0) == WAIT_FAILED &&
+              GetLastError() == ERROR_INVALID_HANDLE,
+          "sync selftest: invalid handle wait");
+    if (opened != nullptr) {
+        check(CloseHandle(opened) != FALSE, "sync selftest: close opened semaphore");
+        check(CloseHandle(opened) == FALSE && GetLastError() == ERROR_INVALID_HANDLE,
+              "sync selftest: reject double close");
+    }
+    if (semaphore != nullptr) {
+        CloseHandle(semaphore);
+    }
+    if (mutex != nullptr) {
+        CloseHandle(mutex);
+    }
+    if (event != nullptr) {
+        CloseHandle(event);
+    }
+
+    write_stdout(ok ? "SYNC SELFTEST PASSED\r\n" : "SYNC SELFTEST FAILED\r\n");
+    return ok ? 0 : 1;
+}
+
 } // namespace
 
 extern "C" int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show_command) {
+    if (wcsstr(GetCommandLineW(), L"--sync-selftest") != nullptr) {
+        return run_sync_selftest();
+    }
     if (wcsstr(GetCommandLineW(), L"--selftest") != nullptr) {
         return run_selftest();
     }

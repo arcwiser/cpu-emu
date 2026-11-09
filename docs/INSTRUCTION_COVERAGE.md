@@ -16,7 +16,8 @@ The [visual completion map](assets/instruction-status.svg) is generated from
 [`instruction-atlas.csv`](instruction-atlas.csv). Every cell maps to one named catalog entry, but
 entries deliberately mix individual mnemonics, grouped condition families, encoding subsets, and
 architectural capabilities; they are not equal-sized encoding units or a percentage denominator.
-`src/cpu.cpp` and `tests/tests.cpp` remain authoritative when documentation and code disagree.
+`src/core/cpu_execute.cpp` and `tests/cpu_tests.cpp` remain authoritative when documentation and code
+disagree.
 
 ## Compatibility impact map
 
@@ -172,5 +173,5 @@ An instruction family moves toward 🟩 only when it has:
 5. Boundary and fault behavior through checked guest memory.
 6. Correct `CPUID` advertising, or an explicit reason the family stays hidden.
 
-New CPU behavior belongs in `src/cpu.cpp` with compact machine-code regressions in
-`tests/tests.cpp`. Application-address-specific instruction patches are not accepted.
+New CPU behavior belongs in `src/core/cpu_execute.cpp` with compact machine-code regressions in
+`tests/cpu_tests.cpp`. Application-address-specific instruction patches are not accepted.

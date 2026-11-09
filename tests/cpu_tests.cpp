@@ -1,64 +1,14 @@
-#include "winemu/cpu.hpp"
-#include "winemu/error.hpp"
-#include "winemu/log.hpp"
-#include "winemu/memory.hpp"
-#include "winemu/pe.hpp"
-#include "winemu/runtime.hpp"
+#include "test_suite.hpp"
 
-#include <algorithm>
+#include "winemu/cpu.hpp"
+#include "winemu/memory.hpp"
+
+#include <array>
 #include <bit>
 #include <cstdint>
-#include <filesystem>
-#include <iostream>
 #include <limits>
-#include <sstream>
-#include <stdexcept>
-#include <string>
 
-namespace {
-
-void require(bool condition, const std::string &message) {
-    if (!condition) {
-        throw std::runtime_error(message);
-    }
-}
-
-void test_memory() {
-    winemu::Memory memory;
-    memory.map(0x200000000ULL, 0x1000, winemu::Read | winemu::Write, "test");
-    memory.write64(0x200000100ULL, 0x8877665544332211ULL);
-    require(memory.read64(0x200000100ULL) == 0x8877665544332211ULL, "64-bit memory round trip");
-    bool rejected = false;
-    try {
-        static_cast<void>(memory.read8(0x400000000ULL));
-    } catch (const winemu::Error &) {
-        rejected = true;
-    }
-    require(rejected, "unmapped access must fail");
-
-    const std::uint8_t wide_text[] = {'C', 0, 'P', 0, 'U', 0, 0, 0};
-    memory.write(0x200000200ULL, wide_text);
-    require(memory.read_wide_string(0x200000200ULL) == L"CPU", "wide string round trip");
-
-    // Two small regions that share one lookup page must both stay reachable through the
-    // region cache, and re-protecting a page must invalidate stale cache entries.
-    memory.map(0x210000400ULL, 0x10, winemu::Read | winemu::Write, "low fragment");
-    memory.map(0x210000800ULL, 0x10, winemu::Read | winemu::Write, "high fragment");
-    memory.write32(0x210000400ULL, 0x11111111U);
-    memory.write32(0x210000800ULL, 0x22222222U);
-    require(memory.read32(0x210000400ULL) == 0x11111111U, "same-page fragment A");
-    require(memory.read32(0x210000800ULL) == 0x22222222U, "same-page fragment B");
-    require(memory.read32(0x210000400ULL) == 0x11111111U, "same-page fragment A re-read");
-    require(memory.protect(0x210000800ULL, 0x10, winemu::Read), "protect fragment B read-only");
-    bool write_rejected = false;
-    try {
-        memory.write32(0x210000800ULL, 0x33333333U);
-    } catch (const winemu::Error &) {
-        write_rejected = true;
-    }
-    require(write_rejected, "protect must invalidate the region cache for that page");
-    require(memory.read32(0x210000800ULL) == 0x22222222U, "protected fragment stays readable");
-}
+namespace winemu::tests {
 
 void test_cpu_loop() {
     winemu::Memory memory;
@@ -624,92 +574,4 @@ void test_sign_extend_accumulator() {
     require(cpu.reg(winemu::Rdx) == UINT64_MAX, "CQO sign extension");
 }
 
-void test_apps() {
-    const std::filesystem::path apps(WINEMU_TEST_APPS_DIR);
-    {
-        winemu::Memory memory;
-        const auto image = winemu::PeLoader::load(
-            apps / "exit32.exe", memory,
-            [](const std::string &, const std::string &, bool) -> std::uint64_t {
-                throw std::runtime_error("unexpected PE32 import");
-            });
-        require(!image.is_64_bit, "PE32 image mode");
-        constexpr std::uint64_t stack_base = 0x00800000;
-        memory.map(stack_base, 0x1000, winemu::Read | winemu::Write, "PE32 stack");
-        memory.write32(stack_base + 0xffc, 0xdeadbeef);
-        winemu::Cpu cpu(memory);
-        cpu.reset(image.entry, stack_base + 0xffc, false);
-        while (cpu.rip() != 0xdeadbeef) {
-            cpu.step();
-        }
-        require(cpu.reg(winemu::Rax) == 42, "PE32 CPU result");
-    }
-    {
-        std::ostringstream output;
-        winemu::Runtime runtime(output);
-        const auto result = runtime.run(apps / "exit42.exe");
-        require(result.exit_code == 42, "exit42 result");
-        require(output.str().empty(), "exit42 output");
-    }
-    {
-        std::ostringstream output;
-        winemu::Runtime runtime(output);
-        const auto result = runtime.run(apps / "sum.exe");
-        require(result.exit_code == 55, "sum result");
-    }
-    {
-        std::ostringstream output;
-        winemu::Runtime runtime(output);
-        const auto result = runtime.run(apps / "hello.exe");
-        require(result.exit_code == 0, "hello result");
-        require(output.str() == "Hello from an emulated Windows PE app!\r\n", "hello output");
-    }
-}
-
-void test_logging() {
-    using namespace winemu::log;
-    set_level(Level::Warn);
-    require(!enabled(Level::Info), "info must be filtered at warn level");
-    require(enabled(Level::Error), "error must pass at warn level");
-    set_level(Level::Trace);
-    require(enabled(Level::Trace), "trace must pass at trace level");
-    Level parsed = Level::Info;
-    require(parse_level("api", parsed) && parsed == Level::Api, "parse api level name");
-    require(!parse_level("nope", parsed), "reject unknown level name");
-    set_level(Level::Info);
-}
-
-void test_paint_selftest() {
-    const std::filesystem::path apps(WINEMU_TEST_APPS_DIR);
-    std::ostringstream output;
-    winemu::Runtime runtime(output);
-    const auto result = runtime.run(apps / "paint.exe", 100'000'000, L"--selftest");
-    require(result.exit_code == 0, "paint selftest exit code");
-    require(output.str().find("PAINT SELFTEST PASSED") != std::string::npos,
-            "paint selftest output");
-}
-
-} // namespace
-
-int main() {
-    try {
-        test_memory();
-        test_cpu_loop();
-        test_cpu_32bit_mode();
-        test_pshufd();
-        test_pshufb();
-        test_packed_absolute_values();
-        test_bit_count_instructions();
-        test_extended_ssse3();
-        test_sse3_float_operations();
-        test_sign_extend_accumulator();
-        test_logging();
-        test_apps();
-        test_paint_selftest();
-        std::cout << "all tests passed\n";
-        return 0;
-    } catch (const std::exception &error) {
-        std::cerr << "test failure: " << error.what() << '\n';
-        return 1;
-    }
-}
+} // namespace winemu::tests
