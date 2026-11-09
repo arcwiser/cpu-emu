@@ -28,7 +28,8 @@ Statuses describe the furthest verified milestone, not a promise that every feat
 | :---: | --- | :---: | --- | --- |
 | 🟢 **Supported** | CPUEmu fixtures | x86 / x64 | Load, execute, print, and exit with checked results | Test scope only |
 | 🟢 **Smoke test** | CPUEmu Paint | x64 | Creates a window and passes headless drawing self-test | Deliberately small fixture |
-| 🔴 **Current build blocked** | Windows 11 Notepad | x64 | Loads 315 imports and reaches packaged-instance synchronization | The current 25H2 launcher requires cross-process/package handoff; no current-tree UI claim |
+| 🟡 **Starts** | Classic Windows Notepad | x64 | Real editor window, basic typing, status bar, menu bar, and File dropdown | Guest subclass callbacks, file dialogs, persistence, and sustained use remain unverified |
+| 🔴 **Blocked** | Modern packaged Notepad | x64 | Activates a guest-owned WinRT application instance | XAML resource lookup and guest exception unwinding |
 | 🟠 **Graphics bring-up** | **Undertale** | x86 | Parses game data, creates `YYGameMakerYY`, initializes safe input, reaches `Direct3DCreate9Ex` | Direct3D 9Ex device and presentation proxy |
 | 🔴 **Blocked early** | Discord / Chromium | x64 | More than 2.6M V8 startup instructions | Guest processes, threads, DLLs, exceptions, SIMD |
 
@@ -67,9 +68,9 @@ These images were captured from windows owned by `cpuemu.exe`, not native stand-
 | --- | --- |
 | ![CPUEmu Paint running through the interpreter](docs/assets/screenshots/paint-cpuemu.png) | ![About Windows running through CPUEmu](docs/assets/screenshots/winver-cpuemu.png) |
 
-The current Windows 11 Notepad launcher does not yet produce a genuine CPUEmu-owned editor window,
-so no Notepad screenshot is presented as supported. See the [capture provenance and exact
-commands](docs/assets/screenshots/README.md).
+Classic `System32\notepad.exe` now produces a genuine CPUEmu-owned editor window and accepts basic
+keyboard input. Its repository screenshot is still pending; the modern packaged Notepad remains a
+separate blocked target. See the [capture provenance and exact commands](docs/assets/screenshots/README.md).
 
 ## What it does
 

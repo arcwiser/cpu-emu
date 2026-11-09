@@ -31,7 +31,8 @@ reproducible blocker.
 | `sum.exe` fixture | Supported | Integer loop, arithmetic, flags, branches, and process return | Test fixture only |
 | `hello.exe` fixture | Supported | Imports resolve and console output passes through `GetStdHandle`/`WriteFile` | Test fixture only |
 | CPUEmu Paint fixture | 🟢 Supported smoke test | Interactive GDI path starts; `--selftest` draws and reports success | Intended as a compatibility probe, not a full paint program |
-| Windows 11 Notepad (25H2 system launcher) | 🔴 Blocked | Loads 315 imports and reaches named synchronization/instance handoff | Current packaged Notepad depends on cross-process/package activation; an earlier UI claim is not reproducible on the current tree and no current screenshot is claimed |
+| Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing updates the real Edit control and dirty title; File/Edit/Format/View/Help render and the File dropdown populates | Guest subclass procedures are retained but not dispatched; open/save, dialogs, persistence, and sustained use are unverified |
+| Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
 | Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates the `YYGameMakerYY` native window, initializes a safe DirectInput proxy, enumerates display modes, and reaches `Direct3DCreate9Ex` after about 15.1M instructions | The HWND is created but not visibly shown/rendering yet; Direct3D 9, active input, streaming audio, and full Steamworks interfaces remain |
 | Discord / Chromium | 🔴 Blocked | Loads the installed x64 image and advances through more than 2.6 million V8 startup instructions | Blocked by guest threads/processes, DLL loading, exceptions, mapped sections, and broader SIMD support |
@@ -68,3 +69,13 @@ The Undertale-specific probe and subsystem roadmap are in [`UNDERTALE.md`](UNDER
 When adding an entry, record the exact application version, Windows version, command line, last
 successful milestone, and first reproducible failure. A compatibility probe should produce a
 regression test before its workaround is considered supported behavior.
+
+The classic Notepad result was re-probed at commit `47a1640` with:
+
+```powershell
+build\cpuemu.exe C:\Windows\System32\notepad.exe --limit 100000000
+```
+
+The CPUEmu-owned window accepted `CPUEmu input test`, changed its title to `*Untitled - Notepad`,
+and opened a populated File menu. This is evidence for basic input and menu routing only; it does
+not establish correct file I/O or full editor compatibility.

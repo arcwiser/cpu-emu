@@ -20,9 +20,10 @@ this file is the companion log of development decisions.
   guest's resource module.
 - Classic `System32\notepad.exe` now runs with a real window, a menu bar rendering File, Edit,
   Format, View, and Help, and its edit, banner, button, and tooltip child windows. Verified
-  visually through a captured window; the editor surface is not yet verified for input, and the
-  subclass procedure is retained but not yet invoked. The modern packaged Notepad still blocks in
-  WinRT/XAML startup and produces no window.
+  against the `cpuemu.exe`-owned window. A follow-up probe typed `CPUEmu input test` into the real
+  Edit control, observed the dirty title, and opened a populated File menu. Open/save, persistence,
+  and sustained editing remain unverified, and the retained subclass procedure is not yet invoked.
+  The modern packaged Notepad still blocks in WinRT/XAML startup and produces no window.
 
 ## 2026-11-10 — Guest activation contexts and stream buffer layout
 

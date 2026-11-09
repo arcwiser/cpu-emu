@@ -32,7 +32,14 @@ build\cpuemu.exe C:\Windows\System32\winver.exe
 
 ## Notepad
 
-No current screenshot is included. The Windows 11 25H2 system `notepad.exe` loads under CPUEmu but
-enters packaged-instance synchronization/cross-process activation before an editor window exists.
-Presenting a native Notepad window as emulated would be misleading. Add a screenshot only after a
-current-tree probe produces a genuine `cpuemu.exe`-owned Notepad editor window.
+No repository screenshot is included yet. At commit `47a1640`, classic
+`C:\Windows\System32\notepad.exe` version 10.0.26100.8457 produced a genuine `cpuemu.exe`-owned
+editor window. Basic typing and the populated File menu were verified interactively with:
+
+```powershell
+build\cpuemu.exe C:\Windows\System32\notepad.exe --limit 100000000
+```
+
+The modern packaged Notepad is a different executable and still does not create a window. Any
+future image must show the classic CPUEmu-owned window and record the commit and capture method;
+a native or packaged Notepad lookalike is not acceptable evidence.
