@@ -4911,6 +4911,10 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     }
     case Api::MsvcpInputStreamConstruct:
         input_stream_buffers_[cpu.reg(Rcx)] = cpu.reg(Rdx);
+        if (pending_ios_object_ != 0) {
+            input_stream_ios_[cpu.reg(Rcx)] = pending_ios_object_;
+            pending_ios_object_ = 0;
+        }
         cpu.set_reg(Rax, cpu.reg(Rcx));
         finish_call();
         break;
@@ -4971,6 +4975,13 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             std::vector<std::uint8_t> bytes(static_cast<std::size_t>(requested));
             count = std::fread(bytes.data(), 1, bytes.size(), stream);
             cpu.memory().write(cpu.reg(Rdx), std::span<const std::uint8_t>(bytes.data(), count));
+            if (found->second == Api::MsvcpStreamRead &&
+                count < static_cast<std::size_t>(requested)) {
+                if (const auto ios = input_stream_ios_.find(cpu.reg(Rcx));
+                    ios != input_stream_ios_.end()) {
+                    ios_states_[ios->second] |= 3U; // eofbit | failbit
+                }
+            }
         }
         cpu.set_reg(Rax, found->second == Api::MsvcpStreamReadSome ? count : cpu.reg(Rcx));
         finish_call();
@@ -4981,6 +4992,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             stream != input_stream_buffers_.end()) {
             input_stream_buffers_.erase(stream);
         }
+        input_stream_ios_.erase(cpu.reg(Rcx));
         stream_buffer_files_.erase(cpu.reg(Rcx));
         cpu.set_reg(Rax, 0);
         finish_call();
@@ -4988,6 +5000,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     case Api::MsvcpIosConstruct:
         ios_states_[cpu.reg(Rcx)] = 0;
         ios_exception_masks_[cpu.reg(Rcx)] = 0;
+        pending_ios_object_ = cpu.reg(Rcx);
         cpu.set_reg(Rax, cpu.reg(Rcx));
         finish_call();
         break;
@@ -5017,6 +5030,9 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     case Api::MsvcpIosDestroy:
         ios_states_.erase(cpu.reg(Rcx));
         ios_exception_masks_.erase(cpu.reg(Rcx));
+        if (pending_ios_object_ == cpu.reg(Rcx)) {
+            pending_ios_object_ = 0;
+        }
         cpu.set_reg(Rax, 0);
         finish_call();
         break;

@@ -10,5 +10,11 @@ int main() {
     input.seekg(4);
     char value = 0;
     input.read(&value, 1);
-    return value == '4' && input.tellg() == 5 ? 0 : 1;
+    if (value != '4' || input.tellg() != 5) {
+        return 1;
+    }
+    input.exceptions(std::ios::goodbit);
+    input.seekg(10);
+    input.read(&value, 1);
+    return input.fail() ? 0 : 3;
 }

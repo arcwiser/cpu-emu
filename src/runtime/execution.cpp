@@ -187,8 +187,10 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     stream_buffer_lengths_.clear();
     stream_buffer_files_.clear();
     input_stream_buffers_.clear();
+    input_stream_ios_.clear();
     ios_states_.clear();
     ios_exception_masks_.clear();
+    pending_ios_object_ = 0;
     pending_guest_file_stream_ = 0;
     for (const auto &[guest_stream, host_stream] : guest_file_streams_) {
         static_cast<void>(guest_stream);

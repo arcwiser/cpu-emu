@@ -72,6 +72,7 @@ CPUEmu constructs guest-owned argument vectors for `__p___argc`, `__p___argv`, a
 `__p___wargv`. MSVC file and input-stream adapters keep native `FILE` pointers in runtime-owned
 maps; guest stream objects contain only guest addresses and opaque handles. Stream initialization,
 seek, position queries, read, swap, `basic_ios` state, and destruction are marshaled by the runtime.
+Short input reads update the associated guest `basic_ios` EOF/fail state.
 MSVC PPL chores re-enter the interpreter cooperatively; they are never handed to the native thread
 pool. Unimplemented C++ object methods must fail closed rather than invoking host STL code against
 a guest object layout.

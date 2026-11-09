@@ -176,8 +176,10 @@ class Runtime {
     std::unordered_map<std::uint64_t, std::uint64_t> stream_buffer_lengths_;
     std::unordered_map<std::uint64_t, std::uint64_t> stream_buffer_files_;
     std::unordered_map<std::uint64_t, std::uint64_t> input_stream_buffers_;
+    std::unordered_map<std::uint64_t, std::uint64_t> input_stream_ios_;
     std::unordered_map<std::uint64_t, std::uint32_t> ios_states_;
     std::unordered_map<std::uint64_t, std::uint32_t> ios_exception_masks_;
+    std::uint64_t pending_ios_object_ = 0;
     std::unordered_map<std::uint64_t, void *> guest_file_streams_;
     std::uint64_t pending_guest_file_stream_ = 0;
 
