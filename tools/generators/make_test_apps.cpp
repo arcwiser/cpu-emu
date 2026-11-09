@@ -31,6 +31,7 @@ int main(int argc, char **argv) {
         make_schedule_chore(output / "schedule.exe");
         make_get_error_info(output / "errorinfo.exe");
         make_property_value(output / "propertyvalue.exe");
+        make_fail_fast(output / "failfast.exe");
         return 0;
     } catch (const std::exception &error) {
         std::cerr << "make_test_apps: " << error.what() << '\n';

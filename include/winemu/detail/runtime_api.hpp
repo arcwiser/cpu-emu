@@ -220,6 +220,7 @@ enum class RuntimeApi {
     MsvcpReleaseChore,
     GuestGetErrorInfo,
     GuestSetErrorInfo,
+    GuestFailFast,
     Native,
     Unsupported,
 };

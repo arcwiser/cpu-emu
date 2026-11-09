@@ -4,6 +4,21 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-10 — Guest fail-fast isolation
+
+- Routed the noreturn UCRT fail-fast family (`_invoke_watson`, `_invalid_parameter_noinfo`,
+  `_invalid_parameter_noinfo_noreturn`, `_wassert`, `_assert`) to a guest-owned adapter. These
+  imports previously fell through to native forwarding, so a guest fail-fast raised
+  `STATUS_STACK_BUFFER_OVERRUN` inside the emulator and killed the host process with 0xC0000409.
+- The adapter terminates only the guest, with the same status Windows raises for `__fastfail`,
+  and logs the triggering routine plus the guest return address.
+- Added the `failfast.exe` fixture and the `test_fail_fast_isolation` regression, which asserts
+  the guest exits with 0xC0000409 and that the sentinel after the noreturn call is never reached.
+- Packaged Notepad 11.2607.14.0 now runs to 245,610 instructions and terminates its own state
+  deserializer instead of crashing the emulator. The deserializer computes a value, rejects it
+  with `cmp rcx, 0x1f; ja`, and invokes `_invoke_watson` from `0x14006ec1c` (return address
+  `0x14006ec22`), so the real blocker is a serialized field the guest bounds-checks to 0-31.
+
 ## 2026-11-09 — Notepad probe reaches one million instructions
 
 - Prevented native MSVC PPL from retaining and executing guest `_Threadpool_chore` callbacks.

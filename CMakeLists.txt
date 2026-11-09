@@ -61,6 +61,7 @@ add_custom_command(
         ${CMAKE_BINARY_DIR}/test-apps/schedule.exe
         ${CMAKE_BINARY_DIR}/test-apps/errorinfo.exe
         ${CMAKE_BINARY_DIR}/test-apps/propertyvalue.exe
+    ${CMAKE_BINARY_DIR}/test-apps/failfast.exe
     COMMAND make_test_apps ${CMAKE_BINARY_DIR}/test-apps
     DEPENDS make_test_apps
     VERBATIM
@@ -74,6 +75,7 @@ add_custom_target(generate_test_apps ALL DEPENDS
     ${CMAKE_BINARY_DIR}/test-apps/schedule.exe
     ${CMAKE_BINARY_DIR}/test-apps/errorinfo.exe
     ${CMAKE_BINARY_DIR}/test-apps/propertyvalue.exe
+    ${CMAKE_BINARY_DIR}/test-apps/failfast.exe
 )
 add_dependencies(cpuemu_tests generate_test_apps)
 

@@ -22,6 +22,7 @@ explicit adapter.
 | Area | APIs and behavior | Current limits |
 | --- | --- | --- |
 | Process lifecycle | `ExitProcess`, CRT exit functions, `TerminateProcess` | Single guest process |
+| Guest fail-fast | `abort`, `_invoke_watson`, `_invalid_parameter_noinfo`, `_invalid_parameter_noinfo_noreturn`, `_wassert`, `_assert` | Noreturn paths terminate only the guest with the Windows fast-fail status; never forwarded natively |
 | Console output | `GetStdHandle`, `WriteFile` | Focused on standard output/error handles |
 | Errors and diagnostics | `GetLastError`, `SetLastError`, `OutputDebugStringA` | Per-runtime error state |
 | Virtual memory | `VirtualAlloc`, `VirtualFree`, `VirtualProtect`, `VirtualQuery` | No placeholders, write-watch, or full mapped-section semantics |

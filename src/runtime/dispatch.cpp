@@ -84,6 +84,9 @@ using detail::narrow_string;
 } // namespace
 
 bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
+    // __fastfail always raises STATUS_STACK_BUFFER_OVERRUN on Windows, independent of the
+    // fail-fast sub-code, so a guest fail-fast terminates with this status.
+    constexpr std::uint32_t fail_fast_status = 0xc0000409U;
     const auto found = thunks_.find(cpu.rip());
     if (found == thunks_.end()) {
         return false;
@@ -174,6 +177,15 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     case Api::AbortProcess:
         throw Error("guest called abort from " + log::hex(cpu.memory().read64(cpu.reg(Rsp))));
+    case Api::GuestFailFast: {
+        // A guest fail-fast is noreturn. Terminate only the guest with the status Windows would
+        // raise for __fastfail, and say which routine triggered it so the real blocker is visible.
+        log::error("runtime", "guest fail-fast via " + thunk_name + " from " +
+                                  log::hex(cpu.memory().read64(cpu.reg(Rsp))));
+        exit_code = fail_fast_status;
+        exited = true;
+        break;
+    }
     case Api::TerminateProcess:
         exit_code = static_cast<std::uint32_t>(argument(1));
         exited = true;

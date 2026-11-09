@@ -110,4 +110,16 @@ void test_property_value() {
     require(result.exit_code == 0, "PropertyValue UInt32 factory and getter");
 }
 
+void test_fail_fast_isolation() {
+    // A guest fail-fast is noreturn. It must terminate the guest with the Windows fast-fail
+    // status rather than being forwarded natively, which would raise the exception in the host
+    // emulator process. The sentinel exit code proves the guest never returned from the call.
+    std::ostringstream output;
+    winemu::Runtime runtime(output);
+    const auto result = runtime.run(WINEMU_TEST_APPS_DIR "/failfast.exe");
+    constexpr std::uint32_t status_stack_buffer_overrun = 0xc0000409U;
+    require(result.exit_code == status_stack_buffer_overrun,
+            "guest fail-fast terminates only the guest");
+}
+
 } // namespace winemu::tests

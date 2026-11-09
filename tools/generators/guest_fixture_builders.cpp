@@ -343,4 +343,49 @@ void make_property_value(const std::filesystem::path &path) {
     write_pe(path, section, imports_rva, 40, iat_rva, 16);
 }
 
+// Calls the UCRT noreturn fail-fast entry point. The guest must terminate with the Windows
+// fail-fast status instead of the emulator raising that exception in the host process.
+void make_fail_fast(const std::filesystem::path &path) {
+    constexpr std::uint32_t imports_rva = 0x1100;
+    constexpr std::uint32_t dll_rva = 0x1140;
+    constexpr std::uint32_t int_rva = 0x1180;
+    constexpr std::uint32_t iat_rva = 0x1190;
+    constexpr std::uint32_t names_rva = 0x11a0;
+
+    std::vector<std::uint8_t> section(0x300);
+    std::vector<std::uint8_t> code;
+    const auto emit = [&](std::initializer_list<std::uint8_t> values) {
+        code.insert(code.end(), values.begin(), values.end());
+    };
+    const auto emit_rip_relative = [&](std::initializer_list<std::uint8_t> prefix,
+                                       std::uint32_t target) {
+        code.insert(code.end(), prefix.begin(), prefix.end());
+        const auto next = section_rva + static_cast<std::uint32_t>(code.size()) + 4;
+        append32(code, target - next);
+    };
+
+    emit({0x48, 0x83, 0xec, 0x38}); // sub rsp, 0x38 (shadow space plus reserved argument)
+    emit({0x31, 0xc9});             // xor ecx, ecx (expression)
+    emit({0x31, 0xd2});             // xor edx, edx (function name)
+    emit({0x45, 0x31, 0xc0});       // xor r8d, r8d (file name)
+    emit({0x45, 0x31, 0xc9});       // xor r9d, r9d (line number)
+    emit({0x48, 0xc7, 0x44, 0x24, 0x20, 0, 0, 0, 0}); // mov qword [rsp+0x20], 0 (reserved)
+    emit_rip_relative({0xff, 0x15}, iat_rva);         // call _invoke_watson (noreturn)
+    emit({0xb8, 0x7f, 0, 0, 0});                      // unreached sentinel exit code
+    emit({0x48, 0x83, 0xc4, 0x38, 0xc3});             // add rsp, 0x38; ret
+    std::copy(code.begin(), code.end(), section.begin());
+
+    const auto offset = [](std::uint32_t rva) { return rva - section_rva; };
+    put32(section, offset(imports_rva), int_rva);
+    put32(section, offset(imports_rva) + 12, dll_rva);
+    put32(section, offset(imports_rva) + 16, iat_rva);
+    const std::string dll = "api-ms-win-crt-runtime-l1-1-0.dll";
+    std::copy(dll.begin(), dll.end(), section.begin() + offset(dll_rva));
+    const std::string import = "_invoke_watson";
+    put64(section, offset(int_rva), names_rva);
+    put64(section, offset(iat_rva), names_rva);
+    std::copy(import.begin(), import.end(), section.begin() + offset(names_rva) + 2);
+    write_pe(path, section, imports_rva, 40, iat_rva, 16);
+}
+
 } // namespace cpuemu::fixtures

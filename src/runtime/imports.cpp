@@ -343,6 +343,13 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
     } else if (name == "abort") {
         // A guest CRT abort must never terminate or hang the host emulator process.
         api = Api::AbortProcess;
+    } else if (name == "_invoke_watson" || name == "_invalid_parameter_noinfo" ||
+               name == "_invalid_parameter_noinfo_noreturn" || name == "_wassert" ||
+               name == "_assert") {
+        // These CRT routines are noreturn fail-fast paths. Forwarding them natively raises the
+        // fast-fail exception in the host process and kills the emulator, so the guest terminates
+        // instead while keeping the same Windows process status.
+        api = Api::GuestFailFast;
     } else if (name == "_o__cexit" || name == "_o__c_exit" || name == "_c_exit") {
         api = Api::ReturnZero;
     } else if (name == "TerminateProcess") {
