@@ -4,6 +4,26 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-10 — Classic Notepad reaches window and menu rendering
+
+- Adapted the comctl32 v6 subclass family. `SetWindowSubclass` is exported as ordinal 410,
+  `RemoveWindowSubclass` as 412, and `DefSubclassProc` as 413; Notepad imports them by ordinal.
+  Native forwarding let comctl32 invoke a guest subclass procedure as host code from its message
+  dispatch. The procedure is now retained guest-side and comctl32 receives no registration, so the
+  window behaves as unsubclassed until a guest-side subclass dispatcher exists.
+- `WM_DRAWITEM` was not in the window-procedure marshaling table, so its LPARAM, a host
+  `DRAWITEMSTRUCT` pointer, reached guest code directly and faulted. It is now copied into guest
+  scratch space with copy-back. The 32-bit layout differs, so that case is refused rather than
+  silently corrupted.
+- Window classes registered with CPUEmu's own instance handle, so Windows resolved a class menu
+  name against CPUEmu and produced no menu. Registration and `CreateWindowExW` now both use the
+  guest's resource module.
+- Classic `System32\notepad.exe` now runs with a real window, a menu bar rendering File, Edit,
+  Format, View, and Help, and its edit, banner, button, and tooltip child windows. Verified
+  visually through a captured window; the editor surface is not yet verified for input, and the
+  subclass procedure is retained but not yet invoked. The modern packaged Notepad still blocks in
+  WinRT/XAML startup and produces no window.
+
 ## 2026-11-10 — Guest activation contexts and stream buffer layout
 
 - Guest imports now bind under an activation context created from the guest image. Without it a

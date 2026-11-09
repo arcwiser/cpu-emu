@@ -303,6 +303,15 @@ std::intptr_t Runtime::invoke_window_proc(Cpu &cpu, std::uint64_t window, std::u
     case WM_WINDOWPOSCHANGED:
         pointer_size = sizeof(WINDOWPOS);
         break;
+    case WM_DRAWITEM:
+        // DRAWITEMSTRUCT holds a host HDC and HWND, so it must be copied into guest memory rather
+        // than handed over as a raw host pointer. Only the 64-bit layout matches the host one; the
+        // 32-bit case is refused instead of silently corrupting the structure.
+        if (!guest_is_64_bit_) {
+            throw Error("WM_DRAWITEM marshaling is not implemented for 32-bit guests");
+        }
+        pointer_size = sizeof(DRAWITEMSTRUCT);
+        break;
     case WM_NCCALCSIZE:
         pointer_size = word_parameter == 0 ? sizeof(RECT) : sizeof(NCCALCSIZE_PARAMS);
         break;

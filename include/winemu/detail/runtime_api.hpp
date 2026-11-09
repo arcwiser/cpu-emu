@@ -223,6 +223,7 @@ enum class RuntimeApi {
     GuestFailFast,
     FeatureStateSubscribe,
     FeatureStateUnsubscribe,
+    WindowSubclass,
     Native,
     Unsupported,
 };

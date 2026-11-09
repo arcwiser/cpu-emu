@@ -108,6 +108,9 @@ class Runtime {
     std::unordered_map<std::uint64_t, std::uint32_t> protection_policy_methods_;
     // Guest feature-state-change callbacks, retained so they are never executed as host code.
     std::unordered_map<std::uint64_t, std::uint64_t> feature_state_callbacks_;
+    // Guest subclass procedures from SetWindowSubclass, retained so comctl32 never executes them
+    // as native host code from its message dispatch.
+    std::unordered_map<std::uint64_t, std::uint64_t> window_subclass_callbacks_;
     std::uint64_t winrt_activation_factory_proxy_ = 0;
     std::uint64_t geographic_region_proxy_ = 0;
     std::unordered_map<std::uint64_t, std::uint32_t> winrt_activation_factory_methods_;

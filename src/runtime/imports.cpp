@@ -532,6 +532,15 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::FeatureStateSubscribe;
     } else if (name == "UnsubscribeFeatureStateChangeNotification") {
         api = Api::FeatureStateUnsubscribe;
+    } else if (name == "SetWindowSubclass" || name == "RemoveWindowSubclass" ||
+               name == "DefSubclassProc" || name == "GetWindowSubclass") {
+        // comctl32 subclassing retains a guest procedure and invokes it from message dispatch.
+        api = Api::WindowSubclass;
+    } else if (normalized_module == "comctl32.dll" &&
+               (name == "#410" || name == "#412" || name == "#413")) {
+        // The same subclass family is exported by ordinal only in comctl32 v6: SetWindowSubclass
+        // is 410, RemoveWindowSubclass 412, and DefSubclassProc 413.
+        api = Api::WindowSubclass;
     } else if (name == "SetThreadpoolTimer" || name == "WaitForThreadpoolTimerCallbacks" ||
                name == "CloseThreadpoolTimer") {
         api = Api::ReturnZero;

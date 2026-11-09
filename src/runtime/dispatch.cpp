@@ -2303,6 +2303,27 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         cpu.set_reg(Rax, 0);
         finish_call(1);
         break;
+    case Api::WindowSubclass: {
+        if (thunk_name.ends_with("SetWindowSubclass") || thunk_name.ends_with("#410")) {
+            // The subclass procedure is a guest address. It is retained guest-side rather than
+            // registered with comctl32, which would invoke it as native host code during message
+            // dispatch. The window therefore behaves as unsubclassed until a guest-side subclass
+            // dispatcher exists.
+            window_subclass_callbacks_[cpu.reg(Rcx)] = cpu.reg(Rdx);
+            cpu.set_reg(Rax, 1);
+            finish_call(4);
+        } else if (thunk_name.ends_with("RemoveWindowSubclass") || thunk_name.ends_with("#412")) {
+            window_subclass_callbacks_.erase(cpu.reg(Rcx));
+            cpu.set_reg(Rax, 1);
+            finish_call(3);
+        } else {
+            // DefSubclassProc and GetWindowSubclass: the chain is empty because comctl32 never
+            // received a registration, so there is nothing to forward to.
+            cpu.set_reg(Rax, 0);
+            finish_call(4);
+        }
+        break;
+    }
     case Api::CreateThreadpoolTimer:
         cpu.set_reg(Rax, allocate(8));
         finish_call();
@@ -2967,7 +2988,8 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             static_cast<int>(cpu.memory().read32(structure + (guest_is_64_bit_ ? 16 : 12)));
         host_class.cbWndExtra =
             static_cast<int>(cpu.memory().read32(structure + (guest_is_64_bit_ ? 20 : 16)));
-        host_class.hInstance = GetModuleHandleW(nullptr);
+        host_class.hInstance = resource_module_ != nullptr ? static_cast<HMODULE>(resource_module_)
+                                                           : GetModuleHandleW(nullptr);
         host_class.hIcon = reinterpret_cast<HICON>(read_pointer(24, 32));
         host_class.hCursor = reinterpret_cast<HCURSOR>(read_pointer(28, 40));
         host_class.hbrBackground = reinterpret_cast<HBRUSH>(read_pointer(32, 48));
@@ -3011,14 +3033,19 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             creating_window_procedure_ =
                 found == class_window_procedures_.end() ? 0 : found->second;
         }
+        // The instance must match the one the class was registered with, and it is also where
+        // Windows resolves a class menu name, so it has to be the guest image rather than
+        // CPUEmu itself.
+        const auto window_instance = resource_module_ != nullptr
+                                         ? static_cast<HINSTANCE>(resource_module_)
+                                         : GetModuleHandleW(nullptr);
         const auto result = ::CreateWindowExW(
             static_cast<DWORD>(argument(0)), native_class,
             title_pointer == 0 ? nullptr : title.c_str(), static_cast<DWORD>(argument(3)),
             static_cast<int>(argument(4)), static_cast<int>(argument(5)),
             static_cast<int>(argument(6)), static_cast<int>(argument(7)),
             reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(8))),
-            reinterpret_cast<HMENU>(static_cast<std::uintptr_t>(argument(9))),
-            GetModuleHandleW(nullptr),
+            reinterpret_cast<HMENU>(static_cast<std::uintptr_t>(argument(9))), window_instance,
             reinterpret_cast<void *>(static_cast<std::uintptr_t>(argument(11))));
         if (auto exception = detail::take_callback_exception(); exception != nullptr) {
             std::rethrow_exception(exception);
