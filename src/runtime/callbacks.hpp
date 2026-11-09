@@ -7,6 +7,8 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+// Common Controls depends on the base Windows declarations above.
+#include <commctrl.h>
 
 namespace winemu {
 
@@ -21,6 +23,9 @@ void clear_callback_context();
 [[nodiscard]] std::string window_message_name(std::uint32_t message);
 LRESULT CALLBACK window_proc_bridge(HWND window, UINT message, WPARAM word_parameter,
                                     LPARAM long_parameter);
+LRESULT CALLBACK window_subclass_bridge(HWND window, UINT message, WPARAM word_parameter,
+                                        LPARAM long_parameter, UINT_PTR token,
+                                        DWORD_PTR reference_data);
 
 } // namespace detail
 } // namespace winemu

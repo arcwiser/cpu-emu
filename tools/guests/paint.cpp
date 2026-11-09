@@ -11,6 +11,8 @@
 // through natively forwarded GDI calls.
 
 #include <windows.h>
+// Common Controls depends on the base Windows declarations above.
+#include <commctrl.h>
 
 #include <cstdint>
 #include <cwchar>
@@ -59,6 +61,28 @@ HBRUSH background_brush = nullptr;
 bool message_selftest = false;
 
 void write_stdout(const char *text);
+
+constexpr UINT_PTR subclass_id = 0x123456789abcdef0ULL;
+constexpr DWORD_PTR subclass_reference = 0x0fedcba987654321ULL;
+
+LRESULT CALLBACK paint_subclass_procedure(HWND window, UINT message, WPARAM word_parameter,
+                                          LPARAM long_parameter, UINT_PTR id,
+                                          DWORD_PTR reference_data) {
+    if (message == WM_APP + 1) {
+        DWORD_PTR queried_reference = 0;
+        const bool valid =
+            id == subclass_id && reference_data == subclass_reference &&
+            GetWindowSubclass(window, paint_subclass_procedure, subclass_id, &queried_reference) !=
+                FALSE &&
+            queried_reference == subclass_reference &&
+            RemoveWindowSubclass(window, paint_subclass_procedure, subclass_id) != FALSE;
+        write_stdout(valid ? "PAINT SUBCLASS SELFTEST PASSED\r\n"
+                           : "PAINT SUBCLASS SELFTEST FAILED\r\n");
+        PostQuitMessage(valid ? 0 : 1);
+        return 0;
+    }
+    return DefSubclassProc(window, message, word_parameter, long_parameter);
+}
 
 void trace(const char *message) { OutputDebugStringA(message); }
 
@@ -155,12 +179,18 @@ LRESULT CALLBACK paint_window_procedure(HWND window, UINT message, WPARAM word_p
     case WM_CREATE:
         trace("paint: window created");
         if (message_selftest) {
-            PostMessageW(window, WM_APP + 1, 0, 0);
+            if (SetWindowSubclass(window, paint_subclass_procedure, subclass_id,
+                                  subclass_reference) == FALSE) {
+                write_stdout("PAINT SUBCLASS SELFTEST FAILED\r\n");
+                PostQuitMessage(1);
+            } else {
+                PostMessageW(window, WM_APP + 1, 0, 0);
+            }
         }
         return 0;
     case WM_APP + 1:
-        write_stdout("PAINT MESSAGE LOOP SELFTEST PASSED\r\n");
-        PostQuitMessage(0);
+        write_stdout("PAINT SUBCLASS SELFTEST FAILED\r\n");
+        PostQuitMessage(1);
         return 0;
     case WM_ERASEBKGND:
         return 1;

@@ -217,22 +217,59 @@ LRESULT CALLBACK window_proc_bridge(HWND window, UINT message, WPARAM word_param
     return result;
 }
 
+LRESULT CALLBACK window_subclass_bridge(HWND window, UINT message, WPARAM word_parameter,
+                                        LPARAM long_parameter, UINT_PTR token,
+                                        DWORD_PTR reference_data) {
+    static_cast<void>(reference_data);
+    if (active_runtime == nullptr || active_cpu == nullptr || active_exit_code == nullptr ||
+        active_exited == nullptr) {
+        return DefSubclassProc(window, message, word_parameter, long_parameter);
+    }
+    std::intptr_t result = 0;
+    try {
+        result = active_runtime->invoke_window_subclass(
+            *active_cpu, token, reinterpret_cast<std::uint64_t>(window), message, word_parameter,
+            long_parameter, *active_exit_code, *active_exited);
+    } catch (...) {
+        callback_exception = std::current_exception();
+        log::error("window", "guest subclass procedure faulted on " + window_message_name(message) +
+                                 ", falling back to DefSubclassProc");
+        result = DefSubclassProc(window, message, word_parameter, long_parameter);
+    }
+    return result;
+}
+
 } // namespace detail
 
 std::uint64_t Runtime::invoke_guest(Cpu &cpu, std::uint64_t target,
                                     const std::array<std::uint64_t, 4> &arguments,
                                     std::uint32_t &exit_code, bool &exited) {
+    return invoke_guest(cpu, target, std::span<const std::uint64_t>(arguments), exit_code, exited);
+}
+
+std::uint64_t Runtime::invoke_guest(Cpu &cpu, std::uint64_t target,
+                                    std::span<const std::uint64_t> arguments,
+                                    std::uint32_t &exit_code, bool &exited) {
+    if (arguments.size() > 6) {
+        throw Error("guest callback has too many arguments");
+    }
     const auto outer_stack = cpu.reg(Rsp);
     const auto outer_rip = cpu.rip();
-    const auto callback_stack = outer_stack - (guest_is_64_bit_ ? 0x30 : 0x20);
+    const auto callback_stack = outer_stack - (guest_is_64_bit_ ? 0x40 : 0x20);
     const auto return_address =
         guest_is_64_bit_ ? detail::callback_return : detail::callback_return32;
     if (guest_is_64_bit_) {
-        cpu.set_reg(Rcx, arguments[0]);
-        cpu.set_reg(Rdx, arguments[1]);
-        cpu.set_reg(R8, arguments[2]);
-        cpu.set_reg(R9, arguments[3]);
+        const auto argument = [&](std::size_t index) {
+            return index < arguments.size() ? arguments[index] : 0;
+        };
+        cpu.set_reg(Rcx, argument(0));
+        cpu.set_reg(Rdx, argument(1));
+        cpu.set_reg(R8, argument(2));
+        cpu.set_reg(R9, argument(3));
         cpu.memory().write64(callback_stack, return_address);
+        for (std::size_t index = 4; index < arguments.size(); ++index) {
+            cpu.memory().write64(callback_stack + 8 + index * 8, arguments[index]);
+        }
     } else {
         cpu.memory().write32(callback_stack, static_cast<std::uint32_t>(return_address));
         for (std::size_t index = 0; index < arguments.size(); ++index) {
@@ -270,6 +307,39 @@ std::intptr_t Runtime::invoke_window_proc(Cpu &cpu, std::uint64_t window, std::u
         return DefWindowProcW(reinterpret_cast<HWND>(window), message, word_parameter,
                               long_parameter);
     }
+    const auto result = invoke_window_callback(cpu, found->second, window, message, word_parameter,
+                                               long_parameter, 0, 0, false, exit_code, exited);
+    if (message == WM_NCDESTROY) {
+        window_procedures_.erase(window);
+    }
+    return result;
+}
+
+std::intptr_t Runtime::invoke_window_subclass(Cpu &cpu, std::uint64_t token, std::uint64_t window,
+                                              std::uint32_t message, std::uint64_t word_parameter,
+                                              std::int64_t long_parameter, std::uint32_t &exit_code,
+                                              bool &exited) {
+    const auto found = window_subclasses_.find(token);
+    if (found == window_subclasses_.end() || found->second.window != window) {
+        return DefSubclassProc(reinterpret_cast<HWND>(window), message, word_parameter,
+                               long_parameter);
+    }
+    const auto record = found->second;
+    const auto result = invoke_window_callback(cpu, record.procedure, window, message,
+                                               word_parameter, long_parameter, record.id,
+                                               record.reference_data, true, exit_code, exited);
+    if (message == WM_NCDESTROY) {
+        window_subclasses_.erase(token);
+    }
+    return result;
+}
+
+std::intptr_t Runtime::invoke_window_callback(Cpu &cpu, std::uint64_t target, std::uint64_t window,
+                                              std::uint32_t message, std::uint64_t word_parameter,
+                                              std::int64_t long_parameter,
+                                              std::uint64_t subclass_id,
+                                              std::uint64_t reference_data, bool subclass,
+                                              std::uint32_t &exit_code, bool &exited) {
     static constexpr std::uint32_t notable_messages[] = {
         WM_CREATE,     WM_NCCREATE, WM_DESTROY, WM_NCDESTROY,  WM_CLOSE,         WM_COMMAND,
         WM_SYSCOMMAND, WM_QUIT,     WM_SIZE,    WM_SHOWWINDOW, WM_INITMENUPOPUP, WM_TIMER,
@@ -401,9 +471,17 @@ std::intptr_t Runtime::invoke_window_proc(Cpu &cpu, std::uint64_t window, std::u
     ++callback_depth_;
     std::uint64_t result = 0;
     try {
-        result = invoke_guest(cpu, found->second,
-                              {window, message, word_parameter, guest_long_parameter}, exit_code,
-                              exited);
+        if (subclass) {
+            const std::array<std::uint64_t, 6> arguments{
+                window, message, word_parameter, guest_long_parameter, subclass_id, reference_data};
+            result = invoke_guest(cpu, target, std::span<const std::uint64_t>(arguments), exit_code,
+                                  exited);
+        } else {
+            result = invoke_guest(
+                cpu, target,
+                std::array<std::uint64_t, 4>{window, message, word_parameter, guest_long_parameter},
+                exit_code, exited);
+        }
     } catch (...) {
         if (scratch != 0) {
             callback_long_parameters_.erase(scratch);
@@ -428,9 +506,6 @@ std::intptr_t Runtime::invoke_window_proc(Cpu &cpu, std::uint64_t window, std::u
     } else if (scratch != 0 && copy_back_raw) {
         const auto bytes = cpu.memory().read(scratch, pointer_size);
         std::memcpy(reinterpret_cast<void *>(long_parameter), bytes.data(), bytes.size());
-    }
-    if (message == WM_NCDESTROY) {
-        window_procedures_.erase(found);
     }
     return static_cast<std::intptr_t>(result);
 }

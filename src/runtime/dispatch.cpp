@@ -2305,21 +2305,88 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     case Api::WindowSubclass: {
         if (thunk_name.ends_with("SetWindowSubclass") || thunk_name.ends_with("#410")) {
-            // The subclass procedure is a guest address. It is retained guest-side rather than
-            // registered with comctl32, which would invoke it as native host code during message
-            // dispatch. The window therefore behaves as unsubclassed until a guest-side subclass
-            // dispatcher exists.
-            window_subclass_callbacks_[cpu.reg(Rcx)] = cpu.reg(Rdx);
-            cpu.set_reg(Rax, 1);
+            const auto window = argument(0);
+            const auto procedure = argument(1);
+            const auto id = argument(2);
+            const auto reference_data = argument(3);
+            auto token = std::uint64_t{0};
+            WindowSubclass *existing = nullptr;
+            for (const auto &[candidate, record] : window_subclasses_) {
+                if (record.window == window && record.procedure == procedure && record.id == id) {
+                    token = candidate;
+                    existing = &window_subclasses_.at(candidate);
+                    break;
+                }
+            }
+            if (token == 0) {
+                token = next_window_subclass_token_++;
+                window_subclasses_[token] = {window, procedure, id, reference_data};
+            }
+            const auto success =
+                procedure != 0 &&
+                ::SetWindowSubclass(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(window)),
+                                    detail::window_subclass_bridge, token, 0) != FALSE;
+            if (success && existing != nullptr) {
+                existing->reference_data = reference_data;
+            } else if (!success && existing == nullptr) {
+                window_subclasses_.erase(token);
+            }
+            cpu.set_reg(Rax, success ? 1 : 0);
             finish_call(4);
         } else if (thunk_name.ends_with("RemoveWindowSubclass") || thunk_name.ends_with("#412")) {
-            window_subclass_callbacks_.erase(cpu.reg(Rcx));
-            cpu.set_reg(Rax, 1);
+            auto found = window_subclasses_.end();
+            for (auto candidate = window_subclasses_.begin(); candidate != window_subclasses_.end();
+                 ++candidate) {
+                if (candidate->second.window == argument(0) &&
+                    candidate->second.procedure == argument(1) &&
+                    candidate->second.id == argument(2)) {
+                    found = candidate;
+                    break;
+                }
+            }
+            const auto success =
+                found != window_subclasses_.end() &&
+                ::RemoveWindowSubclass(
+                    reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(0))),
+                    detail::window_subclass_bridge, found->first) != FALSE;
+            if (success) {
+                window_subclasses_.erase(found);
+            }
+            cpu.set_reg(Rax, success ? 1 : 0);
             finish_call(3);
+        } else if (thunk_name.ends_with("DefSubclassProc") || thunk_name.ends_with("#413")) {
+            auto native_long_parameter = static_cast<std::int64_t>(argument(3));
+            if (const auto translated = callback_long_parameters_.find(argument(3));
+                translated != callback_long_parameters_.end()) {
+                native_long_parameter = translated->second;
+            }
+            const auto result =
+                ::DefSubclassProc(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(0))),
+                                  static_cast<UINT>(argument(1)), static_cast<WPARAM>(argument(2)),
+                                  static_cast<LPARAM>(native_long_parameter));
+            cpu.set_reg(Rax, static_cast<std::uint64_t>(result));
+            finish_call(4);
         } else {
-            // DefSubclassProc and GetWindowSubclass: the chain is empty because comctl32 never
-            // received a registration, so there is nothing to forward to.
-            cpu.set_reg(Rax, 0);
+            auto found = window_subclasses_.end();
+            for (auto candidate = window_subclasses_.begin(); candidate != window_subclasses_.end();
+                 ++candidate) {
+                if (candidate->second.window == argument(0) &&
+                    candidate->second.procedure == argument(1) &&
+                    candidate->second.id == argument(2)) {
+                    found = candidate;
+                    break;
+                }
+            }
+            const auto success = found != window_subclasses_.end() && argument(3) != 0;
+            if (success) {
+                if (guest_is_64_bit_) {
+                    cpu.memory().write64(argument(3), found->second.reference_data);
+                } else {
+                    cpu.memory().write32(argument(3),
+                                         static_cast<std::uint32_t>(found->second.reference_data));
+                }
+            }
+            cpu.set_reg(Rax, success ? 1 : 0);
             finish_call(4);
         }
         break;

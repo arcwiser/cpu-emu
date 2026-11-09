@@ -7,10 +7,13 @@ this file is the companion log of development decisions.
 ## 2026-11-10 — Classic Notepad reaches window and menu rendering
 
 - Adapted the comctl32 v6 subclass family. `SetWindowSubclass` is exported as ordinal 410,
-  `RemoveWindowSubclass` as 412, and `DefSubclassProc` as 413; Notepad imports them by ordinal.
+  `GetWindowSubclass` as 411, `RemoveWindowSubclass` as 412, and `DefSubclassProc` as 413; Notepad
+  imports them by ordinal.
   Native forwarding let comctl32 invoke a guest subclass procedure as host code from its message
-  dispatch. The procedure is now retained guest-side and comctl32 receives no registration, so the
-  window behaves as unsubclassed until a guest-side subclass dispatcher exists.
+  dispatch. Common Controls now retains a host bridge and opaque token; the six-argument guest
+  procedure re-enters the interpreter, uses the shared message marshaler, and can chain through
+  `DefSubclassProc`. The Paint message-loop fixture verifies ID/reference data, lookup, removal,
+  and callback re-entry.
 - `WM_DRAWITEM` was not in the window-procedure marshaling table, so its LPARAM, a host
   `DRAWITEMSTRUCT` pointer, reached guest code directly and faulted. It is now copied into guest
   scratch space with copy-back. The 32-bit layout differs, so that case is refused rather than
@@ -22,8 +25,8 @@ this file is the companion log of development decisions.
   Format, View, and Help, and its edit, banner, button, and tooltip child windows. Verified
   against the `cpuemu.exe`-owned window. A follow-up probe typed `CPUEmu input test` into the real
   Edit control, observed the dirty title, and opened a populated File menu. Open/save, persistence,
-  and sustained editing remain unverified, and the retained subclass procedure is not yet invoked.
-  The modern packaged Notepad still blocks in WinRT/XAML startup and produces no window.
+  and sustained editing remain unverified. The modern packaged Notepad still blocks in WinRT/XAML
+  startup and produces no window.
 
 ## 2026-11-10 — Guest activation contexts and stream buffer layout
 

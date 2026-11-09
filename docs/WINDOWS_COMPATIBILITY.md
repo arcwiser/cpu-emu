@@ -24,7 +24,7 @@ explicit adapter.
 | Process lifecycle | `ExitProcess`, CRT exit functions, `TerminateProcess` | Single guest process |
 | Import binding | `LoadLibraryA`/`GetProcAddress` under the guest's own activation context | Side-by-Side assemblies such as Common-Controls v6 bind as Windows binds them for the guest; contexts are created from the guest image's embedded manifest |
 | Window classes | `RegisterClassExW`, `CreateWindowExW` under the guest's resource module | Class menu names resolve against the guest image, so class menus load; child controls are real host windows |
-| Subclassing | `SetWindowSubclass`, `RemoveWindowSubclass`, `DefSubclassProc`, and comctl32 v6 ordinals 410/412/413 | The guest procedure is retained guest-side and comctl32 receives no registration, so the window behaves as unsubclassed; guest-side subclass dispatch is not implemented yet |
+| Subclassing | `SetWindowSubclass`, `GetWindowSubclass`, `RemoveWindowSubclass`, `DefSubclassProc`, and comctl32 v6 ordinals 410–413 | Common Controls retains only a host bridge and opaque token; six-argument guest procedures re-enter the interpreter, use the normal message-pointer marshaler, and can continue the native chain |
 | Guest fail-fast | `abort`, `_invoke_watson`, `_invalid_parameter_noinfo`, `_invalid_parameter_noinfo_noreturn`, `_wassert`, `_assert` | Noreturn paths terminate only the guest with the Windows fast-fail status; never forwarded natively |
 | Console output | `GetStdHandle`, `WriteFile` | Focused on standard output/error handles |
 | Errors and diagnostics | `GetLastError`, `SetLastError`, `OutputDebugStringA` | Per-runtime error state |

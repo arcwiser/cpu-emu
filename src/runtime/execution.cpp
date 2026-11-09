@@ -122,6 +122,12 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     class_window_procedures_.clear();
     atom_window_procedures_.clear();
     window_procedures_.clear();
+    for (const auto &[token, record] : window_subclasses_) {
+        ::RemoveWindowSubclass(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(record.window)),
+                               detail::window_subclass_bridge, token);
+    }
+    window_subclasses_.clear();
+    next_window_subclass_token_ = 1;
     creating_window_procedure_ = 0;
     quit_message_pending_ = false;
     quit_message_code_ = 0;

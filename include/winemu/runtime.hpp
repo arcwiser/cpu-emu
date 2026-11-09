@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iosfwd>
+#include <span>
 #include <string>
 #include <unordered_map>
 
@@ -28,6 +29,10 @@ class Runtime {
     std::intptr_t invoke_window_proc(Cpu &cpu, std::uint64_t window, std::uint32_t message,
                                      std::uint64_t word_parameter, std::int64_t long_parameter,
                                      std::uint32_t &exit_code, bool &exited);
+    std::intptr_t invoke_window_subclass(Cpu &cpu, std::uint64_t token, std::uint64_t window,
+                                         std::uint32_t message, std::uint64_t word_parameter,
+                                         std::int64_t long_parameter, std::uint32_t &exit_code,
+                                         bool &exited);
 
   private:
     using Api = detail::RuntimeApi;
@@ -45,6 +50,13 @@ class Runtime {
     [[nodiscard]] std::uint64_t invoke_guest(Cpu &cpu, std::uint64_t target,
                                              const std::array<std::uint64_t, 4> &arguments,
                                              std::uint32_t &exit_code, bool &exited);
+    [[nodiscard]] std::uint64_t invoke_guest(Cpu &cpu, std::uint64_t target,
+                                             std::span<const std::uint64_t> arguments,
+                                             std::uint32_t &exit_code, bool &exited);
+    [[nodiscard]] std::intptr_t invoke_window_callback(
+        Cpu &cpu, std::uint64_t target, std::uint64_t window, std::uint32_t message,
+        std::uint64_t word_parameter, std::int64_t long_parameter, std::uint64_t subclass_id,
+        std::uint64_t reference_data, bool subclass, std::uint32_t &exit_code, bool &exited);
 
     // Import thunks are guest-callable addresses. The maps below keep their behavior and any
     // explicitly approved native target separate so an untrusted guest address is never cast and
@@ -108,9 +120,16 @@ class Runtime {
     std::unordered_map<std::uint64_t, std::uint32_t> protection_policy_methods_;
     // Guest feature-state-change callbacks, retained so they are never executed as host code.
     std::unordered_map<std::uint64_t, std::uint64_t> feature_state_callbacks_;
-    // Guest subclass procedures from SetWindowSubclass, retained so comctl32 never executes them
-    // as native host code from its message dispatch.
-    std::unordered_map<std::uint64_t, std::uint64_t> window_subclass_callbacks_;
+    struct WindowSubclass {
+        std::uint64_t window;
+        std::uint64_t procedure;
+        std::uint64_t id;
+        std::uint64_t reference_data;
+    };
+    // Common Controls receives only a host bridge and an opaque token. Guest procedures and
+    // reference data remain here and are invoked through the interpreter.
+    std::uint64_t next_window_subclass_token_ = 1;
+    std::unordered_map<std::uint64_t, WindowSubclass> window_subclasses_;
     std::uint64_t winrt_activation_factory_proxy_ = 0;
     std::uint64_t geographic_region_proxy_ = 0;
     std::unordered_map<std::uint64_t, std::uint32_t> winrt_activation_factory_methods_;

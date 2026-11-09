@@ -1,5 +1,6 @@
 #include "winemu/runtime.hpp"
 
+#include "callbacks.hpp"
 #include "winemu/detail/runtime_layout.hpp"
 
 #include <sstream>
@@ -19,6 +20,10 @@ Runtime::Runtime(std::ostream &output) : output_(output) {
 }
 
 Runtime::~Runtime() {
+    for (const auto &[token, record] : window_subclasses_) {
+        ::RemoveWindowSubclass(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(record.window)),
+                               detail::window_subclass_bridge, token);
+    }
     for (const auto &[guest_handle, host_handle] : find_handles_) {
         static_cast<void>(guest_handle);
         ::FindClose(static_cast<HANDLE>(host_handle));
