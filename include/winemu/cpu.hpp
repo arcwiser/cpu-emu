@@ -42,6 +42,7 @@ class Cpu {
     [[nodiscard]] std::uint64_t instructions() const;
     [[nodiscard]] std::vector<std::uint64_t> recent_instructions() const;
     [[nodiscard]] Memory &memory();
+    [[nodiscard]] const Memory &memory() const;
     [[nodiscard]] std::uint64_t pop64();
     void push64(std::uint64_t value);
 

@@ -221,6 +221,8 @@ enum class RuntimeApi {
     GuestGetErrorInfo,
     GuestSetErrorInfo,
     GuestFailFast,
+    FeatureStateSubscribe,
+    FeatureStateUnsubscribe,
     Native,
     Unsupported,
 };

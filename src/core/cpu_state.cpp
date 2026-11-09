@@ -38,6 +38,8 @@ std::uint64_t Cpu::instructions() const { return instructions_; }
 
 Memory &Cpu::memory() { return memory_; }
 
+const Memory &Cpu::memory() const { return memory_; }
+
 std::vector<std::uint64_t> Cpu::recent_instructions() const {
     std::vector<std::uint64_t> addresses;
     addresses.reserve(history_capacity);

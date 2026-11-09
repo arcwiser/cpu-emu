@@ -35,6 +35,12 @@ class Runtime {
     [[nodiscard]] std::uint64_t resolve_import(const std::string &module, const std::string &name);
     [[nodiscard]] std::uint64_t allocate_data_import(const std::string &module,
                                                      const std::string &name);
+    // Guest imports must bind under the guest's own activation context. Without it, a manifest
+    // that requests Side-by-Side assemblies such as Common-Controls v6 silently binds to the
+    // older system DLL, whose export table can be missing the ordinals the guest imports.
+    [[nodiscard]] bool ensure_guest_activation_context();
+    [[nodiscard]] std::uintptr_t activate_guest_context() const;
+    void deactivate_guest_context(std::uintptr_t cookie) const;
     [[nodiscard]] bool dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited);
     [[nodiscard]] std::uint64_t invoke_guest(Cpu &cpu, std::uint64_t target,
                                              const std::array<std::uint64_t, 4> &arguments,
@@ -74,6 +80,7 @@ class Runtime {
     std::uint64_t host_gdiplus_token_ = 0;
     std::filesystem::path guest_executable_;
     void *resource_module_ = nullptr;
+    void *guest_activation_context_ = nullptr;
 
     // Host windows call back through a bridge. These tables retain the corresponding guest
     // procedure and callback arguments while the interpreter is re-entered.
@@ -99,6 +106,8 @@ class Runtime {
     std::unordered_map<std::uint64_t, std::uint32_t> object_array_methods_;
     std::uint64_t protection_policy_proxy_ = 0;
     std::unordered_map<std::uint64_t, std::uint32_t> protection_policy_methods_;
+    // Guest feature-state-change callbacks, retained so they are never executed as host code.
+    std::unordered_map<std::uint64_t, std::uint64_t> feature_state_callbacks_;
     std::uint64_t winrt_activation_factory_proxy_ = 0;
     std::uint64_t geographic_region_proxy_ = 0;
     std::unordered_map<std::uint64_t, std::uint32_t> winrt_activation_factory_methods_;

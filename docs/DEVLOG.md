@@ -4,6 +4,27 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-10 — Guest activation contexts and stream buffer layout
+
+- Guest imports now bind under an activation context created from the guest image. Without it a
+  manifest requesting Common-Controls v6 silently bound to the older system `comctl32.dll`, whose
+  export table lacks ordinals 381 and 345 that Notepad imports; those imports then reported
+  unsupported. `CreateActCtxW` failure is logged rather than silently ignored.
+- Corrected `basic_streambuf` construction to the real MSVC layout. The adapter pointed its six
+  `_IG*`/`_IP*` indirection members at offsets `+0x78`-`+0xa8`, which are `basic_filebuf`'s own
+  members, so buffer state overwrote them and the guest observed a write position holding a
+  vtable pointer. The indirections now point at the direct `_Gfirst`/`_Pfirst`/`_Gnext`/`_Pnext`/
+  `_Gcount`/`_Pcount` members, matching `basic_streambuf::_Init()` in the installed MSVC headers.
+- Feature-state change subscriptions no longer hand the guest callback to Windows, which invoked
+  it from a thread-pool timer thread as native code. The subscription is inert and guest-owned.
+- Added `callee_saved_windows` diagnostics so a guest fail-fast also reports the state of the
+  non-volatile registers that still point at the object being processed.
+- Classic `System32\notepad.exe` now passes the Common-Controls import that previously stopped it
+  at 53,726 instructions and reaches real window creation: it creates its edit, button, and
+  tooltip windows and runs layout (`MoveWindow`, `WM_WINDOWPOSCHANGING`). It still does not stay
+  running; the next blocker is a host-side callback fault during layout, so no rendered window is
+  claimed.
+
 ## 2026-11-10 — Guest fail-fast isolation
 
 - Routed the noreturn UCRT fail-fast family (`_invoke_watson`, `_invalid_parameter_noinfo`,

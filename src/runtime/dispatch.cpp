@@ -3,6 +3,7 @@
 #include "winemu/runtime.hpp"
 
 #include "callbacks.hpp"
+#include "diagnostics.hpp"
 
 #include "winemu/detail/runtime_layout.hpp"
 #include "winemu/detail/runtime_strings.hpp"
@@ -182,6 +183,8 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         // raise for __fastfail, and say which routine triggered it so the real blocker is visible.
         log::error("runtime", "guest fail-fast via " + thunk_name + " from " +
                                   log::hex(cpu.memory().read64(cpu.reg(Rsp))));
+        log::error("cpu", detail::cpu_state_dump(cpu));
+        log::error("cpu", detail::callee_saved_windows(cpu));
         exit_code = fail_fast_status;
         exited = true;
         break;
@@ -2282,6 +2285,23 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         cpu.set_reg(Rax, 0);
         finish_call();
+        break;
+    case Api::FeatureStateSubscribe: {
+        // The guest callback is retained here rather than handed to Windows, which would execute
+        // it as native host code from a thread-pool timer thread.
+        const auto subscription = allocate(8);
+        feature_state_callbacks_.emplace(subscription, cpu.reg(Rdx));
+        if (cpu.reg(Rcx) != 0) {
+            cpu.memory().write64(cpu.reg(Rcx), subscription);
+        }
+        cpu.set_reg(Rax, 0);
+        finish_call(3);
+        break;
+    }
+    case Api::FeatureStateUnsubscribe:
+        feature_state_callbacks_.erase(cpu.reg(Rcx));
+        cpu.set_reg(Rax, 0);
+        finish_call(1);
         break;
     case Api::CreateThreadpoolTimer:
         cpu.set_reg(Rax, allocate(8));
@@ -4734,23 +4754,29 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     }
     case Api::MsvcpStreamBufferConstruct: {
         const auto object = cpu.reg(Rcx);
-        const auto storage = allocate(4096);
+        // Replicates basic_streambuf::_Init(). The six _IG*/_IP* members are pointers to the
+        // direct _Gfirst (+0x08), _Pfirst (+0x10), _Gnext (+0x28), _Pnext (+0x30), _Gcount
+        // (+0x48), and _Pcount (+0x4c) members, and every buffer starts empty. Direct member
+        // storage is required: the fields past +0x60 belong to basic_filebuf, so pointing the
+        // indirections there overwrote its own state and made the guest see a write area whose
+        // "current position" was a vtable pointer.
+        constexpr std::uint64_t storage_size = 4096;
+        const auto storage = allocate(storage_size);
         stream_buffer_storage_[object] = storage;
         stream_buffer_lengths_[object] = 0;
-        cpu.memory().write64(object + 0x18, object + 0x90);
-        cpu.memory().write64(object + 0x20, object + 0x78);
-        cpu.memory().write64(object + 0x38, object + 0x88);
-        cpu.memory().write64(object + 0x40, object + 0x80);
-        cpu.memory().write64(object + 0x50, object + 0xa0);
-        cpu.memory().write64(object + 0x58, object + 0xa8);
-        cpu.memory().write64(object + 0x68, storage + 4096);
-        cpu.memory().write32(object + 0x70, 0);
-        cpu.memory().write64(object + 0x78, storage);
-        cpu.memory().write64(object + 0x80, storage);
-        cpu.memory().write64(object + 0x88, storage);
-        cpu.memory().write64(object + 0x90, storage);
-        cpu.memory().write32(object + 0xa0, 0);
-        cpu.memory().write32(object + 0xa8, 0);
+        cpu.memory().write64(object + 0x08, 0);             // _Gfirst
+        cpu.memory().write64(object + 0x10, 0);             // _Pfirst
+        cpu.memory().write64(object + 0x18, object + 0x08); // _IGfirst -> &_Gfirst
+        cpu.memory().write64(object + 0x20, object + 0x10); // _IPfirst -> &_Pfirst
+        cpu.memory().write64(object + 0x28, 0);             // _Gnext
+        cpu.memory().write64(object + 0x30, 0);             // _Pnext
+        cpu.memory().write64(object + 0x38, object + 0x28); // _IGnext -> &_Gnext
+        cpu.memory().write64(object + 0x40, object + 0x30); // _IPnext -> &_Pnext
+        cpu.memory().write32(object + 0x48, 0);             // _Gcount
+        cpu.memory().write32(object + 0x4c, 0);             // _Pcount
+        cpu.memory().write64(object + 0x50, object + 0x48); // _IGcount -> &_Gcount
+        cpu.memory().write64(object + 0x58, object + 0x4c); // _IPcount -> &_Pcount
+        cpu.memory().write64(object + 0x60, 0);             // _Plocale
         cpu.set_reg(Rax, object);
         finish_call();
         break;
@@ -5084,8 +5110,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             }
             length += count;
             cpu.memory().write8(storage + length, 0);
-            cpu.memory().write64(stream_buffer + 0x80, storage + length);
-            cpu.memory().write64(stream_buffer + 0x88, storage + length);
+            // basic_streambuf stores the write area through _Pfirst (+0x10), _Pnext (+0x30) and
+            // _Pcount (+0x4c); pptr() is _Pnext and epptr() is _Pnext + _Pcount.
+            cpu.memory().write64(stream_buffer + 0x10, storage);
+            cpu.memory().write64(stream_buffer + 0x30, storage + length);
+            cpu.memory().write32(stream_buffer + 0x4c, static_cast<std::uint32_t>(4096 - length));
         }
         cpu.set_reg(Rax, cpu.reg(Rcx));
         finish_call();

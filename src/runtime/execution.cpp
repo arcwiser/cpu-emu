@@ -1,6 +1,7 @@
 #include "winemu/runtime.hpp"
 
 #include "callbacks.hpp"
+#include "diagnostics.hpp"
 #include "winemu/detail/runtime_layout.hpp"
 #include "winemu/detail/runtime_strings.hpp"
 #include "winemu/error.hpp"
@@ -35,7 +36,7 @@ using detail::tls_base;
 using detail::tls_size;
 using detail::winmain_command_line_address;
 
-namespace {
+namespace detail {
 
 std::string cpu_state_dump(const Cpu &cpu) {
     static constexpr const char *register_names[16] = {"rax", "rcx", "rdx", "rbx", "rsp", "rbp",
@@ -53,7 +54,25 @@ std::string cpu_state_dump(const Cpu &cpu) {
     return stream.str();
 }
 
-} // namespace
+std::string callee_saved_windows(const Cpu &cpu) {
+    static constexpr Register registers[] = {Rbx, Rbp, Rsi, Rdi, R12, R13, R14, R15};
+    static constexpr std::uint64_t window = 0xb0;
+    std::ostringstream stream;
+    for (const auto register_index : registers) {
+        const auto base = cpu.reg(register_index);
+        if (base == 0 || !cpu.memory().contains(base, window)) {
+            continue;
+        }
+        stream << '[' << log::hex(base) << "]";
+        for (std::uint64_t offset = 0; offset < window; offset += 8) {
+            stream << ' ' << log::hex(cpu.memory().read64(base + offset));
+        }
+        stream << '\n';
+    }
+    return stream.str();
+}
+
+} // namespace detail
 
 RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t instruction_limit,
                        const std::wstring &arguments) {
@@ -201,6 +220,10 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     next_fls_index_ = 1;
     tls_values_.clear();
     fls_values_.clear();
+    guest_executable_ = std::filesystem::absolute(executable);
+    // Import resolution happens inside PeLoader::load, so the guest activation context must be
+    // available before the loader walks the import table.
+    static_cast<void>(ensure_guest_activation_context());
     const auto image = PeLoader::load(executable, memory,
                                       [&](const auto &module, const auto &name, bool is_64_bit) {
                                           configure_format(is_64_bit);
@@ -209,7 +232,6 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     configure_format(image.is_64_bit);
     heap_next_ = image.is_64_bit ? 0x0000'0006'0000'0000ULL : 0x1000'0000ULL;
     guest_image_base_ = image.base;
-    guest_executable_ = std::filesystem::absolute(executable);
     if (resource_module_ != nullptr) {
         FreeLibrary(static_cast<HMODULE>(resource_module_));
     }
@@ -436,7 +458,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     } catch (const std::exception &) {
         log::error("cpu",
                    "guest stopped after " + std::to_string(cpu.instructions()) + " instructions");
-        log::error("cpu", cpu_state_dump(cpu));
+        log::error("cpu", detail::cpu_state_dump(cpu));
         detail::clear_callback_context();
         throw;
     }

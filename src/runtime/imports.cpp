@@ -13,6 +13,47 @@
 
 namespace winemu {
 
+bool Runtime::ensure_guest_activation_context() {
+    if (guest_activation_context_ != nullptr) {
+        return true;
+    }
+    // Create the context from the guest image itself, which is where Windows reads the manifest
+    // that selects Side-by-Side assemblies such as Common-Controls v6.
+    ACTCTXW context{};
+    context.cbSize = sizeof(context);
+    context.dwFlags = ACTCTX_FLAG_RESOURCE_NAME_VALID;
+    const auto source = guest_executable_.wstring();
+    context.lpSource = source.c_str();
+    context.lpResourceName = MAKEINTRESOURCEW(1);
+    const auto handle = ::CreateActCtxW(&context);
+    if (handle == INVALID_HANDLE_VALUE) {
+        log::error("runtime", "cannot create the guest activation context for '" +
+                                  guest_executable_.string() + "' (Win32 error " +
+                                  std::to_string(::GetLastError()) + ")");
+        return false;
+    }
+    guest_activation_context_ = handle;
+    return true;
+}
+
+std::uintptr_t Runtime::activate_guest_context() const {
+    if (guest_activation_context_ == nullptr) {
+        return 0;
+    }
+    ULONG_PTR cookie = 0;
+    if (!::ActivateActCtx(static_cast<HANDLE>(guest_activation_context_), &cookie)) {
+        return 0;
+    }
+    return static_cast<std::uintptr_t>(cookie);
+}
+
+void Runtime::deactivate_guest_context(std::uintptr_t cookie) const {
+    if (cookie == 0) {
+        return;
+    }
+    ::DeactivateActCtx(0, static_cast<ULONG_PTR>(cookie));
+}
+
 std::uint64_t Runtime::allocate_data_import(const std::string &module, const std::string &name) {
     // CRT variables are data exports: the guest reads and writes the value at the address
     // in its import table, so each one needs a real mapped slot rather than a code thunk.
@@ -485,6 +526,12 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GuestSetErrorInfo;
     } else if (name == "CreateThreadpoolTimer") {
         api = Api::CreateThreadpoolTimer;
+    } else if (name == "SubscribeFeatureStateChangeNotification") {
+        // The callback is a guest address. Native forwarding would let Windows invoke it from a
+        // thread-pool timer thread, so the subscription is kept inert and guest-owned instead.
+        api = Api::FeatureStateSubscribe;
+    } else if (name == "UnsubscribeFeatureStateChangeNotification") {
+        api = Api::FeatureStateUnsubscribe;
     } else if (name == "SetThreadpoolTimer" || name == "WaitForThreadpoolTimerCallbacks" ||
                name == "CloseThreadpoolTimer") {
         api = Api::ReturnZero;
@@ -547,6 +594,9 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         };
         void *function = nullptr;
         if (guest_is_64_bit_ && !unsafe_calls.contains(name)) {
+            // Resolve under the guest's activation context so manifest-selected Side-by-Side
+            // assemblies bind the same way Windows binds them for the guest.
+            const auto activation_cookie = activate_guest_context();
             if (const auto library = LoadLibraryA(module.c_str()); library != nullptr) {
                 if (name.starts_with('#')) {
                     const auto ordinal = static_cast<WORD>(std::stoul(name.substr(1)));
@@ -556,6 +606,7 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
                     function = reinterpret_cast<void *>(GetProcAddress(library, name.c_str()));
                 }
             }
+            deactivate_guest_context(activation_cookie);
         }
         api = function == nullptr ? Api::Unsupported : Api::Native;
         if (function != nullptr) {
