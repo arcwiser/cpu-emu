@@ -96,6 +96,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     data_import_next_ = 0;
     data_import_slots_.clear();
     last_error_ = 0;
+    common_dialog_error_ = 0;
     guest_exception_filter_ = 0;
     heap_next_ = 0x0000'0006'0000'0000ULL;
     heap_sizes_.clear();

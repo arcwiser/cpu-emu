@@ -31,7 +31,7 @@ reproducible blocker.
 | `sum.exe` fixture | Supported | Integer loop, arithmetic, flags, branches, and process return | Test fixture only |
 | `hello.exe` fixture | Supported | Imports resolve and console output passes through `GetStdHandle`/`WriteFile` | Test fixture only |
 | CPUEmu Paint fixture | 🟢 Supported smoke test | Interactive GDI path starts; `--selftest` draws and reports success | Intended as a compatibility probe, not a full paint program |
-| Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing updates the real Edit control and dirty title; File/Edit/Format/View/Help render and the File dropdown populates | Open/save, dialogs, persistence, and sustained use are unverified |
+| Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing updates the real Edit control and dirty title; menus populate; Open displays a real marshaled file picker and cancellation returns to the editor | File selection/loading, saving, persistence, and sustained use are unverified; guest dialog hooks/templates are not invoked |
 | Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
 | Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates the `YYGameMakerYY` native window, initializes a safe DirectInput proxy, enumerates display modes, and reaches `Direct3DCreate9Ex` after about 15.1M instructions | The HWND is created but not visibly shown/rendering yet; Direct3D 9, active input, streaming audio, and full Steamworks interfaces remain |
@@ -77,5 +77,6 @@ build\cpuemu.exe C:\Windows\System32\notepad.exe --limit 100000000
 ```
 
 The CPUEmu-owned window accepted `CPUEmu input test`, changed its title to `*Untitled - Notepad`,
-and opened a populated File menu. This is evidence for basic input and menu routing only; it does
-not establish correct file I/O or full editor compatibility.
+opened a populated File menu, and displayed/cancelled a real Open picker. This is evidence for
+basic input, menu routing, and synchronous dialog marshaling only; it does not establish correct
+file loading, saving, or full editor compatibility.

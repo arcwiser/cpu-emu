@@ -25,6 +25,9 @@
 #define NOMINMAX
 #include <share.h>
 #include <windows.h>
+// Common Dialogs depends on the base Windows declarations above.
+#include <cderr.h>
+#include <commdlg.h>
 
 extern "C" __declspec(dllimport) wchar_t **__stdcall CommandLineToArgvW(const wchar_t *, int *);
 extern "C" __declspec(dllimport) DWORD __stdcall
@@ -1247,29 +1250,214 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     }
     case Api::GuestFileDialog: {
-        // Treat an unavailable interactive host dialog as a user cancellation. The Win32
-        // contract distinguishes this from an error by returning zero here and from
-        // CommDlgExtendedError, while keeping guest-owned pointers and hooks off the host.
-        if (!thunk_name.ends_with("!CommDlgExtendedError") && argument(0) != 0) {
-            const auto structure = argument(0);
-            const bool wide = thunk_name.ends_with("W");
-            const auto read_dialog_string = [&](std::uint32_t offset32, std::uint32_t offset64) {
-                const auto pointer = guest_is_64_bit_ ? cpu.memory().read64(structure + offset64)
-                                                      : cpu.memory().read32(structure + offset32);
-                if (pointer == 0) {
-                    return std::string{};
-                }
-                return wide ? narrow_string(cpu.memory().read_wide_string(pointer))
-                            : cpu.memory().read_c_string(pointer);
-            };
-            log::api("dialog",
-                     "file='" + read_dialog_string(28, 48) + "' initial-dir='" +
-                         read_dialog_string(44, 80) + "' title='" + read_dialog_string(48, 88) +
-                         "' flags=" +
-                         log::hex(cpu.memory().read32(structure + (guest_is_64_bit_ ? 96 : 52))));
+        if (thunk_name.ends_with("!CommDlgExtendedError")) {
+            cpu.set_reg(Rax, common_dialog_error_);
+            finish_call();
+            break;
         }
-        cpu.set_reg(Rax, 0);
-        finish_call(thunk_name.ends_with("!CommDlgExtendedError") ? 0 : 1);
+        common_dialog_error_ = 0;
+        const auto structure = argument(0);
+        const auto expected_size = guest_is_64_bit_ ? 152U : 88U;
+        if (structure == 0 || cpu.memory().read32(structure) != expected_size) {
+            common_dialog_error_ = CDERR_STRUCTSIZE;
+            cpu.set_reg(Rax, 0);
+            finish_call(1);
+            break;
+        }
+        const auto pointer = [&](std::uint32_t offset32, std::uint32_t offset64) {
+            return guest_is_64_bit_ ? cpu.memory().read64(structure + offset64)
+                                    : cpu.memory().read32(structure + offset32);
+        };
+        constexpr std::uint32_t maximum_dialog_characters = 1024 * 1024;
+        const auto file_pointer = pointer(28, 48);
+        const auto file_capacity = cpu.memory().read32(structure + (guest_is_64_bit_ ? 56 : 32));
+        const auto title_pointer = pointer(36, 64);
+        const auto title_capacity = cpu.memory().read32(structure + (guest_is_64_bit_ ? 72 : 40));
+        if (file_pointer == 0 || file_capacity == 0 || file_capacity > maximum_dialog_characters ||
+            title_capacity > maximum_dialog_characters) {
+            common_dialog_error_ = FNERR_BUFFERTOOSMALL;
+            cpu.set_reg(Rax, 0);
+            finish_call(1);
+            break;
+        }
+        auto flags = cpu.memory().read32(structure + (guest_is_64_bit_ ? 96 : 52));
+        constexpr DWORD callback_or_template_flags =
+            OFN_ENABLEHOOK | OFN_ENABLETEMPLATE | OFN_ENABLETEMPLATEHANDLE;
+        if ((flags & callback_or_template_flags) != 0) {
+            log::warn("dialog", "ignoring guest file-dialog hook/template customization");
+            flags &= ~callback_or_template_flags;
+        }
+        const auto open = thunk_name.find("!GetOpenFileName") != std::string::npos;
+        BOOL success = FALSE;
+        if (thunk_name.ends_with("W")) {
+            const auto read_string = [&](std::uint64_t address) {
+                std::wstring value;
+                if (address == 0) {
+                    return value;
+                }
+                for (std::uint32_t index = 0; index < maximum_dialog_characters; ++index) {
+                    const auto character = cpu.memory().read16(address + index * 2);
+                    if (character == 0) {
+                        return value;
+                    }
+                    value.push_back(static_cast<wchar_t>(character));
+                }
+                throw Error("unterminated guest file-dialog string");
+            };
+            const auto read_filter = [&](std::uint64_t address) {
+                std::vector<wchar_t> value;
+                if (address == 0) {
+                    return value;
+                }
+                bool previous_null = false;
+                for (std::uint32_t index = 0; index < maximum_dialog_characters; ++index) {
+                    const auto character = cpu.memory().read16(address + index * 2);
+                    value.push_back(static_cast<wchar_t>(character));
+                    if (character == 0 && previous_null) {
+                        return value;
+                    }
+                    previous_null = character == 0;
+                }
+                throw Error("unterminated guest file-dialog filter");
+            };
+            std::vector<wchar_t> file(file_capacity);
+            const auto initial_file = read_string(file_pointer);
+            const auto initial_count = std::min<std::size_t>(initial_file.size(), file.size() - 1);
+            std::copy_n(initial_file.c_str(), initial_count, file.begin());
+            file[initial_count] = L'\0';
+            std::vector<wchar_t> file_title(title_pointer == 0 ? 0 : title_capacity);
+            const auto filter = read_filter(pointer(12, 24));
+            const auto initial_directory = read_string(pointer(44, 80));
+            const auto dialog_title = read_string(pointer(48, 88));
+            const auto default_extension = read_string(pointer(60, 104));
+            OPENFILENAMEW dialog{};
+            dialog.lStructSize = sizeof(dialog);
+            dialog.hwndOwner = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(pointer(4, 8)));
+            dialog.lpstrFilter = filter.empty() ? nullptr : filter.data();
+            dialog.nFilterIndex = cpu.memory().read32(structure + (guest_is_64_bit_ ? 44 : 24));
+            dialog.lpstrFile = file.data();
+            dialog.nMaxFile = file_capacity;
+            dialog.lpstrFileTitle = file_title.empty() ? nullptr : file_title.data();
+            dialog.nMaxFileTitle = title_capacity;
+            dialog.lpstrInitialDir =
+                initial_directory.empty() ? nullptr : initial_directory.c_str();
+            dialog.lpstrTitle = dialog_title.empty() ? nullptr : dialog_title.c_str();
+            dialog.Flags = flags;
+            dialog.lpstrDefExt = default_extension.empty() ? nullptr : default_extension.c_str();
+            success = open ? ::GetOpenFileNameW(&dialog) : ::GetSaveFileNameW(&dialog);
+            common_dialog_error_ = success != FALSE ? 0 : ::CommDlgExtendedError();
+            if (success != FALSE) {
+                const auto multiple = (flags & OFN_ALLOWMULTISELECT) != 0;
+                bool previous_null = false;
+                for (std::size_t index = 0; index < file.size(); ++index) {
+                    cpu.memory().write16(file_pointer + index * 2,
+                                         static_cast<std::uint16_t>(file[index]));
+                    if (file[index] == L'\0' && (!multiple || previous_null)) {
+                        break;
+                    }
+                    previous_null = file[index] == L'\0';
+                }
+                if (title_pointer != 0) {
+                    for (std::size_t index = 0; index < file_title.size(); ++index) {
+                        cpu.memory().write16(title_pointer + index * 2,
+                                             static_cast<std::uint16_t>(file_title[index]));
+                        if (file_title[index] == L'\0') {
+                            break;
+                        }
+                    }
+                }
+                cpu.memory().write32(structure + (guest_is_64_bit_ ? 44 : 24), dialog.nFilterIndex);
+                cpu.memory().write16(structure + (guest_is_64_bit_ ? 100 : 56), dialog.nFileOffset);
+                cpu.memory().write16(structure + (guest_is_64_bit_ ? 102 : 58),
+                                     dialog.nFileExtension);
+            }
+        } else {
+            const auto read_string = [&](std::uint64_t address) {
+                std::string value;
+                if (address == 0) {
+                    return value;
+                }
+                for (std::uint32_t index = 0; index < maximum_dialog_characters; ++index) {
+                    const auto character = cpu.memory().read8(address + index);
+                    if (character == 0) {
+                        return value;
+                    }
+                    value.push_back(static_cast<char>(character));
+                }
+                throw Error("unterminated guest file-dialog string");
+            };
+            const auto read_filter = [&](std::uint64_t address) {
+                std::vector<char> value;
+                if (address == 0) {
+                    return value;
+                }
+                bool previous_null = false;
+                for (std::uint32_t index = 0; index < maximum_dialog_characters; ++index) {
+                    const auto character = cpu.memory().read8(address + index);
+                    value.push_back(static_cast<char>(character));
+                    if (character == 0 && previous_null) {
+                        return value;
+                    }
+                    previous_null = character == 0;
+                }
+                throw Error("unterminated guest file-dialog filter");
+            };
+            std::vector<char> file(file_capacity);
+            const auto initial_file = read_string(file_pointer);
+            const auto initial_count = std::min<std::size_t>(initial_file.size(), file.size() - 1);
+            std::copy_n(initial_file.c_str(), initial_count, file.begin());
+            file[initial_count] = '\0';
+            std::vector<char> file_title(title_pointer == 0 ? 0 : title_capacity);
+            const auto filter = read_filter(pointer(12, 24));
+            const auto initial_directory = read_string(pointer(44, 80));
+            const auto dialog_title = read_string(pointer(48, 88));
+            const auto default_extension = read_string(pointer(60, 104));
+            OPENFILENAMEA dialog{};
+            dialog.lStructSize = sizeof(dialog);
+            dialog.hwndOwner = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(pointer(4, 8)));
+            dialog.lpstrFilter = filter.empty() ? nullptr : filter.data();
+            dialog.nFilterIndex = cpu.memory().read32(structure + (guest_is_64_bit_ ? 44 : 24));
+            dialog.lpstrFile = file.data();
+            dialog.nMaxFile = file_capacity;
+            dialog.lpstrFileTitle = file_title.empty() ? nullptr : file_title.data();
+            dialog.nMaxFileTitle = title_capacity;
+            dialog.lpstrInitialDir =
+                initial_directory.empty() ? nullptr : initial_directory.c_str();
+            dialog.lpstrTitle = dialog_title.empty() ? nullptr : dialog_title.c_str();
+            dialog.Flags = flags;
+            dialog.lpstrDefExt = default_extension.empty() ? nullptr : default_extension.c_str();
+            success = open ? ::GetOpenFileNameA(&dialog) : ::GetSaveFileNameA(&dialog);
+            common_dialog_error_ = success != FALSE ? 0 : ::CommDlgExtendedError();
+            if (success != FALSE) {
+                const auto multiple = (flags & OFN_ALLOWMULTISELECT) != 0;
+                std::size_t file_bytes = 0;
+                bool previous_null = false;
+                for (; file_bytes < file.size(); ++file_bytes) {
+                    const auto current_null = file[file_bytes] == '\0';
+                    if (current_null && (!multiple || previous_null)) {
+                        ++file_bytes;
+                        break;
+                    }
+                    previous_null = current_null;
+                }
+                cpu.memory().write(
+                    file_pointer,
+                    std::span<const std::uint8_t>(
+                        reinterpret_cast<const std::uint8_t *>(file.data()), file_bytes));
+                if (title_pointer != 0 && !file_title.empty()) {
+                    cpu.memory().write(title_pointer, std::span<const std::uint8_t>(
+                                                          reinterpret_cast<const std::uint8_t *>(
+                                                              file_title.data()),
+                                                          std::strlen(file_title.data()) + 1));
+                }
+                cpu.memory().write32(structure + (guest_is_64_bit_ ? 44 : 24), dialog.nFilterIndex);
+                cpu.memory().write16(structure + (guest_is_64_bit_ ? 100 : 56), dialog.nFileOffset);
+                cpu.memory().write16(structure + (guest_is_64_bit_ ? 102 : 58),
+                                     dialog.nFileExtension);
+            }
+        }
+        cpu.set_reg(Rax, success != FALSE ? 1 : 0);
+        finish_call(1);
         break;
     }
     case Api::CommonControlsInitialize: {

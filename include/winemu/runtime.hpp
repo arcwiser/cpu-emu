@@ -70,6 +70,7 @@ class Runtime {
     std::uint64_t data_import_next_ = 0;
     std::unordered_map<std::string, std::uint64_t> data_import_slots_;
     std::uint32_t last_error_ = 0;
+    std::uint32_t common_dialog_error_ = 0;
     std::uint64_t guest_exception_filter_ = 0;
     std::uint64_t guest_command_line_ = 0;
     std::uint64_t guest_command_line_a_ = 0;

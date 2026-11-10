@@ -27,6 +27,11 @@ this file is the companion log of development decisions.
   Edit control, observed the dirty title, and opened a populated File menu. Open/save, persistence,
   and sustained editing remain unverified. The modern packaged Notepad still blocks in WinRT/XAML
   startup and produces no window.
+- Replaced the file-dialog cancellation stub with field-by-field `OPENFILENAMEA/W` marshaling.
+  Host dialogs receive host-owned string and output buffers, selected paths and offsets copy back
+  into checked guest memory, and `CommDlgExtendedError` is retained per runtime. Guest hooks and
+  templates are stripped instead of being executed natively. Classic Notepad's Open picker was
+  displayed and cancelled successfully; selecting/loading a file is not yet claimed.
 
 ## 2026-11-10 — Guest activation contexts and stream buffer layout
 

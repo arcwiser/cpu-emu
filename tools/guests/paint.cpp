@@ -13,6 +13,8 @@
 #include <windows.h>
 // Common Controls depends on the base Windows declarations above.
 #include <commctrl.h>
+// Common Dialogs also depends on the base Windows declarations.
+#include <commdlg.h>
 
 #include <cstdint>
 #include <cwchar>
@@ -433,6 +435,10 @@ int run_sync_selftest() {
             ok = false;
         }
     };
+
+    OPENFILENAMEW invalid_dialog{};
+    check(GetOpenFileNameW(&invalid_dialog) == FALSE && CommDlgExtendedError() == CDERR_STRUCTSIZE,
+          "sync selftest: reject invalid file-dialog structure");
 
     const HANDLE missing =
         OpenSemaphoreW(SEMAPHORE_ALL_ACCESS, FALSE, L"CPUEmu synchronization missing object");
