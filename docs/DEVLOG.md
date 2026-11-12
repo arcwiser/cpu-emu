@@ -14,7 +14,10 @@ this file is the companion log of development decisions.
   invalid guest handles, and window teardown.
 - Re-probed classic Notepad with `CMakeLists.txt`. Its CPUEmu-owned Edit control returned length
   5,010 through `WM_GETTEXT`, and the complete text began with
-  `cmake_minimum_required(VERSION 3.24)`. Saving, persistence, and sustained editing remain
+  `cmake_minimum_required(VERSION 3.24)`.
+- Re-probed Save with a disposable existing file. After replacing the Edit text and marking it
+  modified, Notepad's own File → Save command persisted the exact 47-character CRLF payload. The
+  temporary file was removed afterward. Save As, encoding variants, and sustained editing remain
   unverified.
 
 ## 2026-11-13 — Classic Notepad completes the read-only file-open pipeline

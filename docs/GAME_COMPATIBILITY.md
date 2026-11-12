@@ -31,7 +31,7 @@ reproducible blocker.
 | `sum.exe` fixture | Supported | Integer loop, arithmetic, flags, branches, and process return | Test fixture only |
 | `hello.exe` fixture | Supported | Imports resolve and console output passes through `GetStdHandle`/`WriteFile` | Test fixture only |
 | CPUEmu Paint fixture | 🟢 Supported smoke test | Interactive GDI path starts; `--selftest` draws and reports success | Intended as a compatibility probe, not a full paint program |
-| Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; command-line file open places all 5,010 characters of `CMakeLists.txt` in the real Edit control and returns to the message loop | Saving, persistence, and sustained editing remain unverified |
+| Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; file open places all 5,010 characters of `CMakeLists.txt` in the real Edit control; Save persisted exact replacement text to an existing disposable file | Save As, encoding variants, long editing sessions, and broader editor behavior remain unverified |
 | Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
 | Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates the `YYGameMakerYY` native window, initializes a safe DirectInput proxy, enumerates display modes, and reaches `Direct3DCreate9Ex` after about 15.1M instructions | The HWND is created but not visibly shown/rendering yet; Direct3D 9, active input, streaming audio, and full Steamworks interfaces remain |
@@ -105,3 +105,10 @@ guest handle for a safe `EM_GETHANDLE` copy-back. Repeating the command above an
 CPUEmu-owned child Edit with `WM_GETTEXT` returned length 5,010 and the complete `CMakeLists.txt`,
 beginning with `cmake_minimum_required(VERSION 3.24)`. This verifies read-only text loading; save,
 persistence, and sustained editing remain unverified.
+
+The same commit was probed against a disposable copy at
+`%TEMP%\cpuemu-notepad-save-probe.txt`. After `WM_SETTEXT` replaced the Edit contents and
+`EM_SETMODIFY` marked it dirty, Notepad's own File → Save command (menu ID 3) persisted exactly
+`CPUEmu Notepad persistence probe\r\nsecond line\r\n` (47 characters). The temporary file was
+deleted after verification. This establishes Save to an existing file, not Save As, alternate
+encodings, or sustained editing.

@@ -28,7 +28,7 @@ Statuses describe the furthest verified milestone, not a promise that every feat
 | :---: | --- | :---: | --- | --- |
 | 🟢 **Supported** | CPUEmu fixtures | x86 / x64 | Load, execute, print, and exit with checked results | Test scope only |
 | 🟢 **Smoke test** | CPUEmu Paint | x64 | Creates a window and passes headless drawing self-test | Deliberately small fixture |
-| 🟡 **Starts** | Classic Windows Notepad | x64 | Editor window, typing, menus, and verified read-only file text in the real Edit control | Saving, persistence, and sustained editing remain unverified |
+| 🟡 **Starts** | Classic Windows Notepad | x64 | Editor window, typing, menus, verified file loading, and Save persistence to an existing file | Save As, encoding variants, and sustained editing remain unverified |
 | 🔴 **Blocked** | Modern packaged Notepad | x64 | Activates a guest-owned WinRT application instance | XAML resource lookup and guest exception unwinding |
 | 🟠 **Graphics bring-up** | **Undertale** | x86 | Parses game data, creates `YYGameMakerYY`, initializes safe input, reaches `Direct3DCreate9Ex` | Direct3D 9Ex device and presentation proxy |
 | 🔴 **Blocked early** | Discord / Chromium | x64 | More than 2.6M V8 startup instructions | Guest processes, threads, DLLs, exceptions, SIMD |
