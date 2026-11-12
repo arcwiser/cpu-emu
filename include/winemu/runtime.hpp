@@ -107,6 +107,7 @@ class Runtime {
     bool quit_message_pending_ = false;
     std::uint32_t quit_message_code_ = 0;
     std::unordered_map<std::uint64_t, std::int64_t> callback_long_parameters_;
+    std::unordered_map<std::uint64_t, std::uint64_t> edit_memory_handles_;
     std::uint32_t callback_depth_ = 0;
     std::uint64_t direct_input_proxy_ = 0;
     std::uint64_t direct_input_device_proxy_ = 0;

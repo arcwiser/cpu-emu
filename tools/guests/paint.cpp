@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <cwchar>
+#include <iterator>
 
 namespace {
 
@@ -497,6 +498,49 @@ int run_sync_selftest() {
                              nullptr) == nullptr &&
               GetLastError() == ERROR_NOT_ENOUGH_MEMORY,
           "sync selftest: cap page-file mapping size");
+
+    const HWND edit = CreateWindowExW(0, L"EDIT", L"", WS_POPUP | ES_MULTILINE, 0, 0, 200, 100,
+                                      nullptr, nullptr, nullptr, nullptr);
+    check(edit != nullptr, "sync selftest: create multiline edit control");
+    if (edit != nullptr) {
+        check(SendMessageW(edit, EM_SETHANDLE, 0xdead, 0) == 0 &&
+                  GetLastError() == ERROR_INVALID_HANDLE,
+              "sync selftest: reject invalid edit memory handle");
+        constexpr wchar_t initial_text[] = L"guest-owned edit text";
+        const HLOCAL edit_memory =
+            LocalAlloc(LMEM_MOVEABLE | LMEM_ZEROINIT, sizeof(initial_text) + 64);
+        check(edit_memory != nullptr, "sync selftest: allocate edit backing memory");
+        if (edit_memory != nullptr) {
+            auto *const locked = static_cast<wchar_t *>(LocalLock(edit_memory));
+            check(locked != nullptr, "sync selftest: lock edit backing memory");
+            if (locked != nullptr) {
+                for (std::size_t index = 0; index < std::size(initial_text); ++index) {
+                    locked[index] = initial_text[index];
+                }
+                LocalUnlock(edit_memory);
+                check(SendMessageW(edit, EM_SETHANDLE, reinterpret_cast<WPARAM>(edit_memory), 0) !=
+                          0,
+                      "sync selftest: set guest-owned edit handle");
+                wchar_t edit_text[64]{};
+                check(GetWindowTextW(edit, edit_text, static_cast<int>(std::size(edit_text))) !=
+                              0 &&
+                          lstrcmpW(edit_text, initial_text) == 0,
+                      "sync selftest: edit handle copies text to native control");
+                check(SetWindowTextW(edit, L"native edit update") != FALSE,
+                      "sync selftest: update native edit text");
+                const auto returned =
+                    reinterpret_cast<HLOCAL>(SendMessageW(edit, EM_GETHANDLE, 0, 0));
+                const auto *const returned_text = static_cast<const wchar_t *>(LocalLock(returned));
+                check(returned != nullptr && returned_text != nullptr &&
+                          lstrcmpW(returned_text, L"native edit update") == 0,
+                      "sync selftest: get edit handle copies text to guest memory");
+                if (returned_text != nullptr) {
+                    LocalUnlock(returned);
+                }
+            }
+        }
+        DestroyWindow(edit);
+    }
 
     const HANDLE missing =
         OpenSemaphoreW(SEMAPHORE_ALL_ACCESS, FALSE, L"CPUEmu synchronization missing object");

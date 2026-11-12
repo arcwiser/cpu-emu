@@ -1005,7 +1005,57 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         const bool wide = thunk_name.ends_with("W");
         LRESULT result = 0;
         bool supported = true;
-        if (message == WM_SETTEXT) {
+        if (message == EM_SETHANDLE) {
+            const auto guest_handle = static_cast<std::uint64_t>(word_parameter);
+            const auto allocation = heap_sizes_.find(guest_handle);
+            if (allocation == heap_sizes_.end()) {
+                last_error_ = ERROR_INVALID_HANDLE;
+            } else if (wide) {
+                const auto text = cpu.memory().read_wide_string(
+                    guest_handle, static_cast<std::size_t>(allocation->second / sizeof(wchar_t)));
+                result =
+                    ::SendMessageW(window, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(text.c_str()));
+            } else {
+                const auto text = cpu.memory().read_c_string(
+                    guest_handle, static_cast<std::size_t>(allocation->second));
+                result =
+                    ::SendMessageA(window, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(text.c_str()));
+            }
+            if (allocation != heap_sizes_.end() && result != 0) {
+                edit_memory_handles_[reinterpret_cast<std::uint64_t>(window)] = guest_handle;
+            }
+        } else if (message == EM_GETHANDLE) {
+            const auto retained =
+                edit_memory_handles_.find(reinterpret_cast<std::uint64_t>(window));
+            if (retained != edit_memory_handles_.end()) {
+                auto guest_handle = retained->second;
+                const auto length =
+                    wide ? ::GetWindowTextLengthW(window) : ::GetWindowTextLengthA(window);
+                const auto byte_count =
+                    (static_cast<std::uint64_t>(std::max(length, 0)) + 1) * (wide ? 2 : 1);
+                const auto allocation = heap_sizes_.find(guest_handle);
+                if (allocation == heap_sizes_.end() || allocation->second < byte_count) {
+                    guest_handle = allocate(byte_count);
+                    retained->second = guest_handle;
+                }
+                if (wide) {
+                    std::vector<wchar_t> text(static_cast<std::size_t>(length) + 1);
+                    ::GetWindowTextW(window, text.data(), static_cast<int>(text.size()));
+                    cpu.memory().write(
+                        guest_handle,
+                        std::span<const std::uint8_t>(
+                            reinterpret_cast<const std::uint8_t *>(text.data()), byte_count));
+                } else {
+                    std::vector<char> text(static_cast<std::size_t>(length) + 1);
+                    ::GetWindowTextA(window, text.data(), static_cast<int>(text.size()));
+                    cpu.memory().write(
+                        guest_handle,
+                        std::span<const std::uint8_t>(
+                            reinterpret_cast<const std::uint8_t *>(text.data()), byte_count));
+                }
+                result = static_cast<LRESULT>(guest_handle);
+            }
+        } else if (message == WM_SETTEXT) {
             if (wide) {
                 const auto text = guest_long_parameter == 0
                                       ? std::wstring{}

@@ -304,13 +304,18 @@ std::intptr_t Runtime::invoke_window_proc(Cpu &cpu, std::uint64_t window, std::u
         found = window_procedures_.emplace(window, creating_window_procedure_).first;
     }
     if (found == window_procedures_.end()) {
-        return DefWindowProcW(reinterpret_cast<HWND>(window), message, word_parameter,
-                              long_parameter);
+        const auto result =
+            DefWindowProcW(reinterpret_cast<HWND>(window), message, word_parameter, long_parameter);
+        if (message == WM_NCDESTROY) {
+            edit_memory_handles_.erase(window);
+        }
+        return result;
     }
     const auto result = invoke_window_callback(cpu, found->second, window, message, word_parameter,
                                                long_parameter, 0, 0, false, exit_code, exited);
     if (message == WM_NCDESTROY) {
         window_procedures_.erase(window);
+        edit_memory_handles_.erase(window);
     }
     return result;
 }

@@ -140,6 +140,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     quit_message_pending_ = false;
     quit_message_code_ = 0;
     callback_long_parameters_.clear();
+    edit_memory_handles_.clear();
     callback_depth_ = 0;
     direct_input_proxy_ = 0;
     direct_input_device_proxy_ = 0;
