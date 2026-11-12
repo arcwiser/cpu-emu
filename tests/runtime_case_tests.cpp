@@ -122,4 +122,13 @@ void test_fail_fast_isolation() {
             "guest fail-fast terminates only the guest");
 }
 
+void test_mime_type_marshaling() {
+    // URLMON allocates its result in host memory. The adapter must copy it into checked guest
+    // memory rather than exposing that host pointer to interpreted code.
+    std::ostringstream output;
+    winemu::Runtime runtime(output);
+    const auto result = runtime.run(WINEMU_TEST_APPS_DIR "/mimetype.exe");
+    require(result.exit_code == 0, "guest-owned FindMimeFromData output and failures");
+}
+
 } // namespace winemu::tests

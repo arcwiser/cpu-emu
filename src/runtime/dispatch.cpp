@@ -28,6 +28,7 @@
 // Common Dialogs depends on the base Windows declarations above.
 #include <cderr.h>
 #include <commdlg.h>
+#include <urlmon.h>
 
 extern "C" __declspec(dllimport) wchar_t **__stdcall CommandLineToArgvW(const wchar_t *, int *);
 extern "C" __declspec(dllimport) DWORD __stdcall
@@ -1458,6 +1459,87 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         cpu.set_reg(Rax, success != FALSE ? 1 : 0);
         finish_call(1);
+        break;
+    }
+    case Api::GuestMimeType: {
+        constexpr std::uint32_t maximum_input_bytes = 1024 * 1024;
+        constexpr std::uint32_t maximum_string_characters = 32 * 1024;
+        const auto output_pointer = argument(6);
+        const auto finish_result = [&](HRESULT result) {
+            cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+            finish_call(8);
+        };
+        if (output_pointer == 0) {
+            finish_result(E_INVALIDARG);
+            break;
+        }
+        if (guest_is_64_bit_) {
+            cpu.memory().write64(output_pointer, 0);
+        } else {
+            cpu.memory().write32(output_pointer, 0);
+        }
+        const auto binding_context = argument(0);
+        const auto url_pointer = argument(1);
+        const auto data_pointer = argument(2);
+        const auto data_size = argument(3);
+        const auto proposed_pointer = argument(4);
+        const auto flags = static_cast<DWORD>(argument(5));
+        const auto reserved = argument(7);
+        if (binding_context != 0 || reserved != 0 || data_size > maximum_input_bytes ||
+            (data_pointer == 0 && data_size != 0)) {
+            finish_result(E_INVALIDARG);
+            break;
+        }
+        const auto read_wide_string = [&](std::uint64_t address) {
+            std::wstring value;
+            for (std::uint32_t index = 0; index < maximum_string_characters; ++index) {
+                const auto character = cpu.memory().read16(address + index * sizeof(wchar_t));
+                if (character == 0) {
+                    return value;
+                }
+                value.push_back(static_cast<wchar_t>(character));
+            }
+            throw Error("unterminated guest MIME string");
+        };
+        const auto url = url_pointer == 0 ? std::wstring{} : read_wide_string(url_pointer);
+        const auto proposed =
+            proposed_pointer == 0 ? std::wstring{} : read_wide_string(proposed_pointer);
+        const auto data =
+            data_size == 0 ? std::vector<std::uint8_t>{}
+                           : cpu.memory().read(data_pointer, static_cast<std::size_t>(data_size));
+        wchar_t *host_mime = nullptr;
+        auto result = ::FindMimeFromData(
+            nullptr, url_pointer == 0 ? nullptr : url.c_str(),
+            data.empty() ? nullptr : const_cast<std::uint8_t *>(data.data()),
+            static_cast<DWORD>(data.size()), proposed_pointer == 0 ? nullptr : proposed.c_str(),
+            flags, &host_mime, 0);
+        if (SUCCEEDED(result)) {
+            std::size_t length = 0;
+            if (host_mime == nullptr) {
+                result = E_FAIL;
+            } else {
+                while (length < maximum_string_characters && host_mime[length] != L'\0') {
+                    ++length;
+                }
+                if (length == maximum_string_characters) {
+                    result = E_FAIL;
+                } else {
+                    const auto guest_mime = allocate((length + 1) * sizeof(wchar_t));
+                    cpu.memory().write(guest_mime,
+                                       std::span<const std::uint8_t>(
+                                           reinterpret_cast<const std::uint8_t *>(host_mime),
+                                           (length + 1) * sizeof(wchar_t)));
+                    if (guest_is_64_bit_) {
+                        cpu.memory().write64(output_pointer, guest_mime);
+                    } else {
+                        cpu.memory().write32(output_pointer,
+                                             static_cast<std::uint32_t>(guest_mime));
+                    }
+                }
+            }
+        }
+        ::CoTaskMemFree(host_mime);
+        finish_result(result);
         break;
     }
     case Api::CommonControlsInitialize: {

@@ -23,7 +23,7 @@ add_library(winemu_core
     src/runtime/strings.cpp
 )
 target_include_directories(winemu_core PUBLIC include)
-target_link_libraries(winemu_core PUBLIC advapi32 comctl32 comdlg32 shell32 winmm)
+target_link_libraries(winemu_core PUBLIC advapi32 comctl32 comdlg32 ole32 shell32 urlmon winmm)
 target_compile_options(winemu_core PRIVATE
     $<$<CXX_COMPILER_ID:Clang>:-Wall -Wextra -Wpedantic -Werror>
 )
@@ -61,7 +61,8 @@ add_custom_command(
         ${CMAKE_BINARY_DIR}/test-apps/schedule.exe
         ${CMAKE_BINARY_DIR}/test-apps/errorinfo.exe
         ${CMAKE_BINARY_DIR}/test-apps/propertyvalue.exe
-    ${CMAKE_BINARY_DIR}/test-apps/failfast.exe
+        ${CMAKE_BINARY_DIR}/test-apps/failfast.exe
+        ${CMAKE_BINARY_DIR}/test-apps/mimetype.exe
     COMMAND make_test_apps ${CMAKE_BINARY_DIR}/test-apps
     DEPENDS make_test_apps
     VERBATIM
@@ -76,6 +77,7 @@ add_custom_target(generate_test_apps ALL DEPENDS
     ${CMAKE_BINARY_DIR}/test-apps/errorinfo.exe
     ${CMAKE_BINARY_DIR}/test-apps/propertyvalue.exe
     ${CMAKE_BINARY_DIR}/test-apps/failfast.exe
+    ${CMAKE_BINARY_DIR}/test-apps/mimetype.exe
 )
 add_dependencies(cpuemu_tests generate_test_apps)
 

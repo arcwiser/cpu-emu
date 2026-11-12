@@ -23,5 +23,6 @@ void test_schedule_chore();
 void test_get_error_info();
 void test_property_value();
 void test_fail_fast_isolation();
+void test_mime_type_marshaling();
 
 } // namespace winemu::tests

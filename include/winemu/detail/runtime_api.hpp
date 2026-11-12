@@ -53,6 +53,7 @@ enum class RuntimeApi {
     GuestMessageBox,
     GuestMessageLoop,
     GuestFileDialog,
+    GuestMimeType,
     CommonControlsInitialize,
     GdiplusStartup,
     GdiplusShutdown,

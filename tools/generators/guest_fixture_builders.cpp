@@ -388,4 +388,116 @@ void make_fail_fast(const std::filesystem::path &path) {
     write_pe(path, section, imports_rva, 40, iat_rva, 16);
 }
 
+// Exercises FindMimeFromData without allowing URLMON's host allocation to cross into guest
+// memory. It verifies a successful, readable output, a native classification failure, and an
+// invalid null output parameter.
+void make_mime_type(const std::filesystem::path &path) {
+    constexpr std::uint32_t text_url_rva = 0x1200;
+    constexpr std::uint32_t proposed_rva = 0x1240;
+    constexpr std::uint32_t unknown_url_rva = 0x1280;
+    constexpr std::uint32_t output_rva = 0x12c0;
+    constexpr std::uint32_t imports_rva = 0x1300;
+    constexpr std::uint32_t dll_rva = 0x1340;
+    constexpr std::uint32_t int_rva = 0x1360;
+    constexpr std::uint32_t iat_rva = 0x1380;
+    constexpr std::uint32_t name_rva = 0x13a0;
+    constexpr std::uint32_t invalid_argument = 0x80070057;
+
+    std::vector<std::uint8_t> section(0x500);
+    std::vector<std::uint8_t> code;
+    std::vector<std::size_t> failure_jumps;
+    const auto emit = [&](std::initializer_list<std::uint8_t> values) {
+        code.insert(code.end(), values.begin(), values.end());
+    };
+    const auto emit_rip_relative = [&](std::initializer_list<std::uint8_t> prefix,
+                                       std::uint32_t target) {
+        code.insert(code.end(), prefix.begin(), prefix.end());
+        const auto next = section_rva + static_cast<std::uint32_t>(code.size()) + 4;
+        append32(code, target - next);
+    };
+    const auto emit_failure_jump = [&](bool equal) {
+        failure_jumps.push_back(code.size());
+        emit({0x0f, static_cast<std::uint8_t>(equal ? 0x84 : 0x85), 0, 0, 0, 0});
+    };
+    const auto emit_stack_pointer = [&](std::uint8_t offset, std::uint32_t target) {
+        emit_rip_relative({0x48, 0x8d, 0x05}, target); // lea rax,[target]
+        emit({0x48, 0x89, 0x44, 0x24, offset});        // mov [rsp+offset],rax
+    };
+    const auto emit_stack_constant = [&](std::uint8_t offset, std::uint32_t value) {
+        emit({0x48, 0xc7, 0x44, 0x24, offset});
+        append32(code, value);
+    };
+    const auto emit_call = [&](std::uint32_t url, std::uint32_t proposed, bool output) {
+        emit({0x31, 0xc9});                         // xor ecx,ecx (IBindCtx)
+        emit_rip_relative({0x48, 0x8d, 0x15}, url); // lea rdx,[URL]
+        emit({0x45, 0x31, 0xc0, 0x45, 0x31, 0xc9}); // xor r8d,r8d; xor r9d,r9d
+        if (proposed == 0) {
+            emit_stack_constant(0x20, 0); // proposed MIME
+        } else {
+            emit_stack_pointer(0x20, proposed);
+        }
+        emit_stack_constant(0x28, 1); // FMFD_URLASFILENAME
+        if (output) {
+            emit_stack_pointer(0x30, output_rva); // MIME output
+        } else {
+            emit_stack_constant(0x30, 0);
+        }
+        emit_stack_constant(0x38, 0);             // reserved
+        emit_rip_relative({0xff, 0x15}, iat_rva); // call FindMimeFromData
+    };
+
+    emit({0x48, 0x83, 0xec, 0x48}); // sub rsp,0x48
+    emit_call(text_url_rva, proposed_rva, true);
+    emit({0x85, 0xc0});                                // test eax,eax
+    emit_failure_jump(false);                          // jne fail
+    emit_rip_relative({0x48, 0x8b, 0x05}, output_rva); // mov rax,[output]
+    emit({0x48, 0x85, 0xc0});                          // test rax,rax
+    emit_failure_jump(true);                           // je fail
+    emit({0x66, 0x83, 0x38, 0x74});                    // cmp word ptr [rax],'t'
+    emit_failure_jump(false);                          // jne fail
+
+    emit_rip_relative({0x48, 0xc7, 0x05}, output_rva); // mov qword [output],0
+    append32(code, 0);
+    emit_call(unknown_url_rva, 0, true);
+    emit({0x85, 0xc0});                                // test eax,eax
+    emit_failure_jump(true);                           // je fail: expected native failure
+    emit_rip_relative({0x48, 0x8b, 0x05}, output_rva); // mov rax,[output]
+    emit({0x48, 0x85, 0xc0});
+    emit_failure_jump(false); // jne fail: output must remain null
+
+    emit_call(text_url_rva, proposed_rva, false);
+    emit({0x3d}); // cmp eax,E_INVALIDARG
+    append32(code, invalid_argument);
+    emit_failure_jump(false);                         // jne fail
+    emit({0x31, 0xc0, 0x48, 0x83, 0xc4, 0x48, 0xc3}); // return 0
+    const auto failure_offset = static_cast<std::uint32_t>(code.size());
+    emit({0xb8, 0x01, 0, 0, 0, 0x48, 0x83, 0xc4, 0x48, 0xc3}); // return 1
+    for (const auto jump : failure_jumps) {
+        put32(code, jump + 2, failure_offset - static_cast<std::uint32_t>(jump + 6));
+    }
+    std::copy(code.begin(), code.end(), section.begin());
+
+    const auto offset = [](std::uint32_t rva) { return rva - section_rva; };
+    const auto put_wide = [&](std::uint32_t rva, const std::u16string &value) {
+        for (std::size_t index = 0; index < value.size(); ++index) {
+            put16(section, offset(rva) + index * 2, value[index]);
+        }
+        put16(section, offset(rva) + value.size() * 2, 0);
+    };
+    put_wide(text_url_rva, u"sample.txt");
+    put_wide(proposed_rva, u"text/plain");
+    put_wide(unknown_url_rva, u"sample.cpuemu_unknown_mime_type");
+    put64(section, offset(output_rva), 0x12345678);
+    put32(section, offset(imports_rva), int_rva);
+    put32(section, offset(imports_rva) + 12, dll_rva);
+    put32(section, offset(imports_rva) + 16, iat_rva);
+    const std::string dll = "URLMON.dll";
+    std::copy(dll.begin(), dll.end(), section.begin() + offset(dll_rva));
+    const std::string import = "FindMimeFromData";
+    put64(section, offset(int_rva), name_rva);
+    put64(section, offset(iat_rva), name_rva);
+    std::copy(import.begin(), import.end(), section.begin() + offset(name_rva) + 2);
+    write_pe(path, section, imports_rva, 40, iat_rva, 16);
+}
+
 } // namespace cpuemu::fixtures

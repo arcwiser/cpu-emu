@@ -24,6 +24,7 @@ int main() {
         test_get_error_info();
         test_property_value();
         test_fail_fast_isolation();
+        test_mime_type_marshaling();
         std::cout << "all tests passed\n";
         return 0;
     } catch (const std::exception &error) {

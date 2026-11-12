@@ -208,6 +208,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
                name == "GetSaveFileNameA" || name == "GetSaveFileNameW" ||
                name == "CommDlgExtendedError") {
         api = Api::GuestFileDialog;
+    } else if (normalized_module == "urlmon.dll" && name == "FindMimeFromData") {
+        api = Api::GuestMimeType;
     } else if (name == "InitCommonControlsEx") {
         api = Api::CommonControlsInitialize;
     } else if (name == "GdiplusStartup") {
