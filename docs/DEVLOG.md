@@ -4,6 +4,22 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-13 — Classic Notepad completes the read-only file-open pipeline
+
+- Added field-by-field `GetFileInformationByHandle` marshaling for CPUEmu's opaque file tokens at
+  commit `d040900`; raw host handles never enter guest memory.
+- Replaced direct file-mapping forwarding with guest-owned mapping tokens and copied read-only
+  views at commit `e0e4f0e`. Views remain valid after their mapping token closes, explicit unmap
+  removes guest access, and runtime reset/destruction closes retained host handles. Named mappings,
+  guest security attributes, writable access, and views larger than 256 MiB fail closed.
+- Added memory and Paint regressions for exact-base teardown, invalid tokens, mapping output,
+  handle/view lifetime, double close/unmap, write rejection, host-namespace isolation, and size
+  limits.
+- On Windows build `10.0.26200.0`, classic Notepad `10.0.26100.8457` opened the requested
+  `CMakeLists.txt` through file metadata, MIME detection, mapping, edit-control messages, successful
+  unmap, and title update, then remained in its message loop. Visual text correctness, saving,
+  persistence, and sustained editing were not verified.
+
 ## 2026-11-13 — MIME results stay in guest memory
 
 - Added a dedicated `FindMimeFromData` adapter. Guest URL, proposed-type, and bounded sniffing
