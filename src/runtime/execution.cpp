@@ -114,6 +114,13 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     }
     file_handles_.clear();
     next_file_handle_ = 0x400;
+    for (const auto &[guest_handle, host_handle] : mapping_handles_) {
+        static_cast<void>(guest_handle);
+        ::CloseHandle(static_cast<HANDLE>(host_handle));
+    }
+    mapping_handles_.clear();
+    mapped_views_.clear();
+    next_mapping_handle_ = 0x500;
     for (const auto &[guest_handle, host_handle] : sync_handles_) {
         static_cast<void>(guest_handle);
         ::CloseHandle(static_cast<HANDLE>(host_handle));

@@ -38,6 +38,9 @@ class Memory {
     void commit(std::uint64_t base, std::uint64_t size, std::uint8_t permissions, std::string name);
     [[nodiscard]] bool decommit(std::uint64_t base, std::uint64_t size);
     [[nodiscard]] bool release(std::uint64_t base);
+    // Removes an exact mapping created by Memory::map. This is for emulator-owned regions whose
+    // lifetime is controlled by an adapter, not guest VirtualFree reservations.
+    [[nodiscard]] bool unmap_owned(std::uint64_t base);
     [[nodiscard]] bool protect(std::uint64_t base, std::uint64_t size, std::uint8_t permissions);
     [[nodiscard]] bool permissions(std::uint64_t address, std::uint8_t &result) const;
     [[nodiscard]] bool query(std::uint64_t address, VirtualMemoryInfo &result) const;

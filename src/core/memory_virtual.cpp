@@ -61,6 +61,19 @@ bool Memory::release(std::uint64_t base) {
     return true;
 }
 
+bool Memory::unmap_owned(std::uint64_t base) {
+    const auto found =
+        std::find_if(allocations_.begin(), allocations_.end(), [&](const Allocation &allocation) {
+            return allocation.base == base && !allocation.releasable;
+        });
+    if (found == allocations_.end() || VirtualFree(found->data, 0, MEM_RELEASE) == FALSE) {
+        return false;
+    }
+    remove_mappings(found->base, found->size);
+    allocations_.erase(found);
+    return true;
+}
+
 bool Memory::protect(std::uint64_t base, std::uint64_t size, std::uint8_t permissions) {
     if (size == 0 || base > std::numeric_limits<std::uint64_t>::max() - size) {
         return false;

@@ -297,8 +297,9 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::CommandLineToArgvW;
     } else if (name == "GetSecurityInfo") {
         api = Api::GetSecurityInfo;
-    } else if (name == "MapViewOfFile") {
-        api = Api::MapViewOfFile;
+    } else if (name == "CreateFileMappingA" || name == "CreateFileMappingW" ||
+               name == "MapViewOfFile" || name == "UnmapViewOfFile") {
+        api = Api::GuestFileMapping;
     } else if (name == "GetEnvironmentStringsW") {
         api = Api::EnvironmentStringsW;
     } else if (name == "GetEnvironmentStringsA" || name == "GetEnvironmentStrings") {

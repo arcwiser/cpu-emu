@@ -47,6 +47,21 @@ void test_memory() {
     }
     require(write_rejected, "protect must invalidate the region cache for that page");
     require(memory.read32(0x210000800ULL) == 0x22222222U, "protected fragment stays readable");
+
+    memory.map(0x220000000ULL, 0x1000, winemu::Read | winemu::Write, "owned view");
+    memory.write8(0x220000fffULL, 0x5a);
+    require(!memory.unmap_owned(0x220000001ULL), "owned mapping rejects an interior address");
+    require(memory.read8(0x220000fffULL) == 0x5a,
+            "failed owned unmap preserves the complete mapping");
+    require(memory.unmap_owned(0x220000000ULL), "owned mapping unmaps at its exact base");
+    require(!memory.unmap_owned(0x220000000ULL), "owned mapping rejects a repeated unmap");
+    bool unmapped_read_rejected = false;
+    try {
+        static_cast<void>(memory.read8(0x220000000ULL));
+    } catch (const winemu::Error &) {
+        unmapped_read_rejected = true;
+    }
+    require(unmapped_read_rejected, "owned unmap removes access to the entire region");
 }
 
 } // namespace winemu::tests

@@ -96,7 +96,7 @@ enum class RuntimeApi {
     GuestMapString,
     CommandLineToArgvW,
     GetSecurityInfo,
-    MapViewOfFile,
+    GuestFileMapping,
     WinMainCommandLine,
     EnvironmentStringsW,
     EnvironmentStringsA,

@@ -32,6 +32,10 @@ Runtime::~Runtime() {
         static_cast<void>(guest_handle);
         ::CloseHandle(static_cast<HANDLE>(host_handle));
     }
+    for (const auto &[guest_handle, host_handle] : mapping_handles_) {
+        static_cast<void>(guest_handle);
+        ::CloseHandle(static_cast<HANDLE>(host_handle));
+    }
     for (const auto &[guest_handle, host_handle] : sync_handles_) {
         static_cast<void>(guest_handle);
         ::CloseHandle(static_cast<HANDLE>(host_handle));

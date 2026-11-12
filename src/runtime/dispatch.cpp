@@ -438,6 +438,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             result = ::CloseHandle(static_cast<HANDLE>(found->second)) != FALSE;
             file_handles_.erase(found);
         }
+        if (const auto mapping = mapping_handles_.find(argument(0));
+            mapping != mapping_handles_.end()) {
+            result = ::CloseHandle(static_cast<HANDLE>(mapping->second)) != FALSE;
+            mapping_handles_.erase(mapping);
+        }
         if (const auto sync = sync_handles_.find(argument(0)); sync != sync_handles_.end()) {
             result = ::CloseHandle(static_cast<HANDLE>(sync->second)) != FALSE;
             sync_handles_.erase(sync);
@@ -2314,11 +2319,80 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call();
         break;
     }
-    case Api::MapViewOfFile: {
-        const auto requested_size = cpu.memory().read64(cpu.reg(Rsp) + 0x28);
+    case Api::GuestFileMapping: {
+        constexpr std::uint64_t maximum_view_size = 256ULL * 1024 * 1024;
+        if (thunk_name.ends_with("!CreateFileMappingA") ||
+            thunk_name.ends_with("!CreateFileMappingW")) {
+            const auto file = argument(0);
+            HANDLE host_file = INVALID_HANDLE_VALUE;
+            if (file != (guest_is_64_bit_ ? UINT64_MAX : UINT32_MAX)) {
+                const auto found = file_handles_.find(file);
+                if (found == file_handles_.end()) {
+                    last_error_ = ERROR_INVALID_HANDLE;
+                    cpu.set_reg(Rax, 0);
+                    finish_call(6);
+                    break;
+                }
+                host_file = static_cast<HANDLE>(found->second);
+            }
+            const auto maximum_size =
+                ((argument(3) & UINT32_MAX) << 32) | (argument(4) & UINT32_MAX);
+            if (argument(1) != 0 || argument(5) != 0) {
+                last_error_ = ERROR_NOT_SUPPORTED;
+                cpu.set_reg(Rax, 0);
+                finish_call(6);
+                break;
+            }
+            if (maximum_size > maximum_view_size) {
+                last_error_ = ERROR_NOT_ENOUGH_MEMORY;
+                cpu.set_reg(Rax, 0);
+                finish_call(6);
+                break;
+            }
+            const auto host_mapping = ::CreateFileMappingW(
+                host_file, nullptr, static_cast<DWORD>(argument(2)),
+                static_cast<DWORD>(argument(3)), static_cast<DWORD>(argument(4)), nullptr);
+            if (host_mapping == nullptr) {
+                last_error_ = ::GetLastError();
+                cpu.set_reg(Rax, 0);
+            } else {
+                const auto guest_handle = next_mapping_handle_++;
+                mapping_handles_.emplace(guest_handle, host_mapping);
+                cpu.set_reg(Rax, guest_handle);
+            }
+            finish_call(6);
+            break;
+        }
+        if (thunk_name.ends_with("!UnmapViewOfFile")) {
+            const auto address = argument(0);
+            const auto found = mapped_views_.find(address);
+            const auto result = found != mapped_views_.end() && cpu.memory().unmap_owned(address);
+            if (result) {
+                mapped_views_.erase(found);
+                heap_sizes_.erase(address);
+            } else {
+                last_error_ = ERROR_INVALID_ADDRESS;
+            }
+            cpu.set_reg(Rax, result ? 1 : 0);
+            finish_call(1);
+            break;
+        }
+        const auto mapping = mapping_handles_.find(argument(0));
+        const auto access = static_cast<DWORD>(argument(1));
+        const auto requested_size = argument(4);
+        if (mapping == mapping_handles_.end() ||
+            (access != FILE_MAP_READ && access != FILE_MAP_COPY) ||
+            requested_size > maximum_view_size) {
+            last_error_ = mapping == mapping_handles_.end()    ? ERROR_INVALID_HANDLE
+                          : requested_size > maximum_view_size ? ERROR_NOT_ENOUGH_MEMORY
+                                                               : ERROR_ACCESS_DENIED;
+            cpu.set_reg(Rax, 0);
+            finish_call(5);
+            break;
+        }
         auto *const native_view = ::MapViewOfFile(
-            reinterpret_cast<HANDLE>(cpu.reg(Rcx)), static_cast<DWORD>(cpu.reg(Rdx)),
-            static_cast<DWORD>(cpu.reg(R8)), static_cast<DWORD>(cpu.reg(R9)), requested_size);
+            static_cast<HANDLE>(mapping->second), access, static_cast<DWORD>(argument(2)),
+            static_cast<DWORD>(argument(3)), static_cast<SIZE_T>(requested_size));
         if (native_view == nullptr) {
             last_error_ = ::GetLastError();
             cpu.set_reg(Rax, 0);
@@ -2330,19 +2404,31 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                     ::UnmapViewOfFile(native_view);
                     last_error_ = ::GetLastError();
                     cpu.set_reg(Rax, 0);
-                    finish_call();
+                    finish_call(5);
                     break;
                 }
                 size = information.RegionSize;
+            }
+            if (size == 0 || size > maximum_view_size) {
+                ::UnmapViewOfFile(native_view);
+                last_error_ =
+                    size > maximum_view_size ? ERROR_NOT_ENOUGH_MEMORY : ERROR_INVALID_PARAMETER;
+                cpu.set_reg(Rax, 0);
+                finish_call(5);
+                break;
             }
             const auto guest_view = allocate(size);
             cpu.memory().write(guest_view, std::span<const std::uint8_t>(
                                                reinterpret_cast<const std::uint8_t *>(native_view),
                                                static_cast<std::size_t>(size)));
             ::UnmapViewOfFile(native_view);
+            if (access == FILE_MAP_READ) {
+                static_cast<void>(cpu.memory().protect(guest_view, size, Read));
+            }
+            mapped_views_.emplace(guest_view, size);
             cpu.set_reg(Rax, guest_view);
         }
-        finish_call();
+        finish_call(5);
         break;
     }
     case Api::WinMainCommandLine:

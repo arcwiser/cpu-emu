@@ -455,6 +455,30 @@ int run_sync_selftest() {
                   (information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 &&
                   (information.nFileSizeHigh != 0 || information.nFileSizeLow != 0),
               "sync selftest: file information output");
+        const HANDLE mapping =
+            CreateFileMappingW(executable_file, nullptr, PAGE_READONLY, 0, 0, nullptr);
+        check(mapping != nullptr, "sync selftest: create read-only file mapping");
+        if (mapping != nullptr) {
+            const auto *view =
+                static_cast<const unsigned char *>(MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, 64));
+            check(MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, 64) == nullptr &&
+                      GetLastError() == ERROR_ACCESS_DENIED,
+                  "sync selftest: reject writable file view");
+            check(CloseHandle(mapping) != FALSE, "sync selftest: close mapping before its view");
+            check(CloseHandle(mapping) == FALSE && GetLastError() == ERROR_INVALID_HANDLE,
+                  "sync selftest: reject closed mapping handle");
+            check(view != nullptr && view[0] == 'M' && view[1] == 'Z',
+                  "sync selftest: mapped view outlives its handle");
+            if (view != nullptr) {
+                check(UnmapViewOfFile(view) != FALSE, "sync selftest: unmap guest file view");
+                check(UnmapViewOfFile(view) == FALSE && GetLastError() == ERROR_INVALID_ADDRESS,
+                      "sync selftest: reject double unmap");
+            }
+        }
+        check(CreateFileMappingW(executable_file, nullptr, PAGE_READONLY, 0, 0,
+                                 L"CPUEmu forbidden host mapping") == nullptr &&
+                  GetLastError() == ERROR_NOT_SUPPORTED,
+              "sync selftest: reject unisolated named mapping");
         check(CloseHandle(executable_file) != FALSE, "sync selftest: close executable file");
     }
     BY_HANDLE_FILE_INFORMATION invalid_information{};
@@ -462,6 +486,17 @@ int run_sync_selftest() {
                   FALSE &&
               GetLastError() == ERROR_INVALID_HANDLE,
           "sync selftest: reject invalid file-information handle");
+    check(CreateFileMappingW(reinterpret_cast<HANDLE>(0xdead), nullptr, PAGE_READONLY, 0, 0,
+                             nullptr) == nullptr &&
+              GetLastError() == ERROR_INVALID_HANDLE,
+          "sync selftest: reject invalid file-mapping handle");
+    check(MapViewOfFile(reinterpret_cast<HANDLE>(0xdead), FILE_MAP_READ, 0, 0, 64) == nullptr &&
+              GetLastError() == ERROR_INVALID_HANDLE,
+          "sync selftest: reject invalid mapping token");
+    check(CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READONLY, 0, 257U * 1024U * 1024U,
+                             nullptr) == nullptr &&
+              GetLastError() == ERROR_NOT_ENOUGH_MEMORY,
+          "sync selftest: cap page-file mapping size");
 
     const HANDLE missing =
         OpenSemaphoreW(SEMAPHORE_ALL_ACCESS, FALSE, L"CPUEmu synchronization missing object");

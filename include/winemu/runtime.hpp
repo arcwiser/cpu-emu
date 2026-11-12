@@ -87,6 +87,9 @@ class Runtime {
     std::unordered_map<std::uint64_t, void *> find_handles_;
     std::uint64_t next_file_handle_ = 0x400;
     std::unordered_map<std::uint64_t, void *> file_handles_;
+    std::uint64_t next_mapping_handle_ = 0x500;
+    std::unordered_map<std::uint64_t, void *> mapping_handles_;
+    std::unordered_map<std::uint64_t, std::uint64_t> mapped_views_;
     std::uint64_t next_sync_handle_ = 0x600;
     std::unordered_map<std::uint64_t, void *> sync_handles_;
     std::wstring synchronization_namespace_;
