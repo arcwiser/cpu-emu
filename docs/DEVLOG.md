@@ -4,6 +4,19 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-13 — Classic Notepad displays loaded file text
+
+- Added dedicated `EM_SETHANDLE`/`EM_GETHANDLE` marshaling at commit `837f6a5`. Guest
+  `LocalAlloc` addresses are copied into native Edit text rather than forwarded as host `HLOCAL`
+  values; later native edits copy back to guest-owned storage. Invalid handles fail closed, and
+  retained ownership is removed on `WM_NCDESTROY`.
+- Added a multiline Edit regression covering guest-to-native text, native-to-guest copy-back,
+  invalid guest handles, and window teardown.
+- Re-probed classic Notepad with `CMakeLists.txt`. Its CPUEmu-owned Edit control returned length
+  5,010 through `WM_GETTEXT`, and the complete text began with
+  `cmake_minimum_required(VERSION 3.24)`. Saving, persistence, and sustained editing remain
+  unverified.
+
 ## 2026-11-13 — Classic Notepad completes the read-only file-open pipeline
 
 - Added field-by-field `GetFileInformationByHandle` marshaling for CPUEmu's opaque file tokens at
