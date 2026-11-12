@@ -24,6 +24,7 @@ enum class RuntimeApi {
     GuestCreateFile,
     GuestReadFile,
     GuestFilePosition,
+    GuestFileInformation,
     GuestCloseHandle,
     WriteFile,
     GetLastError,

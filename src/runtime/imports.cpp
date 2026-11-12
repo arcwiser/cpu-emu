@@ -121,6 +121,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
     } else if (kernel_module &&
                (name == "SetFilePointer" || name == "GetFileSize" || name == "SetEndOfFile")) {
         api = Api::GuestFilePosition;
+    } else if (kernel_module && name == "GetFileInformationByHandle") {
+        api = Api::GuestFileInformation;
     } else if (kernel_module && name == "WriteFile") {
         api = Api::WriteFile;
     } else if (kernel_module && name == "CloseHandle") {

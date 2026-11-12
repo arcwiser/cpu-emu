@@ -440,6 +440,29 @@ int run_sync_selftest() {
     check(GetOpenFileNameW(&invalid_dialog) == FALSE && CommDlgExtendedError() == CDERR_STRUCTSIZE,
           "sync selftest: reject invalid file-dialog structure");
 
+    wchar_t executable[MAX_PATH]{};
+    const DWORD executable_length = GetModuleFileNameW(nullptr, executable, MAX_PATH);
+    check(executable_length != 0 && executable_length < MAX_PATH, "sync selftest: executable path");
+    const HANDLE executable_file =
+        executable_length == 0 || executable_length >= MAX_PATH
+            ? INVALID_HANDLE_VALUE
+            : CreateFileW(executable, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    check(executable_file != INVALID_HANDLE_VALUE, "sync selftest: open executable file");
+    if (executable_file != INVALID_HANDLE_VALUE) {
+        BY_HANDLE_FILE_INFORMATION information{};
+        check(GetFileInformationByHandle(executable_file, &information) != FALSE &&
+                  (information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 &&
+                  (information.nFileSizeHigh != 0 || information.nFileSizeLow != 0),
+              "sync selftest: file information output");
+        check(CloseHandle(executable_file) != FALSE, "sync selftest: close executable file");
+    }
+    BY_HANDLE_FILE_INFORMATION invalid_information{};
+    check(GetFileInformationByHandle(reinterpret_cast<HANDLE>(0xdead), &invalid_information) ==
+                  FALSE &&
+              GetLastError() == ERROR_INVALID_HANDLE,
+          "sync selftest: reject invalid file-information handle");
+
     const HANDLE missing =
         OpenSemaphoreW(SEMAPHORE_ALL_ACCESS, FALSE, L"CPUEmu synchronization missing object");
     check(missing == nullptr && GetLastError() == ERROR_FILE_NOT_FOUND,

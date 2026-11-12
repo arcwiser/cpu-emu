@@ -397,6 +397,40 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(4);
         break;
     }
+    case Api::GuestFileInformation: {
+        const auto found = file_handles_.find(argument(0));
+        const auto destination = argument(1);
+        if (found == file_handles_.end() || destination == 0) {
+            last_error_ =
+                found == file_handles_.end() ? ERROR_INVALID_HANDLE : ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, 0);
+            finish_call(2);
+            break;
+        }
+        BY_HANDLE_FILE_INFORMATION information{};
+        const auto result =
+            ::GetFileInformationByHandle(static_cast<HANDLE>(found->second), &information);
+        if (result == FALSE) {
+            last_error_ = ::GetLastError();
+        } else {
+            cpu.memory().write32(destination, information.dwFileAttributes);
+            cpu.memory().write32(destination + 4, information.ftCreationTime.dwLowDateTime);
+            cpu.memory().write32(destination + 8, information.ftCreationTime.dwHighDateTime);
+            cpu.memory().write32(destination + 12, information.ftLastAccessTime.dwLowDateTime);
+            cpu.memory().write32(destination + 16, information.ftLastAccessTime.dwHighDateTime);
+            cpu.memory().write32(destination + 20, information.ftLastWriteTime.dwLowDateTime);
+            cpu.memory().write32(destination + 24, information.ftLastWriteTime.dwHighDateTime);
+            cpu.memory().write32(destination + 28, information.dwVolumeSerialNumber);
+            cpu.memory().write32(destination + 32, information.nFileSizeHigh);
+            cpu.memory().write32(destination + 36, information.nFileSizeLow);
+            cpu.memory().write32(destination + 40, information.nNumberOfLinks);
+            cpu.memory().write32(destination + 44, information.nFileIndexHigh);
+            cpu.memory().write32(destination + 48, information.nFileIndexLow);
+        }
+        cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+        finish_call(2);
+        break;
+    }
     case Api::GuestCloseHandle: {
         const auto found = file_handles_.find(argument(0));
         bool result = argument(0) >= 0x100 && argument(0) <= 0x102;
