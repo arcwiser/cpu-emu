@@ -28,7 +28,7 @@ Statuses describe the furthest verified milestone, not a promise that every feat
 | :---: | --- | :---: | --- | --- |
 | 🟢 **Supported** | CPUEmu fixtures | x86 / x64 | Load, execute, print, and exit with checked results | Test scope only |
 | 🟢 **Smoke test** | CPUEmu Paint | x64 | Creates a window and passes headless drawing self-test | Deliberately small fixture |
-| 🟡 **Starts** | Classic Windows Notepad | x64 | Real editor window, basic typing, menus, and a marshaled Open picker | File selection/loading, persistence, and sustained use remain unverified |
+| 🟡 **Starts** | Classic Windows Notepad | x64 | Editor window, typing, menus, Open selection, and guest-owned MIME detection | `GetFileInformationByHandle` still sees an opaque guest token, so file contents do not load |
 | 🔴 **Blocked** | Modern packaged Notepad | x64 | Activates a guest-owned WinRT application instance | XAML resource lookup and guest exception unwinding |
 | 🟠 **Graphics bring-up** | **Undertale** | x86 | Parses game data, creates `YYGameMakerYY`, initializes safe input, reaches `Direct3DCreate9Ex` | Direct3D 9Ex device and presentation proxy |
 | 🔴 **Blocked early** | Discord / Chromium | x64 | More than 2.6M V8 startup instructions | Guest processes, threads, DLLs, exceptions, SIMD |

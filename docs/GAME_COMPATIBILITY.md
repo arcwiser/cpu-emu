@@ -31,7 +31,7 @@ reproducible blocker.
 | `sum.exe` fixture | Supported | Integer loop, arithmetic, flags, branches, and process return | Test fixture only |
 | `hello.exe` fixture | Supported | Imports resolve and console output passes through `GetStdHandle`/`WriteFile` | Test fixture only |
 | CPUEmu Paint fixture | 🟢 Supported smoke test | Interactive GDI path starts; `--selftest` draws and reports success | Intended as a compatibility probe, not a full paint program |
-| Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing updates the real Edit control and dirty title; menus populate; Open displays a real marshaled file picker and cancellation returns to the editor | File selection/loading, saving, persistence, and sustained use are unverified; guest dialog hooks/templates are not invoked |
+| Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; Open returns the selected path; `CreateFileW` succeeds and MIME detection returns guest-owned output | `GetFileInformationByHandle` still receives CPUEmu's opaque file token, reports `ERROR_INVALID_HANDLE`, and prevents contents from loading; saving and persistence remain unverified |
 | Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
 | Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates the `YYGameMakerYY` native window, initializes a safe DirectInput proxy, enumerates display modes, and reaches `Direct3DCreate9Ex` after about 15.1M instructions | The HWND is created but not visibly shown/rendering yet; Direct3D 9, active input, streaming audio, and full Steamworks interfaces remain |
@@ -70,7 +70,7 @@ When adding an entry, record the exact application version, Windows version, com
 successful milestone, and first reproducible failure. A compatibility probe should produce a
 regression test before its workaround is considered supported behavior.
 
-The classic Notepad result was re-probed at commit `47a1640` with:
+The basic input/menu result was re-probed at commit `47a1640` with:
 
 ```powershell
 build\cpuemu.exe C:\Windows\System32\notepad.exe --limit 100000000
@@ -80,3 +80,17 @@ The CPUEmu-owned window accepted `CPUEmu input test`, changed its title to `*Unt
 opened a populated File menu, and displayed/cancelled a real Open picker. This is evidence for
 basic input, menu routing, and synchronous dialog marshaling only; it does not establish correct
 file loading, saving, or full editor compatibility.
+
+File selection and command-line loading were re-probed at commit `e3c3f39` on Windows build
+`10.0.26200.0` with classic Notepad file version `10.0.26100.8457`:
+
+```powershell
+build\cpuemu.exe C:\Windows\System32\notepad.exe --limit 20000000 -vv -- `
+  (Resolve-Path .\CMakeLists.txt).Path
+```
+
+The selected path reached `CreateFileW`, and `FindMimeFromData` returned a guest-owned MIME string
+without the former unmapped host-pointer fault. The next reproducible blocker is
+`GetFileInformationByHandle`: its native fallback receives guest token `0x400`, returns false with
+`ERROR_INVALID_HANDLE`, and Notepad reports “The handle is invalid.” The editor stays in its
+message loop, but this is not evidence that file contents loaded.

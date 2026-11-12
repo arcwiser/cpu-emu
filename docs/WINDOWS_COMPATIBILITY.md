@@ -26,6 +26,7 @@ explicit adapter.
 | Window classes | `RegisterClassExW`, `CreateWindowExW` under the guest's resource module | Class menu names resolve against the guest image, so class menus load; child controls are real host windows |
 | Subclassing | `SetWindowSubclass`, `GetWindowSubclass`, `RemoveWindowSubclass`, `DefSubclassProc`, and comctl32 v6 ordinals 410–413 | Common Controls retains only a host bridge and opaque token; six-argument guest procedures re-enter the interpreter, use the normal message-pointer marshaler, and can continue the native chain |
 | File dialogs | `GetOpenFileNameA/W`, `GetSaveFileNameA/W`, `CommDlgExtendedError` | Synchronous strings, filters, buffers, selection offsets, and errors are marshaled; guest hook/template pointers are deliberately omitted rather than executed natively |
+| MIME detection | `FindMimeFromData` | URL, proposed type, and bounded sniffing bytes are copied to host storage; the host result is copied into guest-owned memory and native allocation is released before returning |
 | Guest fail-fast | `abort`, `_invoke_watson`, `_invalid_parameter_noinfo`, `_invalid_parameter_noinfo_noreturn`, `_wassert`, `_assert` | Noreturn paths terminate only the guest with the Windows fast-fail status; never forwarded natively |
 | Console output | `GetStdHandle`, `WriteFile` | Focused on standard output/error handles |
 | Errors and diagnostics | `GetLastError`, `SetLastError`, `OutputDebugStringA` | Per-runtime error state |
@@ -41,8 +42,9 @@ explicit adapter.
 ## Marshalled Windows adapters
 
 CPUEmu currently has explicit adapters for `CommandLineToArgvW`, `GetSecurityInfo`, read-only
-`MapViewOfFile`, `SHGetKnownFolderPath`, resource loading, cursor/icon/image loading, accelerator
-loading, window-class registration, window creation, and selected WinRT protection-policy calls.
+`MapViewOfFile`, `FindMimeFromData`, `SHGetKnownFolderPath`, resource loading, cursor/icon/image
+loading, accelerator loading, window-class registration, window creation, and selected WinRT
+protection-policy calls.
 The window bridge re-enters interpreted code through `Runtime::invoke_guest`; it never casts a
 guest window procedure to a native function pointer.
 

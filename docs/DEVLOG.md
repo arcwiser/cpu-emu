@@ -4,6 +4,20 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-13 — MIME results stay in guest memory
+
+- Added a dedicated `FindMimeFromData` adapter. Guest URL, proposed-type, and bounded sniffing
+  buffers are copied into host-owned storage; URLMON's result is copied into CPUEmu's guest heap,
+  and the host allocation is released before control returns to interpreted code. Non-null guest
+  binding contexts are refused because CPUEmu cannot safely expose them to URLMON.
+- Added `mimetype.exe`, a generated machine-code regression covering successful MIME detection,
+  readable guest output, native classification failure with a null output, and rejection of a
+  null output parameter.
+- At commit `e3c3f39`, Classic Notepad file selection advances past the previous host-pointer
+  fault. It opens the selected path and completes MIME detection. File contents still do not load:
+  `GetFileInformationByHandle` receives opaque guest token `0x400`, returns
+  `ERROR_INVALID_HANDLE`, and Notepad displays that error before returning to its message loop.
+
 ## 2026-11-10 — Classic Notepad reaches window and menu rendering
 
 - Adapted the comctl32 v6 subclass family. `SetWindowSubclass` is exported as ordinal 410,
