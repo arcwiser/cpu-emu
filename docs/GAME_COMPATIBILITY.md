@@ -31,7 +31,7 @@ reproducible blocker.
 | `sum.exe` fixture | Supported | Integer loop, arithmetic, flags, branches, and process return | Test fixture only |
 | `hello.exe` fixture | Supported | Imports resolve and console output passes through `GetStdHandle`/`WriteFile` | Test fixture only |
 | CPUEmu Paint fixture | 🟢 Supported smoke test | Interactive GDI path starts; `--selftest` draws and reports success | Intended as a compatibility probe, not a full paint program |
-| Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; file open places all 5,010 characters of `CMakeLists.txt` in the real Edit control; Save persists replacement text; Save As creates a new file; UTF-8 Unicode text saves and reopens exactly | Edited-content Save As, UTF-16/legacy encodings, long editing sessions, and broader editor behavior remain unverified |
+| Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; file open, Save, and Save As work for tested paths; UTF-8 Unicode text and a 52,138-character document save and reopen exactly | Edited-content Save As, UTF-16/legacy encodings, long interactive sessions, and broader editor behavior remain unverified |
 | Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
 | Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates the `YYGameMakerYY` native window, initializes a safe DirectInput proxy, enumerates display modes, and reaches `Direct3DCreate9Ex` after about 15.1M instructions | The HWND is created but not visibly shown/rendering yet; Direct3D 9, active input, streaming audio, and full Steamworks interfaces remain |
@@ -124,3 +124,8 @@ emoji (`café Ω 漢字 😀`). Notepad saved a modified 61-character document a
 without a BOM, and reopening it returned all 61 Unicode characters exactly. The probe file was
 deleted afterward. UTF-16, legacy code pages, and encoding changes through Save As remain
 unverified.
+
+The Edit ownership path was then stressed with 2,048 Unicode lines totaling 52,138 characters.
+Notepad saved all characters to the disposable source and reopened the result exactly. Commit
+`8192754` extends the Paint regression so `EM_GETHANDLE` must replace an undersized guest buffer and
+copy the expanded native text back without exposing a host `HLOCAL`.

@@ -4,6 +4,14 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-14 — Large Notepad Edit buffers grow safely
+
+- Replaced the contents of a disposable Notepad document with 2,048 Unicode lines totaling 52,138
+  characters. Save and reopen returned every character exactly.
+- At commit `8192754`, the hidden multiline Edit regression now expands beyond its original guest
+  allocation. `EM_GETHANDLE` must return a new larger guest-owned buffer containing the complete
+  native text, covering the reallocation path used by larger documents.
+
 ## 2026-11-14 — Classic Notepad UTF-8 round-trip
 
 - Loaded a disposable UTF-8 file without a BOM containing accented Latin, Greek, CJK, and emoji
