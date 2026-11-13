@@ -4,6 +4,16 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-14 — Classic Notepad UTF-8 round-trip
+
+- Loaded a disposable UTF-8 file without a BOM containing accented Latin, Greek, CJK, and emoji
+  text. The CPUEmu-owned Edit control returned the complete Unicode text.
+- Replaced and saved the content through Notepad, producing 72 bytes of UTF-8 without a BOM for a
+  61-character document. Reopening returned all 61 characters exactly. The probe and trace files
+  were deleted afterward.
+- UTF-16, legacy code pages, encoding changes through Save As, and sustained editing remain
+  unverified.
+
 ## 2026-11-14 — Classic Notepad Save As reaches a new file
 
 - Exercised File → Save As through CPUEmu's real marshalled common dialog using disposable source

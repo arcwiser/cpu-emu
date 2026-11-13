@@ -31,7 +31,7 @@ reproducible blocker.
 | `sum.exe` fixture | Supported | Integer loop, arithmetic, flags, branches, and process return | Test fixture only |
 | `hello.exe` fixture | Supported | Imports resolve and console output passes through `GetStdHandle`/`WriteFile` | Test fixture only |
 | CPUEmu Paint fixture | 🟢 Supported smoke test | Interactive GDI path starts; `--selftest` draws and reports success | Intended as a compatibility probe, not a full paint program |
-| Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; file open places all 5,010 characters of `CMakeLists.txt` in the real Edit control; Save persists exact replacement text; Save As creates a new file containing the complete loaded text | Edited-content Save As, encoding variants, long editing sessions, and broader editor behavior remain unverified |
+| Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; file open places all 5,010 characters of `CMakeLists.txt` in the real Edit control; Save persists replacement text; Save As creates a new file; UTF-8 Unicode text saves and reopens exactly | Edited-content Save As, UTF-16/legacy encodings, long editing sessions, and broader editor behavior remain unverified |
 | Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
 | Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates the `YYGameMakerYY` native window, initializes a safe DirectInput proxy, enumerates display modes, and reaches `Direct3DCreate9Ex` after about 15.1M instructions | The HWND is created but not visibly shown/rendering yet; Direct3D 9, active input, streaming audio, and full Steamworks interfaces remain |
@@ -118,3 +118,9 @@ field and shell confirmation were completed for a disposable target, and the new
 all 5,010 characters of the loaded `CMakeLists.txt`. Both temporary files were deleted after the
 probe. This establishes Save As for unchanged loaded content; edited-content Save As, alternate
 encodings, and sustained editing remain unverified.
+
+A second 2026-11-14 probe loaded UTF-8 without a BOM containing accented Latin, Greek, CJK, and an
+emoji (`café Ω 漢字 😀`). Notepad saved a modified 61-character document as 72 bytes of UTF-8
+without a BOM, and reopening it returned all 61 Unicode characters exactly. The probe file was
+deleted afterward. UTF-16, legacy code pages, and encoding changes through Save As remain
+unverified.
