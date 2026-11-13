@@ -67,6 +67,12 @@ bool message_selftest = false;
 bool legacy_window_callback_seen = false;
 bool dialog_callback_seen = false;
 bool nested_dialog_callback_seen = false;
+HWND expected_enum_child = nullptr;
+HWND expected_enum_grandchild = nullptr;
+HWND expected_enum_parent = nullptr;
+bool outer_enum_callback_seen = false;
+bool nested_enum_callback_seen = false;
+bool process_enum_callback_seen = false;
 
 void write_stdout(const char *text);
 
@@ -87,6 +93,28 @@ INT_PTR CALLBACK test_dialog_procedure(HWND dialog, UINT message, WPARAM, LPARAM
         DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_CALLBACK_TEST), dialog,
                         test_dialog_procedure, 0x87654321);
     EndDialog(dialog, translated && value == 73 && nested_result == 0x1111 ? 0x2468 : 0x1357);
+    return TRUE;
+}
+
+BOOL CALLBACK test_window_enum_procedure(HWND window, LPARAM parameter) {
+    constexpr LPARAM outer_parameter = 0x10203040;
+    constexpr LPARAM nested_parameter = 0x50607080;
+    constexpr LPARAM process_parameter = 0x11223344;
+    if (parameter == process_parameter) {
+        process_enum_callback_seen = process_enum_callback_seen || window == expected_enum_parent;
+        return TRUE;
+    }
+    if (parameter == nested_parameter) {
+        nested_enum_callback_seen = nested_enum_callback_seen || window == expected_enum_grandchild;
+        return TRUE;
+    }
+    if (parameter != outer_parameter) {
+        return FALSE;
+    }
+    if (window == expected_enum_child) {
+        outer_enum_callback_seen = true;
+        return EnumChildWindows(window, test_window_enum_procedure, nested_parameter);
+    }
     return TRUE;
 }
 
@@ -569,6 +597,31 @@ int run_sync_selftest() {
                           test_dialog_procedure, 0) == -1 &&
               GetLastError() != ERROR_SUCCESS,
           "sync selftest: reject missing dialog resource");
+
+    expected_enum_parent = CreateWindowExW(0, L"STATIC", L"enumeration parent", WS_POPUP, 0, 0, 100,
+                                           100, nullptr, nullptr, nullptr, nullptr);
+    expected_enum_child = CreateWindowExW(0, L"STATIC", L"enumeration child", WS_CHILD, 0, 0, 50,
+                                          50, expected_enum_parent, nullptr, nullptr, nullptr);
+    expected_enum_grandchild =
+        CreateWindowExW(0, L"STATIC", L"enumeration grandchild", WS_CHILD, 0, 0, 25, 25,
+                        expected_enum_child, nullptr, nullptr, nullptr);
+    check(expected_enum_parent != nullptr && expected_enum_child != nullptr &&
+              expected_enum_grandchild != nullptr,
+          "sync selftest: create window enumeration tree");
+    check(EnumChildWindows(expected_enum_parent, test_window_enum_procedure, 0x10203040) != FALSE &&
+              outer_enum_callback_seen && nested_enum_callback_seen,
+          "sync selftest: nested child-window enumeration callbacks");
+    check(EnumWindows(test_window_enum_procedure, 0x11223344) != FALSE &&
+              process_enum_callback_seen,
+          "sync selftest: process-owned top-level window enumeration");
+    SetLastError(ERROR_SUCCESS);
+    check(EnumChildWindows(expected_enum_parent, reinterpret_cast<WNDENUMPROC>(0xdead), 0) ==
+                  FALSE &&
+              GetLastError() == ERROR_INVALID_PARAMETER,
+          "sync selftest: reject invalid window enumeration callback");
+    if (expected_enum_parent != nullptr) {
+        DestroyWindow(expected_enum_parent);
+    }
 
     const HWND edit = CreateWindowExW(0, L"EDIT", L"", WS_POPUP | ES_MULTILINE, 0, 0, 200, 100,
                                       nullptr, nullptr, nullptr, nullptr);

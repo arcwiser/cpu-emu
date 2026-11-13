@@ -153,6 +153,7 @@ enum class RuntimeApi {
     CreateWindowExW,
     DialogBoxParamW,
     EndDialog,
+    GuestEnumWindows,
     DirectInputCreate,
     DirectInputMethod,
     ResolveDelayLoadedAPI,

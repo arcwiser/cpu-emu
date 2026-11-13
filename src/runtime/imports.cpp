@@ -560,10 +560,12 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
     } else if (name == "__std_atomic_notify_one_direct" ||
                name == "__std_atomic_notify_all_direct") {
         api = Api::ReturnZero;
-    } else if (name == "EnumWindows" || name == "EnumThreadWindows" || name == "EnumChildWindows") {
-        // The callback is guest code and cannot be passed to native USER32. This process owns no
-        // host windows before CreateWindowExW, so a successful empty enumeration is accurate.
-        api = Api::ReturnOne;
+    } else if (name == "EnumWindows" || name == "EnumChildWindows") {
+        api = Api::GuestEnumWindows;
+    } else if (name == "EnumThreadWindows") {
+        // Guest thread IDs do not identify native threads. Fail closed until the cooperative
+        // thread scheduler can enumerate windows by guest ownership.
+        api = Api::ReturnZero;
     } else if (name == "_beginthreadex" || name == "_o__beginthreadex") {
         api = Api::GuestThreadCreate;
     } else if (name == "_beginthread" || name == "_o__beginthread") {

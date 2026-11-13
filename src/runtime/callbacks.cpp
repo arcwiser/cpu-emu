@@ -237,6 +237,25 @@ INT_PTR CALLBACK dialog_proc_bridge(HWND window, UINT message, WPARAM word_param
     return result;
 }
 
+BOOL CALLBACK window_enum_bridge(HWND window, LPARAM parameter) {
+    static_cast<void>(parameter);
+    if (active_runtime == nullptr || active_cpu == nullptr || active_exit_code == nullptr ||
+        active_exited == nullptr) {
+        return FALSE;
+    }
+    try {
+        return active_runtime->invoke_window_enum(*active_cpu,
+                                                  reinterpret_cast<std::uint64_t>(window),
+                                                  *active_exit_code, *active_exited)
+                   ? TRUE
+                   : FALSE;
+    } catch (...) {
+        callback_exception = std::current_exception();
+        log::error("window", "guest window-enumeration procedure faulted");
+        return FALSE;
+    }
+}
+
 LRESULT CALLBACK window_subclass_bridge(HWND window, UINT message, WPARAM word_parameter,
                                         LPARAM long_parameter, UINT_PTR token,
                                         DWORD_PTR reference_data) {
@@ -378,6 +397,24 @@ std::intptr_t Runtime::invoke_dialog_proc(Cpu &cpu, std::uint64_t window, std::u
         dialog_procedures_.erase(window);
     }
     return result;
+}
+
+bool Runtime::invoke_window_enum(Cpu &cpu, std::uint64_t window, std::uint32_t &exit_code,
+                                 bool &exited) {
+    if (pending_window_enumerations_.empty()) {
+        return false;
+    }
+    const auto record = pending_window_enumerations_.back();
+    if (record.current_process_only) {
+        DWORD process_id = 0;
+        GetWindowThreadProcessId(reinterpret_cast<HWND>(window), &process_id);
+        if (process_id != GetCurrentProcessId()) {
+            return true;
+        }
+    }
+    const std::array<std::uint64_t, 2> arguments{window, record.parameter};
+    return invoke_guest(cpu, record.procedure, std::span<const std::uint64_t>(arguments), exit_code,
+                        exited) != 0;
 }
 
 std::intptr_t Runtime::invoke_window_callback(Cpu &cpu, std::uint64_t target, std::uint64_t window,

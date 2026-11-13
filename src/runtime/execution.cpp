@@ -132,6 +132,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     window_procedures_.clear();
     dialog_procedures_.clear();
     pending_dialogs_.clear();
+    pending_window_enumerations_.clear();
     for (const auto &[token, record] : window_subclasses_) {
         ::RemoveWindowSubclass(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(record.window)),
                                detail::window_subclass_bridge, token);

@@ -25,6 +25,7 @@ LRESULT CALLBACK window_proc_bridge(HWND window, UINT message, WPARAM word_param
                                     LPARAM long_parameter);
 INT_PTR CALLBACK dialog_proc_bridge(HWND window, UINT message, WPARAM word_parameter,
                                     LPARAM long_parameter);
+BOOL CALLBACK window_enum_bridge(HWND window, LPARAM parameter);
 LRESULT CALLBACK window_subclass_bridge(HWND window, UINT message, WPARAM word_parameter,
                                         LPARAM long_parameter, UINT_PTR token,
                                         DWORD_PTR reference_data);

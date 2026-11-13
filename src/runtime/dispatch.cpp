@@ -3634,6 +3634,39 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(2);
         break;
     }
+    case Api::GuestEnumWindows: {
+        const bool children = thunk_name.ends_with("!EnumChildWindows");
+        const auto guest_procedure = argument(children ? 1 : 0);
+        std::uint8_t procedure_permissions = 0;
+        if (guest_procedure == 0 ||
+            !cpu.memory().permissions(guest_procedure, procedure_permissions) ||
+            (procedure_permissions & Execute) == 0) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, FALSE);
+            finish_call(children ? 3 : 2);
+            break;
+        }
+        const auto parameter = argument(children ? 2 : 1);
+        pending_window_enumerations_.push_back(
+            PendingWindowEnumeration{guest_procedure, parameter, !children});
+        BOOL result = FALSE;
+        try {
+            result = children ? ::EnumChildWindows(reinterpret_cast<HWND>(
+                                                       static_cast<std::uintptr_t>(argument(0))),
+                                                   detail::window_enum_bridge, 0)
+                              : ::EnumWindows(detail::window_enum_bridge, 0);
+        } catch (...) {
+            pending_window_enumerations_.pop_back();
+            throw;
+        }
+        pending_window_enumerations_.pop_back();
+        if (auto exception = detail::take_callback_exception(); exception != nullptr) {
+            std::rethrow_exception(exception);
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(children ? 3 : 2);
+        break;
+    }
     case Api::DirectInputCreate: {
         const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
         const auto write_pointer = [&](std::uint64_t address, std::uint64_t value) {
