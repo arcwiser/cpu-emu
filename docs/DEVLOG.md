@@ -4,6 +4,17 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-14 — Guest modal dialog callbacks
+
+- Added dedicated `DialogBoxParamW` and `EndDialog` adapters. Windows receives a host bridge, while
+  guest procedures and initialization parameters remain in CPUEmu and re-enter the interpreter.
+  A stack preserves the correct procedure and initialization value across nested modal dialogs.
+- Extended the Paint fixture with a real dialog resource. Its synchronization test covers nested
+  callbacks, initialized controls, result propagation, a null callback, and a missing resource.
+- Probed x64 WinAPI Minesweeper revision `dda5200` at commit `50a606f`. Game → Custom displayed and
+  initialized the real preferences dialog; Cancel returned to the board, and the guest later
+  exited cleanly with code 0. Full gameplay, audio, persistence, and x86 remain unverified.
+
 ## 2026-11-14 — Large Notepad Edit buffers grow safely
 
 - Replaced the contents of a disposable Notepad document with 2,048 Unicode lines totaling 52,138

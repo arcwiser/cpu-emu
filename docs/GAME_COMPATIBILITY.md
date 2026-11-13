@@ -31,6 +31,7 @@ reproducible blocker.
 | `sum.exe` fixture | Supported | Integer loop, arithmetic, flags, branches, and process return | Test fixture only |
 | `hello.exe` fixture | Supported | Imports resolve and console output passes through `GetStdHandle`/`WriteFile` | Test fixture only |
 | CPUEmu Paint fixture | 🟢 Supported smoke test | Interactive GDI path starts; `--selftest` draws and reports success | Intended as a compatibility probe, not a full paint program |
+| WinAPI Minesweeper (`wesmar/minesweeper` `dda5200`) | 🟡 Starts | x64 build renders a live board; Game → Custom opens its resource-backed modal dialog, initializes all three fields through the guest dialog procedure, and Cancel returns to the board | Gameplay input, win/loss flow, sound, preferences persistence, and the x86 build remain unverified |
 | Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; file open, Save, and Save As work for tested paths; UTF-8 Unicode text and a 52,138-character document save and reopen exactly | Edited-content Save As, UTF-16/legacy encodings, long interactive sessions, and broader editor behavior remain unverified |
 | Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
@@ -129,3 +130,17 @@ The Edit ownership path was then stressed with 2,048 Unicode lines totaling 52,1
 Notepad saved all characters to the disposable source and reopened the result exactly. Commit
 `8192754` extends the Paint regression so `EM_GETHANDLE` must replace an undersized guest buffer and
 copy the expanded native text back without exposing a host `HLOCAL`.
+
+WinAPI Minesweeper source revision `dda5200ca256b011a05b1fbe82aa2519ad7ad4b7` was built as x64
+Release and probed on Windows `10.0.26200.0` at CPUEmu commit `50a606f` with:
+
+```powershell
+build\cpuemu.exe `
+  $env:TEMP\cpuemu-minesweeper-probe-19472\src\x64\Release\WinMine.exe `
+  --limit 100000000
+```
+
+The main board rendered, Game → Custom opened the genuine `ID_DLG_PREF` resource, and its guest
+dialog procedure populated Height 9, Width 9, and Mines 10. Cancel returned to the live board;
+Alt+F4 then exited guest code 0 after 127,713 instructions. This verifies modal resource loading,
+nested interpreter callback entry, and dialog closure only—not full gameplay or sound.
