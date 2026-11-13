@@ -4,6 +4,15 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-14 — Classic Notepad Save As reaches a new file
+
+- Exercised File → Save As through CPUEmu's real marshalled common dialog using disposable source
+  and target paths. The shell filename field and confirmation completed, and the target contained
+  the full 5,010-character loaded `CMakeLists.txt`.
+- Removed the source, target, and one intermediate copy after verification. This probe establishes
+  Save As for unchanged loaded content only; edited-content Save As, alternate encodings, and
+  sustained editing remain unverified.
+
 ## 2026-11-13 — Classic Notepad displays loaded file text
 
 - Added dedicated `EM_SETHANDLE`/`EM_GETHANDLE` marshaling at commit `837f6a5`. Guest
