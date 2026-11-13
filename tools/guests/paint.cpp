@@ -526,14 +526,17 @@ int run_sync_selftest() {
                               0 &&
                           lstrcmpW(edit_text, initial_text) == 0,
                       "sync selftest: edit handle copies text to native control");
-                check(SetWindowTextW(edit, L"native edit update") != FALSE,
+                constexpr wchar_t updated_text[] =
+                    L"native edit update that exceeds the original guest-owned buffer and "
+                    L"requires a larger copy-back allocation";
+                check(SetWindowTextW(edit, updated_text) != FALSE,
                       "sync selftest: update native edit text");
                 const auto returned =
                     reinterpret_cast<HLOCAL>(SendMessageW(edit, EM_GETHANDLE, 0, 0));
                 const auto *const returned_text = static_cast<const wchar_t *>(LocalLock(returned));
-                check(returned != nullptr && returned_text != nullptr &&
-                          lstrcmpW(returned_text, L"native edit update") == 0,
-                      "sync selftest: get edit handle copies text to guest memory");
+                check(returned != nullptr && returned != edit_memory && returned_text != nullptr &&
+                          lstrcmpW(returned_text, updated_text) == 0,
+                      "sync selftest: get edit handle grows guest memory and copies text");
                 if (returned_text != nullptr) {
                     LocalUnlock(returned);
                 }
