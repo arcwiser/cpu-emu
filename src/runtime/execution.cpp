@@ -130,6 +130,8 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     class_window_procedures_.clear();
     atom_window_procedures_.clear();
     window_procedures_.clear();
+    dialog_procedures_.clear();
+    pending_dialogs_.clear();
     for (const auto &[token, record] : window_subclasses_) {
         ::RemoveWindowSubclass(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(record.window)),
                                detail::window_subclass_bridge, token);

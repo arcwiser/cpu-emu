@@ -23,6 +23,8 @@ void clear_callback_context();
 [[nodiscard]] std::string window_message_name(std::uint32_t message);
 LRESULT CALLBACK window_proc_bridge(HWND window, UINT message, WPARAM word_parameter,
                                     LPARAM long_parameter);
+INT_PTR CALLBACK dialog_proc_bridge(HWND window, UINT message, WPARAM word_parameter,
+                                    LPARAM long_parameter);
 LRESULT CALLBACK window_subclass_bridge(HWND window, UINT message, WPARAM word_parameter,
                                         LPARAM long_parameter, UINT_PTR token,
                                         DWORD_PTR reference_data);

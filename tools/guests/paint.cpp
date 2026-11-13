@@ -20,6 +20,8 @@
 #include <cwchar>
 #include <iterator>
 
+#include "paint_resource.h"
+
 namespace {
 
 constexpr int window_width = 800;
@@ -63,8 +65,30 @@ HBRUSH brushes[palette_size] = {};
 HBRUSH background_brush = nullptr;
 bool message_selftest = false;
 bool legacy_window_callback_seen = false;
+bool dialog_callback_seen = false;
+bool nested_dialog_callback_seen = false;
 
 void write_stdout(const char *text);
+
+INT_PTR CALLBACK test_dialog_procedure(HWND dialog, UINT message, WPARAM, LPARAM parameter) {
+    if (message != WM_INITDIALOG) {
+        return FALSE;
+    }
+    if (parameter == 0x87654321) {
+        nested_dialog_callback_seen = true;
+        EndDialog(dialog, 0x1111);
+        return TRUE;
+    }
+    dialog_callback_seen = parameter == 0x12345678;
+    SetDlgItemInt(dialog, IDC_CALLBACK_VALUE, 73, FALSE);
+    BOOL translated = FALSE;
+    const auto value = GetDlgItemInt(dialog, IDC_CALLBACK_VALUE, &translated, FALSE);
+    const auto nested_result =
+        DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_CALLBACK_TEST), dialog,
+                        test_dialog_procedure, 0x87654321);
+    EndDialog(dialog, translated && value == 73 && nested_result == 0x1111 ? 0x2468 : 0x1357);
+    return TRUE;
+}
 
 constexpr UINT_PTR subclass_id = 0x123456789abcdef0ULL;
 constexpr DWORD_PTR subclass_reference = 0x0fedcba987654321ULL;
@@ -529,6 +553,22 @@ int run_sync_selftest() {
     }
     check(RegisterClassW(nullptr) == 0 && GetLastError() == ERROR_INVALID_PARAMETER,
           "sync selftest: reject null legacy window class");
+
+    const auto dialog_result =
+        DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_CALLBACK_TEST), nullptr,
+                        test_dialog_procedure, 0x12345678);
+    check(dialog_result == 0x2468 && dialog_callback_seen && nested_dialog_callback_seen,
+          "sync selftest: nested modal dialog callbacks and result");
+    SetLastError(ERROR_SUCCESS);
+    check(DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_CALLBACK_TEST), nullptr,
+                          nullptr, 0) == -1 &&
+              GetLastError() == ERROR_INVALID_PARAMETER,
+          "sync selftest: reject null dialog callback");
+    SetLastError(ERROR_SUCCESS);
+    check(DialogBoxParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(0x7fff), nullptr,
+                          test_dialog_procedure, 0) == -1 &&
+              GetLastError() != ERROR_SUCCESS,
+          "sync selftest: reject missing dialog resource");
 
     const HWND edit = CreateWindowExW(0, L"EDIT", L"", WS_POPUP | ES_MULTILINE, 0, 0, 200, 100,
                                       nullptr, nullptr, nullptr, nullptr);

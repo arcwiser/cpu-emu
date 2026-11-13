@@ -151,6 +151,8 @@ enum class RuntimeApi {
     LoadAcceleratorsW,
     GuestRegisterClassW,
     CreateWindowExW,
+    DialogBoxParamW,
+    EndDialog,
     DirectInputCreate,
     DirectInputMethod,
     ResolveDelayLoadedAPI,

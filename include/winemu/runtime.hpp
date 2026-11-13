@@ -11,6 +11,7 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace winemu {
 
@@ -33,6 +34,9 @@ class Runtime {
                                          std::uint32_t message, std::uint64_t word_parameter,
                                          std::int64_t long_parameter, std::uint32_t &exit_code,
                                          bool &exited);
+    std::intptr_t invoke_dialog_proc(Cpu &cpu, std::uint64_t window, std::uint32_t message,
+                                     std::uint64_t word_parameter, std::int64_t long_parameter,
+                                     std::uint32_t &exit_code, bool &exited);
 
   private:
     using Api = detail::RuntimeApi;
@@ -104,6 +108,12 @@ class Runtime {
     std::unordered_map<std::uint16_t, std::uint64_t> atom_window_procedures_;
     std::unordered_map<std::uint64_t, std::uint64_t> window_procedures_;
     std::uint64_t creating_window_procedure_ = 0;
+    struct PendingDialog {
+        std::uint64_t procedure;
+        std::uint64_t init_parameter;
+    };
+    std::vector<PendingDialog> pending_dialogs_;
+    std::unordered_map<std::uint64_t, std::uint64_t> dialog_procedures_;
     bool quit_message_pending_ = false;
     std::uint32_t quit_message_code_ = 0;
     std::unordered_map<std::uint64_t, std::int64_t> callback_long_parameters_;

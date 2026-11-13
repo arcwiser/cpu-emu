@@ -1,0 +1,9 @@
+#include "paint_resource.h"
+
+IDD_CALLBACK_TEST DIALOGEX 0, 0, 120, 48
+STYLE 0x80 | 0x80000000 | 0x00C00000
+CAPTION "CPUEmu callback test"
+FONT 9, "Segoe UI"
+BEGIN
+    EDITTEXT IDC_CALLBACK_VALUE, 8, 8, 104, 14, 0x80
+END

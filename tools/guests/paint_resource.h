@@ -1,0 +1,4 @@
+#pragma once
+
+#define IDD_CALLBACK_TEST 2001
+#define IDC_CALLBACK_VALUE 2002

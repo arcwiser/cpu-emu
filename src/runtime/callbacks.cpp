@@ -217,6 +217,26 @@ LRESULT CALLBACK window_proc_bridge(HWND window, UINT message, WPARAM word_param
     return result;
 }
 
+INT_PTR CALLBACK dialog_proc_bridge(HWND window, UINT message, WPARAM word_parameter,
+                                    LPARAM long_parameter) {
+    if (active_runtime == nullptr || active_cpu == nullptr || active_exit_code == nullptr ||
+        active_exited == nullptr) {
+        return FALSE;
+    }
+    std::intptr_t result = FALSE;
+    try {
+        result = active_runtime->invoke_dialog_proc(
+            *active_cpu, reinterpret_cast<std::uint64_t>(window), message, word_parameter,
+            long_parameter, *active_exit_code, *active_exited);
+    } catch (...) {
+        callback_exception = std::current_exception();
+        log::error("dialog", "guest dialog procedure faulted on " + window_message_name(message));
+        // A modal host dialog cannot be left running after its guest procedure faults.
+        EndDialog(window, -1);
+    }
+    return result;
+}
+
 LRESULT CALLBACK window_subclass_bridge(HWND window, UINT message, WPARAM word_parameter,
                                         LPARAM long_parameter, UINT_PTR token,
                                         DWORD_PTR reference_data) {
@@ -335,6 +355,27 @@ std::intptr_t Runtime::invoke_window_subclass(Cpu &cpu, std::uint64_t token, std
                                                record.reference_data, true, exit_code, exited);
     if (message == WM_NCDESTROY) {
         window_subclasses_.erase(token);
+    }
+    return result;
+}
+
+std::intptr_t Runtime::invoke_dialog_proc(Cpu &cpu, std::uint64_t window, std::uint32_t message,
+                                          std::uint64_t word_parameter, std::int64_t long_parameter,
+                                          std::uint32_t &exit_code, bool &exited) {
+    auto found = dialog_procedures_.find(window);
+    if (found == dialog_procedures_.end() && !pending_dialogs_.empty()) {
+        found = dialog_procedures_.emplace(window, pending_dialogs_.back().procedure).first;
+    }
+    if (found == dialog_procedures_.end()) {
+        return FALSE;
+    }
+    if (message == WM_INITDIALOG && !pending_dialogs_.empty()) {
+        long_parameter = static_cast<std::int64_t>(pending_dialogs_.back().init_parameter);
+    }
+    const auto result = invoke_window_callback(cpu, found->second, window, message, word_parameter,
+                                               long_parameter, 0, 0, false, exit_code, exited);
+    if (message == WM_NCDESTROY) {
+        dialog_procedures_.erase(window);
     }
     return result;
 }

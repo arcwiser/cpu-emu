@@ -435,6 +435,10 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GuestRegisterClassW;
     } else if (name == "CreateWindowExW") {
         api = Api::CreateWindowExW;
+    } else if (name == "DialogBoxParamW") {
+        api = Api::DialogBoxParamW;
+    } else if (name == "EndDialog") {
+        api = Api::EndDialog;
     } else if (name == "DirectInput8Create") {
         api = Api::DirectInputCreate;
     } else if (name == "ResolveDelayLoadedAPI") {
@@ -598,7 +602,6 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
             "__CxxFrameHandler3",
             "__C_specific_handler",
             "RegisterClassExW",
-            "DialogBoxParamW",
             "CreateDialogParamW",
             "CreateDialogIndirectParamW",
             "EnumFontsW",

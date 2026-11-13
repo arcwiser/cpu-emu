@@ -23,7 +23,8 @@ explicit adapter.
 | --- | --- | --- |
 | Process lifecycle | `ExitProcess`, CRT exit functions, `TerminateProcess` | Single guest process |
 | Import binding | `LoadLibraryA`/`GetProcAddress` under the guest's own activation context | Side-by-Side assemblies such as Common-Controls v6 bind as Windows binds them for the guest; contexts are created from the guest image's embedded manifest |
-| Window classes | `RegisterClassExW`, `CreateWindowExW` under the guest's resource module | Class menu names resolve against the guest image, so class menus load; child controls are real host windows |
+| Window classes | `RegisterClassW`, `RegisterClassExW`, `CreateWindowExW` under the guest's resource module | Class menu names resolve against the guest image, so class menus load; child controls are real host windows |
+| Modal dialogs | `DialogBoxParamW`, `EndDialog` | Resource templates resolve from the guest image; Windows retains only a host bridge while guest dialog procedures, initialization values, and nested-dialog state remain in the runtime |
 | Subclassing | `SetWindowSubclass`, `GetWindowSubclass`, `RemoveWindowSubclass`, `DefSubclassProc`, and comctl32 v6 ordinals 410–413 | Common Controls retains only a host bridge and opaque token; six-argument guest procedures re-enter the interpreter, use the normal message-pointer marshaler, and can continue the native chain |
 | File dialogs | `GetOpenFileNameA/W`, `GetSaveFileNameA/W`, `CommDlgExtendedError` | Synchronous strings, filters, buffers, selection offsets, and errors are marshaled; guest hook/template pointers are deliberately omitted rather than executed natively |
 | MIME detection | `FindMimeFromData` | URL, proposed type, and bounded sniffing bytes are copied to host storage; the host result is copied into guest-owned memory and native allocation is released before returning |
@@ -45,10 +46,9 @@ explicit adapter.
 
 CPUEmu currently has explicit adapters for `CommandLineToArgvW`, `GetSecurityInfo`, read-only file
 mapping, `FindMimeFromData`, `SHGetKnownFolderPath`, resource loading, cursor/icon/image loading,
-accelerator loading, window-class registration, window creation, and selected WinRT
-protection-policy calls.
-The window bridge re-enters interpreted code through `Runtime::invoke_guest`; it never casts a
-guest window procedure to a native function pointer.
+accelerator loading, window-class registration, window creation, modal resource dialogs, and
+selected WinRT protection-policy calls. Window and dialog bridges re-enter interpreted code
+through `Runtime::invoke_guest`; they never cast a guest procedure to a native function pointer.
 
 ## Safely refused operations
 
@@ -61,8 +61,8 @@ escape emulation or retain unsafe guest state:
 - Vectored exception handlers and native language exception callbacks.
 - General COM objects whose interface pointers and vtables have not been proxied into guest
   memory.
-- Dialog, font-enumeration, printing, and other APIs that retain or synchronously invoke callbacks
-  without a dedicated adapter.
+- Modeless/indirect dialogs, font enumeration, printing, and other APIs that retain or
+  synchronously invoke callbacks without a dedicated adapter.
 - WaveOut, DirectSound, WASAPI, Media Foundation, and other streaming or callback-driven audio
   interfaces.
 

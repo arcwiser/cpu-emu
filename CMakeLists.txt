@@ -83,13 +83,23 @@ add_dependencies(cpuemu_tests generate_test_apps)
 
 # Guest painting application, compiled with the host toolchain and executed by CPUEmu.
 add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/test-apps/paint.res
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/test-apps
+    COMMAND ${CMAKE_RC_COMPILER} /fo ${CMAKE_BINARY_DIR}/test-apps/paint.res
+            ${CMAKE_SOURCE_DIR}/tools/guests/paint.rc
+    DEPENDS tools/guests/paint.rc tools/guests/paint_resource.h
+    VERBATIM
+)
+add_custom_command(
     OUTPUT ${CMAKE_BINARY_DIR}/test-apps/paint.exe
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/test-apps
-    COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_SOURCE_DIR}/tools/guests/paint.cpp -std=c++20 -O2
+    COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_SOURCE_DIR}/tools/guests/paint.cpp
+            ${CMAKE_BINARY_DIR}/test-apps/paint.res -std=c++20 -O2
             -municode -D_DLL -D_MT -Xclang --dependent-lib=msvcrt
             -o ${CMAKE_BINARY_DIR}/test-apps/paint.exe -luser32 -lgdi32 -lcomctl32 -lcomdlg32
             -Wl,-subsystem:windows
-    DEPENDS tools/guests/paint.cpp
+    DEPENDS tools/guests/paint.cpp tools/guests/paint_resource.h
+            ${CMAKE_BINARY_DIR}/test-apps/paint.res
     VERBATIM
 )
 add_custom_target(guest_paint ALL DEPENDS ${CMAKE_BINARY_DIR}/test-apps/paint.exe)

@@ -3579,6 +3579,61 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(12);
         break;
     }
+    case Api::DialogBoxParamW: {
+        const auto module_value = argument(0);
+        const auto template_value = argument(1);
+        const auto guest_procedure = argument(3);
+        std::uint8_t procedure_permissions = 0;
+        if ((module_value != 0 && module_value != guest_image_base_) || template_value == 0 ||
+            guest_procedure == 0 ||
+            !cpu.memory().permissions(guest_procedure, procedure_permissions) ||
+            (procedure_permissions & Execute) == 0) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, static_cast<std::uint64_t>(-1));
+            finish_call(5);
+            break;
+        }
+        const auto module = module_value == guest_image_base_
+                                ? static_cast<HINSTANCE>(resource_module_)
+                                : static_cast<HINSTANCE>(nullptr);
+        const auto template_storage = template_value > 0xffff
+                                          ? cpu.memory().read_wide_string(template_value)
+                                          : std::wstring{};
+        const auto template_name =
+            template_value <= 0xffff ? MAKEINTRESOURCEW(template_value) : template_storage.c_str();
+        pending_dialogs_.push_back(PendingDialog{guest_procedure, argument(4)});
+        INT_PTR result = -1;
+        try {
+            result =
+                ::DialogBoxParamW(module, template_name,
+                                  reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(2))),
+                                  detail::dialog_proc_bridge, static_cast<LPARAM>(argument(4)));
+        } catch (...) {
+            pending_dialogs_.pop_back();
+            throw;
+        }
+        pending_dialogs_.pop_back();
+        if (auto exception = detail::take_callback_exception(); exception != nullptr) {
+            std::rethrow_exception(exception);
+        }
+        if (result == -1) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, static_cast<std::uint64_t>(result));
+        finish_call(5);
+        break;
+    }
+    case Api::EndDialog: {
+        const auto result =
+            ::EndDialog(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(0))),
+                        static_cast<INT_PTR>(argument(1)));
+        if (result == FALSE) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(2);
+        break;
+    }
     case Api::DirectInputCreate: {
         const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
         const auto write_pointer = [&](std::uint64_t address, std::uint64_t value) {
