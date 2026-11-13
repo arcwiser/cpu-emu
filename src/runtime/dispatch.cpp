@@ -3463,10 +3463,14 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(2);
         break;
     }
-    case Api::RegisterClassExW: {
+    case Api::GuestRegisterClassW: {
         const auto structure = argument(0);
-        const auto guest_size = guest_is_64_bit_ ? 80U : 48U;
-        if (structure == 0 || cpu.memory().read32(structure) != guest_size) {
+        const bool extended = thunk_name.ends_with("!RegisterClassExW");
+        const auto guest_size =
+            extended ? (guest_is_64_bit_ ? 80U : 48U) : (guest_is_64_bit_ ? 72U : 40U);
+        if (structure == 0 || !cpu.memory().contains(structure, guest_size) ||
+            (extended && cpu.memory().read32(structure) != guest_size)) {
+            last_error_ = ERROR_INVALID_PARAMETER;
             cpu.set_reg(Rax, 0);
             finish_call(1);
             break;
@@ -3476,41 +3480,49 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                        ? cpu.memory().read64(structure + offset64)
                        : static_cast<std::uint64_t>(cpu.memory().read32(structure + offset32));
         };
-        const auto guest_procedure = read_pointer(8, 8);
-        const auto class_pointer = read_pointer(40, 64);
+        const auto guest_procedure = read_pointer(extended ? 8U : 4U, 8);
+        const auto class_pointer = read_pointer(extended ? 40U : 36U, 64);
         if (class_pointer == 0 || guest_procedure == 0) {
+            last_error_ = ERROR_INVALID_PARAMETER;
             cpu.set_reg(Rax, 0);
             finish_call(1);
             break;
         }
         const auto class_name = cpu.memory().read_wide_string(class_pointer);
-        const auto menu_pointer = read_pointer(36, 56);
+        const auto menu_pointer = read_pointer(extended ? 36U : 32U, 56);
         const auto menu_name =
             menu_pointer > 0xffff ? cpu.memory().read_wide_string(menu_pointer) : std::wstring{};
         WNDCLASSEXW host_class{};
         host_class.cbSize = sizeof(host_class);
-        host_class.style = cpu.memory().read32(structure + 4);
+        host_class.style = cpu.memory().read32(structure + (extended ? 4U : 0U));
         host_class.lpfnWndProc = detail::window_proc_bridge;
         host_class.cbClsExtra =
-            static_cast<int>(cpu.memory().read32(structure + (guest_is_64_bit_ ? 16 : 12)));
+            static_cast<int>(cpu.memory().read32(structure + (guest_is_64_bit_ ? 16U
+                                                              : extended       ? 12U
+                                                                               : 8U)));
         host_class.cbWndExtra =
-            static_cast<int>(cpu.memory().read32(structure + (guest_is_64_bit_ ? 20 : 16)));
+            static_cast<int>(cpu.memory().read32(structure + (guest_is_64_bit_ ? 20U
+                                                              : extended       ? 16U
+                                                                               : 12U)));
         host_class.hInstance = resource_module_ != nullptr ? static_cast<HMODULE>(resource_module_)
                                                            : GetModuleHandleW(nullptr);
-        host_class.hIcon = reinterpret_cast<HICON>(read_pointer(24, 32));
-        host_class.hCursor = reinterpret_cast<HCURSOR>(read_pointer(28, 40));
-        host_class.hbrBackground = reinterpret_cast<HBRUSH>(read_pointer(32, 48));
+        host_class.hIcon = reinterpret_cast<HICON>(read_pointer(extended ? 24U : 20U, 32));
+        host_class.hCursor = reinterpret_cast<HCURSOR>(read_pointer(extended ? 28U : 24U, 40));
+        host_class.hbrBackground = reinterpret_cast<HBRUSH>(read_pointer(extended ? 32U : 28U, 48));
         host_class.lpszMenuName = menu_pointer == 0        ? nullptr
                                   : menu_pointer <= 0xffff ? MAKEINTRESOURCEW(menu_pointer)
                                                            : menu_name.c_str();
         host_class.lpszClassName = class_name.c_str();
-        host_class.hIconSm = reinterpret_cast<HICON>(read_pointer(44, 72));
-        class_window_procedures_[class_name] = guest_procedure;
+        host_class.hIconSm = extended ? reinterpret_cast<HICON>(read_pointer(44, 72)) : nullptr;
         const auto atom = ::RegisterClassExW(&host_class);
-        log::api("window", "RegisterClassExW class='" + narrow_string(class_name) + "' proc=" +
+        log::api("window", (extended ? "RegisterClassExW" : "RegisterClassW") +
+                               std::string(" class='") + narrow_string(class_name) + "' proc=" +
                                log::hex(guest_procedure) + " atom=" + std::to_string(atom));
         if (atom != 0) {
+            class_window_procedures_[class_name] = guest_procedure;
             atom_window_procedures_[atom] = guest_procedure;
+        } else {
+            last_error_ = ::GetLastError();
         }
         cpu.set_reg(Rax, atom);
         finish_call(1);

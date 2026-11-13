@@ -431,8 +431,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::LoadImageW;
     } else if (name == "LoadAcceleratorsW") {
         api = Api::LoadAcceleratorsW;
-    } else if (name == "RegisterClassExW") {
-        api = Api::RegisterClassExW;
+    } else if (name == "RegisterClassW" || name == "RegisterClassExW") {
+        api = Api::GuestRegisterClassW;
     } else if (name == "CreateWindowExW") {
         api = Api::CreateWindowExW;
     } else if (name == "DirectInput8Create") {

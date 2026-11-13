@@ -149,7 +149,7 @@ enum class RuntimeApi {
     LoadIconW,
     LoadImageW,
     LoadAcceleratorsW,
-    RegisterClassExW,
+    GuestRegisterClassW,
     CreateWindowExW,
     DirectInputCreate,
     DirectInputMethod,

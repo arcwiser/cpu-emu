@@ -62,6 +62,7 @@ HPEN pens[palette_size] = {};
 HBRUSH brushes[palette_size] = {};
 HBRUSH background_brush = nullptr;
 bool message_selftest = false;
+bool legacy_window_callback_seen = false;
 
 void write_stdout(const char *text);
 
@@ -85,6 +86,15 @@ LRESULT CALLBACK paint_subclass_procedure(HWND window, UINT message, WPARAM word
         return 0;
     }
     return DefSubclassProc(window, message, word_parameter, long_parameter);
+}
+
+LRESULT CALLBACK legacy_window_procedure(HWND window, UINT message, WPARAM word_parameter,
+                                         LPARAM long_parameter) {
+    if (message == WM_APP + 2) {
+        legacy_window_callback_seen = true;
+        return 0x1234;
+    }
+    return DefWindowProcW(window, message, word_parameter, long_parameter);
 }
 
 void trace(const char *message) { OutputDebugStringA(message); }
@@ -498,6 +508,27 @@ int run_sync_selftest() {
                              nullptr) == nullptr &&
               GetLastError() == ERROR_NOT_ENOUGH_MEMORY,
           "sync selftest: cap page-file mapping size");
+
+    WNDCLASSW legacy_class{};
+    legacy_class.lpfnWndProc = legacy_window_procedure;
+    legacy_class.hInstance = GetModuleHandleW(nullptr);
+    legacy_class.lpszClassName = L"CPUEmuLegacyWindowClass";
+    const ATOM legacy_atom = RegisterClassW(&legacy_class);
+    check(legacy_atom != 0, "sync selftest: register legacy window class");
+    const HWND legacy_window =
+        legacy_atom == 0
+            ? nullptr
+            : CreateWindowExW(0, legacy_class.lpszClassName, L"CPUEmu legacy window", WS_POPUP, 0,
+                              0, 100, 100, nullptr, nullptr, nullptr, nullptr);
+    check(legacy_window != nullptr, "sync selftest: create legacy registered window");
+    if (legacy_window != nullptr) {
+        check(SendMessageW(legacy_window, WM_APP + 2, 0, 0) == 0x1234 &&
+                  legacy_window_callback_seen,
+              "sync selftest: dispatch legacy registered window callback");
+        DestroyWindow(legacy_window);
+    }
+    check(RegisterClassW(nullptr) == 0 && GetLastError() == ERROR_INVALID_PARAMETER,
+          "sync selftest: reject null legacy window class");
 
     const HWND edit = CreateWindowExW(0, L"EDIT", L"", WS_POPUP | ES_MULTILINE, 0, 0, 200, 100,
                                       nullptr, nullptr, nullptr, nullptr);
