@@ -36,10 +36,11 @@ they can unlock while keeping non-CPU blockers visible.
 | Exception delivery | Divide/access/illegal-instruction recovery and C++ runtimes | Guest exception records, stack dispatch/unwind, handler ABI | Controlled fault/handler fixtures | Loader metadata and per-thread state |
 | AVX/AVX2 | Newer codecs, browsers, game middleware | VEX decode, YMM state, context switching, `CPUID`/XSAVE contract | Generated encoding/state tests before advertising | Scheduler and exception/context model |
 
-The 2026-11-18 Undertale probe passed all six `MOV r/m16, Sreg` stores after completing initial
-Direct3D 9Ex adapter discovery, then reached opcode `0x8F` after 15,149,331 instructions. Filling
-the instruction atlas alone cannot make a game playable; Win32 APIs, graphics, input, audio,
-threading, loading, services, and persistence are independent compatibility axes.
+The 2026-11-18 Undertale probe passed all six `MOV r/m16, Sreg` stores and its saved-flags
+`POP r/m` after completing initial Direct3D 9Ex adapter discovery, then reached the
+`IsDebuggerPresent` API after 15,149,348 instructions. Filling the instruction atlas alone cannot
+make a game playable; Win32 APIs, graphics, input, audio, threading, loading, services, and
+persistence are independent compatibility axes.
 
 ## Execution modes
 
@@ -57,7 +58,7 @@ threading, loading, services, and persistence are independent compatibility axes
 | Status | Implemented mnemonic groups | Important scope |
 | :---: | --- | --- |
 | 🟩 | `MOV`, immediate `MOV`, `MOVSX`, `MOVZX`, `MOVBE`, `LEA`, `XCHG` | Register and checked-memory forms across implemented widths; `MOVBE` covers 16/32/64-bit endian conversion; `MOV r/m16, Sreg` exposes fixed Windows user-mode selectors and rejects reserved segment encodings |
-| 🟩 | `PUSH`, `POP`, `PUSHF`, `POPF`, `LEAVE` | Mode-correct stack width and x86 callback stacks |
+| 🟩 | `PUSH`, `POP`, `PUSHF`, `POPF`, `LEAVE` | Mode-correct stack width and x86 callback stacks; `POP r/m` covers register, checked-memory, 16/32/64-bit, post-increment stack-relative addressing, and reserved-group rejection |
 | 🟩 | `ADD`, `ADC`, `SUB`, `SBB`, `CMP`, `INC`, `DEC`, `NEG` | Arithmetic flags and immediate groups |
 | 🟩 | `AND`, `OR`, `XOR`, `TEST`, `NOT` | Register, memory, and immediate groups |
 | 🟩 | `MUL`, `IMUL`, `DIV`, `IDIV` | One-operand and common immediate/two-operand forms |

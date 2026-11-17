@@ -64,7 +64,8 @@ class Cpu {
     [[nodiscard]] std::uint16_t fetch16();
     [[nodiscard]] std::uint32_t fetch32();
     [[nodiscard]] std::uint64_t fetch64();
-    [[nodiscard]] DecodedRm decode_rm(std::uint8_t rex, std::uint64_t pending_immediate = 0);
+    [[nodiscard]] DecodedRm decode_rm(std::uint8_t rex, std::uint64_t pending_immediate = 0,
+                                      std::uint64_t stack_pointer_adjustment = 0);
     [[nodiscard]] std::uint64_t read_operand(const Operand &operand, unsigned width) const;
     void write_operand(const Operand &operand, unsigned width, std::uint64_t value);
     [[nodiscard]] std::uint64_t read_register(std::uint8_t index, unsigned width) const;

@@ -30,7 +30,8 @@ std::uint64_t Cpu::fetch64() {
     return value;
 }
 
-Cpu::DecodedRm Cpu::decode_rm(std::uint8_t rex, std::uint64_t pending_immediate) {
+Cpu::DecodedRm Cpu::decode_rm(std::uint8_t rex, std::uint64_t pending_immediate,
+                              std::uint64_t stack_pointer_adjustment) {
     const auto modrm = fetch8();
     const auto mod = static_cast<std::uint8_t>(modrm >> 6);
     const auto raw_reg = static_cast<std::uint8_t>((modrm >> 3) & 7);
@@ -58,7 +59,8 @@ Cpu::DecodedRm Cpu::decode_rm(std::uint8_t rex, std::uint64_t pending_immediate)
                 has_base = false;
             } else {
                 const auto base = static_cast<std::uint8_t>(raw_base + ((rex & 1) ? 8 : 0));
-                address += static_cast<std::uint32_t>(registers_[base]);
+                address += static_cast<std::uint32_t>(registers_[base] +
+                                                      (base == Rsp ? stack_pointer_adjustment : 0));
             }
         } else if (mod == 0 && raw_rm == 5) {
             has_base = false;
@@ -91,7 +93,7 @@ Cpu::DecodedRm Cpu::decode_rm(std::uint8_t rex, std::uint64_t pending_immediate)
             has_base = false;
         } else {
             const auto base = static_cast<std::uint8_t>(raw_base + ((rex & 1) ? 8 : 0));
-            address += registers_[base];
+            address += registers_[base] + (base == Rsp ? stack_pointer_adjustment : 0);
         }
     } else if (mod == 0 && raw_rm == 5) {
         has_base = false;

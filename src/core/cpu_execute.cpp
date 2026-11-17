@@ -507,6 +507,23 @@ void Cpu::step() {
         write_register(decoded.reg, width, decoded.rm.address);
         return;
     }
+    case 0x8f: {
+        const auto pop_width = operand16 ? 16U : (long_mode_ ? 64U : 32U);
+        const auto pop_size = pop_width / 8;
+        const auto decoded = decode_rm(rex, 0, pop_size);
+        if ((decoded.reg & 7) != 0) {
+            throw Error("invalid POP instruction group");
+        }
+        std::uint64_t value = 0;
+        if (pop_width == 16) {
+            value = memory_.read16(registers_[Rsp]);
+            registers_[Rsp] = (registers_[Rsp] + 2) & (long_mode_ ? UINT64_MAX : UINT32_MAX);
+        } else {
+            value = pop64();
+        }
+        write_operand(decoded.rm, pop_width, value);
+        return;
+    }
     case 0x98:
         if (width == 64) {
             registers_[Rax] = static_cast<std::uint64_t>(

@@ -338,6 +338,10 @@ this file is the companion log of development decisions.
 - Implemented register and memory forms of `MOV r/m16, Sreg`, including Windows user-mode selector
   state, width behavior, and rejection of reserved segment encodings. Undertale executes the six
   consecutive selector stores and reaches opcode `0x8F` after 15,149,331 instructions.
+- Added the `POP r/m` opcode family with mode-correct widths, reserved-group validation, and the
+  architectural rule that an ESP-based memory destination is calculated after the stack advances.
+- The follow-up Undertale probe executes the saved-flags `POP` and reaches
+  `KERNEL32!IsDebuggerPresent` after 15,149,348 instructions.
 
 ## 2026-11-08 — Undertale PE32 window creation
 

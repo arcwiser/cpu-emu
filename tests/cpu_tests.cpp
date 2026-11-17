@@ -135,6 +135,50 @@ void test_cpu_32bit_mode() {
         rejected_segment = true;
     }
     require(rejected_segment, "MOV rejects reserved segment-register encoding");
+
+    const std::uint8_t pop_memory[] = {0x8f, 0x05, 0xa0, 0x01, 0x00, 0x10};
+    memory.write(code_address + 0x210, pop_memory);
+    memory.write32(stack_address + 0xff8, 0x89abcdef);
+    cpu.reset(code_address + 0x210, stack_address + 0xff8, false);
+    cpu.step();
+    require(memory.read32(code_address + 0x1a0) == 0x89abcdef,
+            "POP stores a dword into an x86 memory operand");
+    require(cpu.reg(winemu::Rsp) == stack_address + 0xffc, "POP advances the x86 stack");
+
+    const std::uint8_t pop_register[] = {0x8f, 0xc1};
+    memory.write(code_address + 0x220, pop_register);
+    memory.write32(stack_address + 0xff8, 0x12345678);
+    cpu.reset(code_address + 0x220, stack_address + 0xff8, false);
+    cpu.step();
+    require(cpu.reg(winemu::Rcx) == 0x12345678, "POP writes an x86 register operand");
+
+    const std::uint8_t pop_word[] = {0x66, 0x8f, 0xc2};
+    memory.write(code_address + 0x230, pop_word);
+    memory.write16(stack_address + 0xffa, 0x7654);
+    cpu.reset(code_address + 0x230, stack_address + 0xffa, false);
+    cpu.set_reg(winemu::Rdx, 0x12340000);
+    cpu.step();
+    require(cpu.reg(winemu::Rdx) == 0x12347654 && cpu.reg(winemu::Rsp) == stack_address + 0xffc,
+            "operand-size POP preserves upper register bits and advances by two");
+
+    const std::uint8_t pop_stack_relative[] = {0x8f, 0x04, 0x24};
+    memory.write(code_address + 0x240, pop_stack_relative);
+    memory.write32(stack_address + 0xff8, 0x0badc0de);
+    cpu.reset(code_address + 0x240, stack_address + 0xff8, false);
+    cpu.step();
+    require(memory.read32(stack_address + 0xffc) == 0x0badc0de,
+            "POP computes an ESP-based destination after advancing the stack");
+
+    const std::uint8_t invalid_pop[] = {0x8f, 0xc8}; // only ModRM group 0 is defined
+    memory.write(code_address + 0x250, invalid_pop);
+    cpu.reset(code_address + 0x250, stack_address + 0xff8, false);
+    bool rejected_pop = false;
+    try {
+        cpu.step();
+    } catch (const winemu::Error &) {
+        rejected_pop = true;
+    }
+    require(rejected_pop, "POP rejects reserved ModRM groups");
 }
 
 void test_pshufd() {
