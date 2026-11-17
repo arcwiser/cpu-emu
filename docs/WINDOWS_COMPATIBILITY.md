@@ -45,7 +45,7 @@ explicit adapter.
 | Module queries | module handles, module filename, selected `GetProcAddress`, delay imports | Loaded main image and emulated thunks; no general guest DLL loader |
 | Basic audio | `Beep`, `MessageBeep`, synchronous `PlaySoundA/W`, `sndPlaySoundA/W` | No retained guest buffers, asynchronous playback, loops, resource audio, or streaming APIs |
 | Game-loop timing | `GetTickCount`, `GetTickCount64`, performance counter/frequency, `Sleep`, `timeGetTime`, timer period begin/end | Host-clock backed; no virtual or deterministic clock |
-| Direct3D 9Ex discovery | `Direct3DCreate9Ex`, adapter enumeration, display modes, format checks, capabilities, monitor and LUID queries | Guest-owned `IDirect3D9Ex` objects marshal pointer-free query structures; software rasterizer callbacks and device creation fail closed until a guest device proxy exists |
+| Direct3D 9Ex discovery | `Direct3DCreate9Ex`, adapter enumeration, display modes, format checks, capabilities, monitor and LUID queries | Guest-owned `IDirect3D9Ex` objects marshal pointer-free query structures; `D3DADAPTER_IDENTIFIER9` copies its 1,100-byte defined field extent without leaking the 64-bit host's trailing alignment padding; software rasterizer callbacks and device creation fail closed until a guest device proxy exists |
 | PE32 startup | stack-based stdcall arguments, low thunk/module handles, startup info, process/thread IDs, security cookie helpers, heap, TLS, and critical-section adapters | Adapter-by-adapter ABI audit remains in progress |
 
 ## Marshalled Windows adapters

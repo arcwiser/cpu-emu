@@ -3990,13 +3990,17 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             break;
         case 5: {
             D3DADAPTER_IDENTIFIER9 identifier{};
-            if (argument(3) == 0 || !cpu.memory().contains(argument(3), sizeof(identifier))) {
+            constexpr auto identifier_fields_size =
+                offsetof(D3DADAPTER_IDENTIFIER9, WHQLLevel) + sizeof(DWORD);
+            if (argument(3) == 0 || !cpu.memory().contains(argument(3), identifier_fields_size)) {
                 result = invalid_argument;
             } else {
                 result = static_cast<std::uint32_t>(host->GetAdapterIdentifier(
                     static_cast<UINT>(argument(1)), static_cast<DWORD>(argument(2)), &identifier));
                 if (SUCCEEDED(static_cast<HRESULT>(result))) {
-                    copy_to_guest(argument(3), identifier);
+                    const auto *bytes = reinterpret_cast<const std::uint8_t *>(&identifier);
+                    cpu.memory().write(
+                        argument(3), std::span<const std::uint8_t>(bytes, identifier_fields_size));
                 }
             }
             break;

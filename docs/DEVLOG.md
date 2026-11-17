@@ -345,6 +345,13 @@ this file is the companion log of development decisions.
 - Added an isolated guest-process implementation of `IsDebuggerPresent`; a debugger attached to
   the CPUEmu host is not misreported as a debugger attached inside the emulated process. Undertale
   advances to `UnhandledExceptionFilter` after 15,149,358 instructions.
+- Traced that apparent exception boundary to a cross-bitness ABI overwrite: the 64-bit host's
+  `D3DADAPTER_IDENTIFIER9` has four bytes of trailing alignment padding beyond the 1,100 bytes of
+  defined fields, which had overwritten the adjacent PE32 GS cookie. The adapter now copies only
+  the defined field extent and a canary regression guards the boundary.
+- Undertale now passes the cookie check, attempts `IDirect3D9Ex::CreateDevice` three times, and
+  exits through its normal graphics-initialization failure path with `-1` after 15,201,662
+  instructions. Device creation is the current first blocker; guest SEH was not invoked.
 
 ## 2026-11-08 — Undertale PE32 window creation
 

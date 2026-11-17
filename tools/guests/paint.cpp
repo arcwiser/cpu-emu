@@ -635,10 +635,25 @@ int run_sync_selftest() {
         const UINT adapter_count = direct3d->GetAdapterCount();
         check(adapter_count != 0, "sync selftest: enumerate Direct3D adapters");
         if (adapter_count != 0) {
-            D3DADAPTER_IDENTIFIER9 identifier{};
-            check(SUCCEEDED(direct3d->GetAdapterIdentifier(0, 0, &identifier)) &&
-                      identifier.Description[0] != '\0',
+            constexpr size_t identifier_fields_size =
+                offsetof(D3DADAPTER_IDENTIFIER9, WHQLLevel) + sizeof(DWORD);
+            alignas(D3DADAPTER_IDENTIFIER9) unsigned char
+                identifier_storage[sizeof(D3DADAPTER_IDENTIFIER9) + 4]{};
+            for (size_t index = identifier_fields_size; index < sizeof(identifier_storage);
+                 ++index) {
+                identifier_storage[index] = 0xa5;
+            }
+            auto *identifier = reinterpret_cast<D3DADAPTER_IDENTIFIER9 *>(identifier_storage);
+            check(SUCCEEDED(direct3d->GetAdapterIdentifier(0, 0, identifier)) &&
+                      identifier->Description[0] != '\0',
                   "sync selftest: query Direct3D adapter identifier");
+            bool identifier_canary_intact = true;
+            for (size_t index = identifier_fields_size; index < sizeof(identifier_storage);
+                 ++index) {
+                identifier_canary_intact &= identifier_storage[index] == 0xa5;
+            }
+            check(identifier_canary_intact,
+                  "sync selftest: preserve Direct3D identifier trailing bytes");
             D3DDISPLAYMODE mode{};
             check(SUCCEEDED(direct3d->GetAdapterDisplayMode(0, &mode)) && mode.Width != 0 &&
                       mode.Height != 0,
