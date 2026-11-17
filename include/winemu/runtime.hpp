@@ -41,6 +41,8 @@ class Runtime {
     bool invoke_window_enum(Cpu &cpu, std::uint64_t window, std::uint32_t &exit_code, bool &exited);
     void invoke_timer_proc(Cpu &cpu, std::uint64_t window, std::uint64_t timer_id,
                            std::uint32_t tick_count, std::uint32_t &exit_code, bool &exited);
+    int invoke_font_enum(Cpu &cpu, const void *font, const void *metric, std::uint32_t font_type,
+                         std::uint32_t &exit_code, bool &exited);
 
   private:
     using Api = detail::RuntimeApi;
@@ -131,6 +133,12 @@ class Runtime {
         std::uint64_t procedure;
     };
     std::vector<WindowTimer> window_timers_;
+    struct PendingFontEnumeration {
+        std::uint64_t procedure;
+        std::uint64_t parameter;
+        bool extended;
+    };
+    std::vector<PendingFontEnumeration> pending_font_enumerations_;
     bool quit_message_pending_ = false;
     std::uint32_t quit_message_code_ = 0;
     std::unordered_map<std::uint64_t, std::int64_t> callback_long_parameters_;

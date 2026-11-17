@@ -4,6 +4,18 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-18 — Unicode font enumeration callbacks are marshalled
+
+- Added dedicated `EnumFontsW`, `EnumFontFamiliesW`, and `EnumFontFamiliesExW` adapters. GDI sees
+  only a host bridge; `LOGFONTW`/`ENUMLOGFONTEXW` and the matching metric layout are copied into
+  bounded guest scratch frames before the interpreted callback runs.
+- Extended callbacks distinguish TrueType `NEWTEXTMETRICEXW` from the smaller non-TrueType
+  `NEWTEXTMETRICW`, avoiding reads beyond host-owned structures. Nested enumeration receives a
+  separate scratch frame, and callback exceptions return through the normal runtime boundary.
+- Paint now verifies nested standard/extended enumeration, family enumeration, readable font and
+  metric output, invalid callback rejection, and a null extended request. ANSI callback variants
+  remain safely refused until their structure conversion is implemented.
+
 ## 2026-11-18 — Modeless resource dialogs retain safe guest callbacks
 
 - Added a dedicated `CreateDialogParamW` adapter. Resource templates resolve from the guest image,

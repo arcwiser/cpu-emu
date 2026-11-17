@@ -445,6 +445,9 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::DestroyWindow;
     } else if (name == "SetTimer" || name == "KillTimer") {
         api = Api::GuestWindowTimer;
+    } else if (name == "EnumFontsW" || name == "EnumFontFamiliesW" ||
+               name == "EnumFontFamiliesExW") {
+        api = Api::GuestFontEnumeration;
     } else if (name == "DirectInput8Create") {
         api = Api::DirectInputCreate;
     } else if (name == "ResolveDelayLoadedAPI") {
@@ -611,7 +614,9 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
             "__C_specific_handler",
             "RegisterClassExW",
             "CreateDialogIndirectParamW",
-            "EnumFontsW",
+            "EnumFontsA",
+            "EnumFontFamiliesA",
+            "EnumFontFamiliesExA",
             "SetAbortProc",
             "GetProcAddress",
             "ResolveDelayLoadedAPI",

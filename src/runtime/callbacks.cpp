@@ -271,6 +271,23 @@ void CALLBACK timer_proc_bridge(HWND window, UINT message, UINT_PTR timer_id, DW
     }
 }
 
+int CALLBACK font_enum_bridge(const LOGFONTW *font, const TEXTMETRICW *metric, DWORD font_type,
+                              LPARAM parameter) {
+    static_cast<void>(parameter);
+    if (active_runtime == nullptr || active_cpu == nullptr || active_exit_code == nullptr ||
+        active_exited == nullptr || font == nullptr || metric == nullptr) {
+        return 0;
+    }
+    try {
+        return active_runtime->invoke_font_enum(*active_cpu, font, metric, font_type,
+                                                *active_exit_code, *active_exited);
+    } catch (...) {
+        callback_exception = std::current_exception();
+        log::error("font", "guest font-enumeration procedure faulted");
+        return 0;
+    }
+}
+
 LRESULT CALLBACK window_subclass_bridge(HWND window, UINT message, WPARAM word_parameter,
                                         LPARAM long_parameter, UINT_PTR token,
                                         DWORD_PTR reference_data) {
@@ -457,6 +474,39 @@ void Runtime::invoke_timer_proc(Cpu &cpu, std::uint64_t window, std::uint64_t ti
     static_cast<void>(invoke_guest(
         cpu, found->procedure, std::array<std::uint64_t, 4>{window, WM_TIMER, timer_id, tick_count},
         exit_code, exited));
+}
+
+int Runtime::invoke_font_enum(Cpu &cpu, const void *font, const void *metric,
+                              std::uint32_t font_type, std::uint32_t &exit_code, bool &exited) {
+    if (pending_font_enumerations_.empty() || callback_depth_ >= 16) {
+        return 0;
+    }
+    const auto record = pending_font_enumerations_.back();
+    const auto font_size = record.extended ? sizeof(ENUMLOGFONTEXW) : sizeof(LOGFONTW);
+    const auto metric_size = !record.extended                       ? sizeof(TEXTMETRICW)
+                             : (font_type & TRUETYPE_FONTTYPE) != 0 ? sizeof(NEWTEXTMETRICEXW)
+                                                                    : sizeof(NEWTEXTMETRICW);
+    const auto scratch = detail::environment_base + 0x10000 + callback_depth_ * 0x1000;
+    const auto metric_address = scratch + 0x800;
+    cpu.memory().write(scratch, std::vector<std::uint8_t>(0x1000));
+    cpu.memory().write(scratch, std::span<const std::uint8_t>(
+                                    reinterpret_cast<const std::uint8_t *>(font), font_size));
+    cpu.memory().write(
+        metric_address,
+        std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(metric), metric_size));
+    ++callback_depth_;
+    std::uint64_t result = 0;
+    try {
+        result = invoke_guest(
+            cpu, record.procedure,
+            std::array<std::uint64_t, 4>{scratch, metric_address, font_type, record.parameter},
+            exit_code, exited);
+    } catch (...) {
+        --callback_depth_;
+        throw;
+    }
+    --callback_depth_;
+    return static_cast<int>(result);
 }
 
 std::intptr_t Runtime::invoke_window_callback(Cpu &cpu, std::uint64_t target, std::uint64_t window,

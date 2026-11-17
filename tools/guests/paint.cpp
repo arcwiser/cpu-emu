@@ -75,6 +75,10 @@ bool dialog_callback_seen = false;
 bool nested_dialog_callback_seen = false;
 bool modeless_dialog_init_seen = false;
 bool modeless_dialog_message_seen = false;
+HDC font_enum_device_context = nullptr;
+bool font_enum_callback_seen = false;
+bool extended_font_enum_callback_seen = false;
+bool family_font_enum_callback_seen = false;
 HWND expected_enum_child = nullptr;
 HWND expected_enum_grandchild = nullptr;
 HWND expected_enum_parent = nullptr;
@@ -114,6 +118,37 @@ INT_PTR CALLBACK test_modeless_dialog_procedure(HWND, UINT message, WPARAM, LPAR
         return TRUE;
     }
     return FALSE;
+}
+
+int CALLBACK test_font_enum_procedure(const LOGFONTW *font, const TEXTMETRICW *metric,
+                                      DWORD font_type, LPARAM parameter) {
+    constexpr LPARAM outer_parameter = 0x22334455;
+    constexpr LPARAM extended_parameter = 0x33445566;
+    constexpr LPARAM family_parameter = 0x44556677;
+    if (font == nullptr || metric == nullptr || font->lfFaceName[0] == L'\0' ||
+        metric->tmHeight == 0) {
+        return 0;
+    }
+    if (parameter == extended_parameter) {
+        const auto *extended_font = reinterpret_cast<const ENUMLOGFONTEXW *>(font);
+        extended_font_enum_callback_seen =
+            extended_font->elfLogFont.lfFaceName[0] != L'\0' &&
+            (font_type & (RASTER_FONTTYPE | DEVICE_FONTTYPE | TRUETYPE_FONTTYPE)) != 0;
+        return 0;
+    }
+    if (parameter == family_parameter) {
+        family_font_enum_callback_seen = true;
+        return 0;
+    }
+    if (parameter != outer_parameter) {
+        return 0;
+    }
+    font_enum_callback_seen = true;
+    LOGFONTW request{};
+    request.lfCharSet = DEFAULT_CHARSET;
+    static_cast<void>(EnumFontFamiliesExW(font_enum_device_context, &request,
+                                          test_font_enum_procedure, extended_parameter, 0));
+    return 0;
 }
 
 BOOL CALLBACK test_window_enum_procedure(HWND window, LPARAM parameter) {
@@ -691,6 +726,31 @@ int run_sync_selftest() {
     check(DestroyWindow(reinterpret_cast<HWND>(0xdead)) == FALSE &&
               GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
           "sync selftest: reject invalid window destruction handle");
+
+    font_enum_device_context = GetDC(nullptr);
+    check(font_enum_device_context != nullptr, "sync selftest: acquire font enumeration context");
+    if (font_enum_device_context != nullptr) {
+        check(EnumFontsW(font_enum_device_context, nullptr, test_font_enum_procedure, 0x22334455) ==
+                      0 &&
+                  font_enum_callback_seen && extended_font_enum_callback_seen,
+              "sync selftest: nested Unicode font enumeration callbacks");
+        check(EnumFontFamiliesW(font_enum_device_context, nullptr, test_font_enum_procedure,
+                                0x44556677) == 0 &&
+                  family_font_enum_callback_seen,
+              "sync selftest: Unicode font-family callback");
+        SetLastError(ERROR_SUCCESS);
+        check(EnumFontsW(font_enum_device_context, nullptr, reinterpret_cast<FONTENUMPROCW>(0xdead),
+                         0) == 0 &&
+                  GetLastError() == ERROR_INVALID_PARAMETER,
+              "sync selftest: reject invalid font enumeration callback");
+        SetLastError(ERROR_SUCCESS);
+        check(EnumFontFamiliesExW(font_enum_device_context, nullptr, test_font_enum_procedure, 0,
+                                  0) == 0 &&
+                  GetLastError() == ERROR_INVALID_PARAMETER,
+              "sync selftest: reject null extended font request");
+        ReleaseDC(nullptr, font_enum_device_context);
+        font_enum_device_context = nullptr;
+    }
 
     expected_enum_parent = CreateWindowExW(0, L"STATIC", L"enumeration parent", WS_POPUP, 0, 0, 100,
                                            100, nullptr, nullptr, nullptr, nullptr);

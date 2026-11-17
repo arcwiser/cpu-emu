@@ -3773,6 +3773,59 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(4);
         break;
     }
+    case Api::GuestFontEnumeration: {
+        const bool extended = thunk_name.ends_with("!EnumFontFamiliesExW");
+        const auto device_context = argument(0);
+        const auto input = argument(1);
+        const auto guest_procedure = argument(2);
+        const auto parameter = argument(3);
+        const auto flags = extended ? static_cast<DWORD>(argument(4)) : 0;
+        std::uint8_t procedure_permissions = 0;
+        if (guest_procedure == 0 ||
+            !cpu.memory().permissions(guest_procedure, procedure_permissions) ||
+            (procedure_permissions & Execute) == 0 ||
+            (extended && (input == 0 || !cpu.memory().contains(input, sizeof(LOGFONTW))))) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, 0);
+            finish_call(extended ? 5 : 4);
+            break;
+        }
+        std::wstring family;
+        LOGFONTW requested_font{};
+        if (extended) {
+            const auto bytes = cpu.memory().read(input, sizeof(requested_font));
+            std::memcpy(&requested_font, bytes.data(), bytes.size());
+        } else if (input != 0) {
+            family = cpu.memory().read_wide_string(input);
+        }
+        pending_font_enumerations_.push_back(
+            PendingFontEnumeration{guest_procedure, parameter, extended});
+        int result = 0;
+        try {
+            const auto hdc = reinterpret_cast<HDC>(static_cast<std::uintptr_t>(device_context));
+            if (extended) {
+                result = ::EnumFontFamiliesExW(hdc, &requested_font, detail::font_enum_bridge,
+                                               static_cast<LPARAM>(parameter), flags);
+            } else if (thunk_name.ends_with("!EnumFontFamiliesW")) {
+                result =
+                    ::EnumFontFamiliesW(hdc, input == 0 ? nullptr : family.c_str(),
+                                        detail::font_enum_bridge, static_cast<LPARAM>(parameter));
+            } else {
+                result = ::EnumFontsW(hdc, input == 0 ? nullptr : family.c_str(),
+                                      detail::font_enum_bridge, static_cast<LPARAM>(parameter));
+            }
+        } catch (...) {
+            pending_font_enumerations_.pop_back();
+            throw;
+        }
+        pending_font_enumerations_.pop_back();
+        if (auto exception = detail::take_callback_exception(); exception != nullptr) {
+            std::rethrow_exception(exception);
+        }
+        cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+        finish_call(extended ? 5 : 4);
+        break;
+    }
     case Api::DirectInputCreate: {
         const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
         const auto write_pointer = [&](std::uint64_t address, std::uint64_t value) {

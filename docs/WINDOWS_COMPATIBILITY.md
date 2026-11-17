@@ -28,6 +28,7 @@ explicit adapter.
 | Modeless dialogs | `CreateDialogParamW`, `DestroyWindow` | Resource templates and guest callback ownership use the dialog bridge on PE32 and PE32+; callback faults destroy modeless windows rather than applying modal `EndDialog` semantics |
 | Window enumeration | `EnumWindows`, `EnumChildWindows` | Synchronous callbacks re-enter guest code; top-level enumeration is filtered to windows owned by CPUEmu, and nested enumeration state remains runtime-owned |
 | Window timers | `SetTimer`, `KillTimer` | Message-only timers use the native queue; retained procedures are stored as guest addresses and invoked only through the interpreter, then removed on kill, registered guest-window destruction, or runtime teardown |
+| Font enumeration | `EnumFontsW`, `EnumFontFamiliesW`, `EnumFontFamiliesExW` | Font and metric structures are copied into bounded guest scratch memory for synchronous callback re-entry; nested enumerations use separate frames |
 | Subclassing | `SetWindowSubclass`, `GetWindowSubclass`, `RemoveWindowSubclass`, `DefSubclassProc`, and comctl32 v6 ordinals 410–413 | Common Controls retains only a host bridge and opaque token; six-argument guest procedures re-enter the interpreter, use the normal message-pointer marshaler, and can continue the native chain |
 | File dialogs | `GetOpenFileNameA/W`, `GetSaveFileNameA/W`, `CommDlgExtendedError` | Synchronous strings, filters, buffers, selection offsets, and errors are marshaled; guest hook/template pointers are deliberately omitted rather than executed natively |
 | MIME detection | `FindMimeFromData` | URL, proposed type, and bounded sniffing bytes are copied to host storage; the host result is copied into guest-owned memory and native allocation is released before returning |
@@ -64,8 +65,8 @@ escape emulation or retain unsafe guest state:
 - Vectored exception handlers and native language exception callbacks.
 - General COM objects whose interface pointers and vtables have not been proxied into guest
   memory.
-- Indirect dialogs, font enumeration, printing, and other APIs that retain or synchronously invoke
-  callbacks without a dedicated adapter.
+- Indirect dialogs, ANSI font enumeration, printing, and other APIs that retain or synchronously
+  invoke callbacks without a dedicated adapter.
 - WaveOut, DirectSound, WASAPI, Media Foundation, and other streaming or callback-driven audio
   interfaces.
 
