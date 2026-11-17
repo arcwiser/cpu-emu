@@ -3826,6 +3826,38 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(extended ? 5 : 4);
         break;
     }
+    case Api::GuestLineDda: {
+        const auto x_start = static_cast<std::int32_t>(argument(0));
+        const auto y_start = static_cast<std::int32_t>(argument(1));
+        const auto x_end = static_cast<std::int32_t>(argument(2));
+        const auto y_end = static_cast<std::int32_t>(argument(3));
+        const auto guest_procedure = argument(4);
+        const auto parameter = argument(5);
+        std::uint8_t procedure_permissions = 0;
+        if (guest_procedure == 0 ||
+            !cpu.memory().permissions(guest_procedure, procedure_permissions) ||
+            (procedure_permissions & Execute) == 0) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, FALSE);
+            finish_call(6);
+            break;
+        }
+        pending_line_dda_.push_back(PendingLineDda{guest_procedure, parameter});
+        BOOL result = FALSE;
+        try {
+            result = ::LineDDA(x_start, y_start, x_end, y_end, detail::line_dda_bridge, 0);
+        } catch (...) {
+            pending_line_dda_.pop_back();
+            throw;
+        }
+        pending_line_dda_.pop_back();
+        if (auto exception = detail::take_callback_exception(); exception != nullptr) {
+            std::rethrow_exception(exception);
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(6);
+        break;
+    }
     case Api::DirectInputCreate: {
         const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
         const auto write_pointer = [&](std::uint64_t address, std::uint64_t value) {

@@ -79,6 +79,9 @@ HDC font_enum_device_context = nullptr;
 bool font_enum_callback_seen = false;
 bool extended_font_enum_callback_seen = false;
 bool family_font_enum_callback_seen = false;
+int line_dda_point_count = 0;
+int nested_line_dda_point_count = 0;
+bool nested_line_dda_started = false;
 HWND expected_enum_child = nullptr;
 HWND expected_enum_grandchild = nullptr;
 HWND expected_enum_parent = nullptr;
@@ -149,6 +152,25 @@ int CALLBACK test_font_enum_procedure(const LOGFONTW *font, const TEXTMETRICW *m
     static_cast<void>(EnumFontFamiliesExW(font_enum_device_context, &request,
                                           test_font_enum_procedure, extended_parameter, 0));
     return 0;
+}
+
+void CALLBACK test_line_dda_procedure(int x, int y, LPARAM parameter) {
+    constexpr LPARAM outer_parameter = static_cast<LPARAM>(0x123456789abcdef0ULL);
+    constexpr LPARAM nested_parameter = static_cast<LPARAM>(0x0fedcba987654321ULL);
+    if (parameter == nested_parameter) {
+        if (y == 10 && x == 10 + nested_line_dda_point_count) {
+            ++nested_line_dda_point_count;
+        }
+        return;
+    }
+    if (parameter != outer_parameter || y != 3 || x != -2 + line_dda_point_count) {
+        return;
+    }
+    ++line_dda_point_count;
+    if (!nested_line_dda_started) {
+        nested_line_dda_started = true;
+        static_cast<void>(LineDDA(10, 10, 13, 10, test_line_dda_procedure, nested_parameter));
+    }
 }
 
 BOOL CALLBACK test_window_enum_procedure(HWND window, LPARAM parameter) {
@@ -751,6 +773,15 @@ int run_sync_selftest() {
         ReleaseDC(nullptr, font_enum_device_context);
         font_enum_device_context = nullptr;
     }
+
+    check(LineDDA(-2, 3, 2, 3, test_line_dda_procedure,
+                  static_cast<LPARAM>(0x123456789abcdef0ULL)) != FALSE &&
+              line_dda_point_count == 4 && nested_line_dda_point_count == 3,
+          "sync selftest: nested LineDDA guest callbacks");
+    SetLastError(ERROR_SUCCESS);
+    check(LineDDA(0, 0, 2, 2, reinterpret_cast<LINEDDAPROC>(0xdead), 0) == FALSE &&
+              GetLastError() == ERROR_INVALID_PARAMETER,
+          "sync selftest: reject invalid LineDDA callback");
 
     expected_enum_parent = CreateWindowExW(0, L"STATIC", L"enumeration parent", WS_POPUP, 0, 0, 100,
                                            100, nullptr, nullptr, nullptr, nullptr);

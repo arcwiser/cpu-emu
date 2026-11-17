@@ -4,6 +4,16 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-18 — LineDDA points re-enter guest code safely
+
+- Added a dedicated `LineDDA` adapter so GDI receives a host bridge rather than a guest procedure
+  address. Signed point coordinates and the guest LPARAM are passed through the interpreter using
+  the correct three-argument callback ABI.
+- Callback records are stacked for nested `LineDDA` calls, callback exceptions propagate after GDI
+  returns, and further host points are ignored if the guest exits from inside its callback.
+- Paint verifies exact negative/positive point sequences, a nested line enumeration with an
+  independent LPARAM, and rejection of a non-executable callback address.
+
 ## 2026-11-18 — Unicode font enumeration callbacks are marshalled
 
 - Added dedicated `EnumFontsW`, `EnumFontFamiliesW`, and `EnumFontFamiliesExW` adapters. GDI sees

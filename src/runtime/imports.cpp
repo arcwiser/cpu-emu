@@ -448,6 +448,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
     } else if (name == "EnumFontsW" || name == "EnumFontFamiliesW" ||
                name == "EnumFontFamiliesExW") {
         api = Api::GuestFontEnumeration;
+    } else if (name == "LineDDA") {
+        api = Api::GuestLineDda;
     } else if (name == "DirectInput8Create") {
         api = Api::DirectInputCreate;
     } else if (name == "ResolveDelayLoadedAPI") {

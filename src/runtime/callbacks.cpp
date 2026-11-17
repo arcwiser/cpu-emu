@@ -288,6 +288,20 @@ int CALLBACK font_enum_bridge(const LOGFONTW *font, const TEXTMETRICW *metric, D
     }
 }
 
+void CALLBACK line_dda_bridge(int x, int y, LPARAM parameter) {
+    static_cast<void>(parameter);
+    if (active_runtime == nullptr || active_cpu == nullptr || active_exit_code == nullptr ||
+        active_exited == nullptr || *active_exited) {
+        return;
+    }
+    try {
+        active_runtime->invoke_line_dda(*active_cpu, x, y, *active_exit_code, *active_exited);
+    } catch (...) {
+        callback_exception = std::current_exception();
+        log::error("gdi", "guest LineDDA procedure faulted");
+    }
+}
+
 LRESULT CALLBACK window_subclass_bridge(HWND window, UINT message, WPARAM word_parameter,
                                         LPARAM long_parameter, UINT_PTR token,
                                         DWORD_PTR reference_data) {
@@ -507,6 +521,19 @@ int Runtime::invoke_font_enum(Cpu &cpu, const void *font, const void *metric,
     }
     --callback_depth_;
     return static_cast<int>(result);
+}
+
+void Runtime::invoke_line_dda(Cpu &cpu, std::int32_t x, std::int32_t y, std::uint32_t &exit_code,
+                              bool &exited) {
+    if (pending_line_dda_.empty()) {
+        return;
+    }
+    const auto record = pending_line_dda_.back();
+    static_cast<void>(
+        invoke_guest(cpu, record.procedure,
+                     std::array<std::uint64_t, 3>{static_cast<std::uint32_t>(x),
+                                                  static_cast<std::uint32_t>(y), record.parameter},
+                     exit_code, exited));
 }
 
 std::intptr_t Runtime::invoke_window_callback(Cpu &cpu, std::uint64_t target, std::uint64_t window,

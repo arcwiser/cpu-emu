@@ -158,6 +158,7 @@ enum class RuntimeApi {
     GuestEnumWindows,
     GuestWindowTimer,
     GuestFontEnumeration,
+    GuestLineDda,
     DirectInputCreate,
     DirectInputMethod,
     ResolveDelayLoadedAPI,

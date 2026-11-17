@@ -43,6 +43,8 @@ class Runtime {
                            std::uint32_t tick_count, std::uint32_t &exit_code, bool &exited);
     int invoke_font_enum(Cpu &cpu, const void *font, const void *metric, std::uint32_t font_type,
                          std::uint32_t &exit_code, bool &exited);
+    void invoke_line_dda(Cpu &cpu, std::int32_t x, std::int32_t y, std::uint32_t &exit_code,
+                         bool &exited);
 
   private:
     using Api = detail::RuntimeApi;
@@ -139,6 +141,11 @@ class Runtime {
         bool extended;
     };
     std::vector<PendingFontEnumeration> pending_font_enumerations_;
+    struct PendingLineDda {
+        std::uint64_t procedure;
+        std::uint64_t parameter;
+    };
+    std::vector<PendingLineDda> pending_line_dda_;
     bool quit_message_pending_ = false;
     std::uint32_t quit_message_code_ = 0;
     std::unordered_map<std::uint64_t, std::int64_t> callback_long_parameters_;

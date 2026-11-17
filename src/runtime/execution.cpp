@@ -139,6 +139,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     pending_dialogs_.clear();
     pending_window_enumerations_.clear();
     pending_font_enumerations_.clear();
+    pending_line_dda_.clear();
     for (const auto &timer : window_timers_) {
         ::KillTimer(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(timer.window)), timer.id);
     }
