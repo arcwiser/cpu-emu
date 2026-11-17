@@ -94,6 +94,7 @@ class Cpu {
     std::uint64_t flags_ = 2;
     std::uint16_t x87_control_ = 0x037f;
     std::uint32_t mxcsr_ = 0x1f80;
+    std::array<std::uint16_t, 6> segment_selectors_{};
     std::uint64_t instructions_ = 0;
     std::uint64_t gs_base_ = 0;
     std::uint64_t fs_base_ = 0;

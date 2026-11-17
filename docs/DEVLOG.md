@@ -335,6 +335,9 @@ this file is the companion log of development decisions.
 - A recorded Undertale probe completed adapter count, device caps, adapter identifier, and monitor
   queries, then stopped at unsupported opcode `0x8C` after 15,149,324 instructions. No visible
   rendering or device creation is claimed.
+- Implemented register and memory forms of `MOV r/m16, Sreg`, including Windows user-mode selector
+  state, width behavior, and rejection of reserved segment encodings. Undertale executes the six
+  consecutive selector stores and reaches opcode `0x8F` after 15,149,331 instructions.
 
 ## 2026-11-08 — Undertale PE32 window creation
 

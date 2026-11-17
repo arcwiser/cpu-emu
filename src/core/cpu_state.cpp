@@ -16,6 +16,11 @@ void Cpu::reset(std::uint64_t entry, std::uint64_t stack_pointer, bool long_mode
     flags_ = 2;
     x87_control_ = 0x037f;
     mxcsr_ = 0x1f80;
+    // Match the user-mode selectors used by 32-bit and 64-bit Windows processes. CPUEmu does not
+    // expose descriptor-table mutation, so these remain fixed for the lifetime of a run.
+    segment_selectors_ = long_mode
+                             ? std::array<std::uint16_t, 6>{0, 0x33, 0x2b, 0, 0, 0}
+                             : std::array<std::uint16_t, 6>{0x2b, 0x23, 0x2b, 0x2b, 0x53, 0x2b};
     instructions_ = 0;
     long_mode_ = long_mode;
 }

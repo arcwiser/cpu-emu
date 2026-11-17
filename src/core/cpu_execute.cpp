@@ -488,6 +488,17 @@ void Cpu::step() {
                                read_operand(decoded.rm, actual_width));
         return;
     }
+    case 0x8c: {
+        const auto decoded = decode_rm(rex);
+        if (decoded.reg >= segment_selectors_.size()) {
+            throw Error("invalid MOV from segment register encoding");
+        }
+        // Memory destinations are always words. Register destinations use the effective operand
+        // size and therefore zero-extend selectors for the 32- and 64-bit forms.
+        write_operand(decoded.rm, decoded.rm.is_register ? width : 16U,
+                      segment_selectors_[decoded.reg]);
+        return;
+    }
     case 0x8d: {
         const auto decoded = decode_rm(rex);
         if (decoded.rm.is_register) {

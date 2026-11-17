@@ -78,6 +78,10 @@ void test_cpu_32bit_mode() {
         0x89, 0x0d, 0x7c, 0x01, 0x00, 0x10,       // mov [1000017ch], ecx
         0xb9, 0x2a, 0x00, 0x00, 0x00,             // restore ecx result
         0xdf, 0xe0, 0x9f, 0x9e,                   // fnstsw ax; lahf; sahf
+        0x66, 0x8c, 0x05, 0x90, 0x01, 0x00, 0x10, // mov [10000190h], es
+        0x66, 0x8c, 0x25, 0x92, 0x01, 0x00, 0x10, // mov [10000192h], fs
+        0x8c, 0xd0,                               // mov eax, ss (zero-extended register form)
+        0xa3, 0x94, 0x01, 0x00, 0x10,             // mov [10000194h], eax
         0xb8, 0x2a, 0x00, 0x00, 0x00,             // restore eax result
         0xc3,
     };
@@ -116,6 +120,21 @@ void test_cpu_32bit_mode() {
     require(memory.read32(code_address + 0x178) == code_address + 0x183,
             "REPNE SCASB destination advance");
     require(memory.read32(code_address + 0x17c) == 1, "REPNE SCASB remaining count");
+    require(memory.read16(code_address + 0x190) == 0x2b, "MOV stores x86 ES selector to memory");
+    require(memory.read16(code_address + 0x192) == 0x53, "MOV stores x86 FS selector to memory");
+    require(memory.read32(code_address + 0x194) == 0x2b,
+            "MOV zero extends x86 SS selector to register");
+
+    const std::uint8_t invalid_segment[] = {0x8c, 0xf0}; // segment-register field 6 is invalid
+    memory.write(code_address + 0x200, invalid_segment);
+    cpu.reset(code_address + 0x200, stack_address + 0xffc, false);
+    bool rejected_segment = false;
+    try {
+        cpu.step();
+    } catch (const winemu::Error &) {
+        rejected_segment = true;
+    }
+    require(rejected_segment, "MOV rejects reserved segment-register encoding");
 }
 
 void test_pshufd() {
