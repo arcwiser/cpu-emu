@@ -19,6 +19,7 @@ int main() {
         test_apps();
         test_logging();
         test_paint_selftest();
+        test_timer_callback_lifetime();
         test_winrt_activation();
         test_schedule_chore();
         test_get_error_info();

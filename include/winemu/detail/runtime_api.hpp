@@ -154,6 +154,7 @@ enum class RuntimeApi {
     DialogBoxParamW,
     EndDialog,
     GuestEnumWindows,
+    GuestWindowTimer,
     DirectInputCreate,
     DirectInputMethod,
     ResolveDelayLoadedAPI,

@@ -18,6 +18,7 @@ void test_sign_extend_accumulator();
 void test_apps();
 void test_logging();
 void test_paint_selftest();
+void test_timer_callback_lifetime();
 void test_winrt_activation();
 void test_schedule_chore();
 void test_get_error_info();

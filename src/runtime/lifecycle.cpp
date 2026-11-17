@@ -20,6 +20,9 @@ Runtime::Runtime(std::ostream &output) : output_(output) {
 }
 
 Runtime::~Runtime() {
+    for (const auto &timer : window_timers_) {
+        ::KillTimer(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(timer.window)), timer.id);
+    }
     for (const auto &[token, record] : window_subclasses_) {
         ::RemoveWindowSubclass(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(record.window)),
                                detail::window_subclass_bridge, token);

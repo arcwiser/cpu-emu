@@ -4,6 +4,18 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-18 — Window timer callbacks stay inside the interpreter
+
+- Added dedicated `SetTimer` and `KillTimer` adapters. Native USER32 retains only CPUEmu's bridge;
+  guest `TIMERPROC` addresses stay in runtime-owned records and receive the four documented
+  arguments through `Runtime::invoke_guest`.
+- Timer records are replaced by window/ID, removed after successful `KillTimer`, and cancelled
+  during runtime reset or destruction. Invalid non-executable guest callback addresses fail before
+  reaching USER32.
+- Extended the Paint message-loop regression to combine subclass and timer callback re-entry,
+  message-only timers, invalid callbacks, repeated kill behavior, and a retained windowless timer.
+  A runtime-reuse test verifies the retained timer is torn down before the next guest starts.
+
 ## 2026-11-14 — Guest modal dialog callbacks
 
 - Added dedicated `DialogBoxParamW` and `EndDialog` adapters. Windows receives a host bridge, while

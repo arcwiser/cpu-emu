@@ -64,6 +64,11 @@ HPEN pens[palette_size] = {};
 HBRUSH brushes[palette_size] = {};
 HBRUSH background_brush = nullptr;
 bool message_selftest = false;
+bool subclass_callback_seen = false;
+bool timer_callback_seen = false;
+bool callback_selftest_reported = false;
+UINT_PTR callback_timer_id = 0;
+UINT_PTR retained_timer_id = 0;
 bool legacy_window_callback_seen = false;
 bool dialog_callback_seen = false;
 bool nested_dialog_callback_seen = false;
@@ -121,6 +126,26 @@ BOOL CALLBACK test_window_enum_procedure(HWND window, LPARAM parameter) {
 constexpr UINT_PTR subclass_id = 0x123456789abcdef0ULL;
 constexpr DWORD_PTR subclass_reference = 0x0fedcba987654321ULL;
 
+void finish_callback_selftest() {
+    if (!callback_selftest_reported && subclass_callback_seen && timer_callback_seen) {
+        callback_selftest_reported = true;
+        write_stdout("PAINT CALLBACK SELFTEST PASSED\r\n");
+        PostQuitMessage(0);
+    }
+}
+
+void CALLBACK paint_timer_procedure(HWND window, UINT message, UINT_PTR timer_id, DWORD) {
+    const bool valid = message == WM_TIMER && timer_id == callback_timer_id &&
+                       KillTimer(window, timer_id) != FALSE && KillTimer(window, timer_id) == FALSE;
+    if (!valid) {
+        write_stdout("PAINT TIMER SELFTEST FAILED\r\n");
+        PostQuitMessage(1);
+        return;
+    }
+    timer_callback_seen = true;
+    finish_callback_selftest();
+}
+
 LRESULT CALLBACK paint_subclass_procedure(HWND window, UINT message, WPARAM word_parameter,
                                           LPARAM long_parameter, UINT_PTR id,
                                           DWORD_PTR reference_data) {
@@ -132,9 +157,13 @@ LRESULT CALLBACK paint_subclass_procedure(HWND window, UINT message, WPARAM word
                 FALSE &&
             queried_reference == subclass_reference &&
             RemoveWindowSubclass(window, paint_subclass_procedure, subclass_id) != FALSE;
-        write_stdout(valid ? "PAINT SUBCLASS SELFTEST PASSED\r\n"
-                           : "PAINT SUBCLASS SELFTEST FAILED\r\n");
-        PostQuitMessage(valid ? 0 : 1);
+        if (!valid) {
+            write_stdout("PAINT SUBCLASS SELFTEST FAILED\r\n");
+            PostQuitMessage(1);
+            return 0;
+        }
+        subclass_callback_seen = true;
+        finish_callback_selftest();
         return 0;
     }
     return DefSubclassProc(window, message, word_parameter, long_parameter);
@@ -244,9 +273,26 @@ LRESULT CALLBACK paint_window_procedure(HWND window, UINT message, WPARAM word_p
     case WM_CREATE:
         trace("paint: window created");
         if (message_selftest) {
-            if (SetWindowSubclass(window, paint_subclass_procedure, subclass_id,
+            SetLastError(ERROR_SUCCESS);
+            const bool invalid_timer_rejected =
+                SetTimer(window, 0x41, 10, reinterpret_cast<TIMERPROC>(0xdead)) == 0 &&
+                GetLastError() == ERROR_INVALID_PARAMETER;
+            const auto message_timer = SetTimer(window, 0x42, 10, nullptr);
+            const bool message_timer_valid =
+                message_timer != 0 && KillTimer(window, message_timer) != FALSE;
+            callback_timer_id = SetTimer(window, 0x43, 10, paint_timer_procedure);
+            retained_timer_id = SetTimer(nullptr, 0, 60000, paint_timer_procedure);
+            if (!invalid_timer_rejected || !message_timer_valid || callback_timer_id == 0 ||
+                retained_timer_id == 0 ||
+                SetWindowSubclass(window, paint_subclass_procedure, subclass_id,
                                   subclass_reference) == FALSE) {
                 write_stdout("PAINT SUBCLASS SELFTEST FAILED\r\n");
+                if (callback_timer_id != 0) {
+                    KillTimer(window, callback_timer_id);
+                }
+                if (retained_timer_id != 0) {
+                    KillTimer(nullptr, retained_timer_id);
+                }
                 PostQuitMessage(1);
             } else {
                 PostMessageW(window, WM_APP + 1, 0, 0);

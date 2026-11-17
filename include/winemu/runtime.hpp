@@ -38,6 +38,8 @@ class Runtime {
                                      std::uint64_t word_parameter, std::int64_t long_parameter,
                                      std::uint32_t &exit_code, bool &exited);
     bool invoke_window_enum(Cpu &cpu, std::uint64_t window, std::uint32_t &exit_code, bool &exited);
+    void invoke_timer_proc(Cpu &cpu, std::uint64_t window, std::uint64_t timer_id,
+                           std::uint32_t tick_count, std::uint32_t &exit_code, bool &exited);
 
   private:
     using Api = detail::RuntimeApi;
@@ -121,6 +123,12 @@ class Runtime {
         bool current_process_only;
     };
     std::vector<PendingWindowEnumeration> pending_window_enumerations_;
+    struct WindowTimer {
+        std::uint64_t window;
+        std::uint64_t id;
+        std::uint64_t procedure;
+    };
+    std::vector<WindowTimer> window_timers_;
     bool quit_message_pending_ = false;
     std::uint32_t quit_message_code_ = 0;
     std::unordered_map<std::uint64_t, std::int64_t> callback_long_parameters_;

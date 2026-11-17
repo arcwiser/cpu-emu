@@ -77,6 +77,20 @@ void test_paint_selftest() {
             "paint selftest output");
 }
 
+void test_timer_callback_lifetime() {
+    // Paint deliberately leaves a long-lived windowless callback timer registered. Reusing the
+    // Runtime must cancel that host timer before replacing the guest CPU and memory.
+    const std::filesystem::path apps(WINEMU_TEST_APPS_DIR);
+    std::ostringstream output;
+    winemu::Runtime runtime(output);
+    const auto paint = runtime.run(apps / "paint.exe", 100'000'000, L"--message-selftest");
+    require(paint.exit_code == 0, "timer callback guest exit code");
+    require(output.str().find("PAINT CALLBACK SELFTEST PASSED") != std::string::npos,
+            "timer callback guest output");
+    const auto next_guest = runtime.run(apps / "exit42.exe");
+    require(next_guest.exit_code == 42, "timer callback teardown before runtime reuse");
+}
+
 void test_winrt_activation() {
     // A class with no dedicated adapter must still activate to a guest-owned instance; the
     // emulator must not report success while leaving the ActivateInstance out parameter null.

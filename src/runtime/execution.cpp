@@ -133,6 +133,10 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     dialog_procedures_.clear();
     pending_dialogs_.clear();
     pending_window_enumerations_.clear();
+    for (const auto &timer : window_timers_) {
+        ::KillTimer(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(timer.window)), timer.id);
+    }
+    window_timers_.clear();
     for (const auto &[token, record] : window_subclasses_) {
         ::RemoveWindowSubclass(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(record.window)),
                                detail::window_subclass_bridge, token);

@@ -439,6 +439,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::DialogBoxParamW;
     } else if (name == "EndDialog") {
         api = Api::EndDialog;
+    } else if (name == "SetTimer" || name == "KillTimer") {
+        api = Api::GuestWindowTimer;
     } else if (name == "DirectInput8Create") {
         api = Api::DirectInputCreate;
     } else if (name == "ResolveDelayLoadedAPI") {

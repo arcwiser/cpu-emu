@@ -3667,6 +3667,48 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(children ? 3 : 2);
         break;
     }
+    case Api::GuestWindowTimer: {
+        const bool kill = thunk_name.ends_with("!KillTimer");
+        const auto window = argument(0);
+        const auto requested_id = argument(1);
+        if (kill) {
+            const auto result = ::KillTimer(
+                reinterpret_cast<HWND>(static_cast<std::uintptr_t>(window)), requested_id);
+            if (result != FALSE) {
+                std::erase_if(window_timers_, [&](const WindowTimer &timer) {
+                    return timer.window == window && timer.id == requested_id;
+                });
+            }
+            cpu.set_reg(Rax, result);
+            finish_call(2);
+            break;
+        }
+        const auto guest_procedure = argument(3);
+        if (guest_procedure != 0) {
+            std::uint8_t procedure_permissions = 0;
+            if (!cpu.memory().permissions(guest_procedure, procedure_permissions) ||
+                (procedure_permissions & Execute) == 0) {
+                last_error_ = ERROR_INVALID_PARAMETER;
+                cpu.set_reg(Rax, 0);
+                finish_call(4);
+                break;
+            }
+        }
+        const auto result = ::SetTimer(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(window)),
+                                       requested_id, static_cast<UINT>(argument(2)),
+                                       guest_procedure == 0 ? nullptr : detail::timer_proc_bridge);
+        if (result != 0) {
+            std::erase_if(window_timers_, [&](const WindowTimer &timer) {
+                return timer.window == window && timer.id == result;
+            });
+            if (guest_procedure != 0) {
+                window_timers_.push_back(WindowTimer{window, result, guest_procedure});
+            }
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(4);
+        break;
+    }
     case Api::DirectInputCreate: {
         const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
         const auto write_pointer = [&](std::uint64_t address, std::uint64_t value) {

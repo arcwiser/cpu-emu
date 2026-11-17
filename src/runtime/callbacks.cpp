@@ -256,6 +256,20 @@ BOOL CALLBACK window_enum_bridge(HWND window, LPARAM parameter) {
     }
 }
 
+void CALLBACK timer_proc_bridge(HWND window, UINT message, UINT_PTR timer_id, DWORD tick_count) {
+    if (active_runtime == nullptr || active_cpu == nullptr || active_exit_code == nullptr ||
+        active_exited == nullptr || message != WM_TIMER) {
+        return;
+    }
+    try {
+        active_runtime->invoke_timer_proc(*active_cpu, reinterpret_cast<std::uint64_t>(window),
+                                          timer_id, tick_count, *active_exit_code, *active_exited);
+    } catch (...) {
+        callback_exception = std::current_exception();
+        log::error("timer", "guest timer procedure faulted");
+    }
+}
+
 LRESULT CALLBACK window_subclass_bridge(HWND window, UINT message, WPARAM word_parameter,
                                         LPARAM long_parameter, UINT_PTR token,
                                         DWORD_PTR reference_data) {
@@ -355,6 +369,8 @@ std::intptr_t Runtime::invoke_window_proc(Cpu &cpu, std::uint64_t window, std::u
     if (message == WM_NCDESTROY) {
         window_procedures_.erase(window);
         edit_memory_handles_.erase(window);
+        std::erase_if(window_timers_,
+                      [&](const WindowTimer &timer) { return timer.window == window; });
     }
     return result;
 }
@@ -415,6 +431,20 @@ bool Runtime::invoke_window_enum(Cpu &cpu, std::uint64_t window, std::uint32_t &
     const std::array<std::uint64_t, 2> arguments{window, record.parameter};
     return invoke_guest(cpu, record.procedure, std::span<const std::uint64_t>(arguments), exit_code,
                         exited) != 0;
+}
+
+void Runtime::invoke_timer_proc(Cpu &cpu, std::uint64_t window, std::uint64_t timer_id,
+                                std::uint32_t tick_count, std::uint32_t &exit_code, bool &exited) {
+    const auto found =
+        std::find_if(window_timers_.begin(), window_timers_.end(), [&](const WindowTimer &timer) {
+            return timer.window == window && timer.id == timer_id;
+        });
+    if (found == window_timers_.end()) {
+        return;
+    }
+    static_cast<void>(invoke_guest(
+        cpu, found->procedure, std::array<std::uint64_t, 4>{window, WM_TIMER, timer_id, tick_count},
+        exit_code, exited));
 }
 
 std::intptr_t Runtime::invoke_window_callback(Cpu &cpu, std::uint64_t target, std::uint64_t window,
