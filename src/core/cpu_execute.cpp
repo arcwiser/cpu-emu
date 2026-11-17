@@ -52,6 +52,19 @@ std::uint64_t divide_unsigned_128(std::uint64_t high, std::uint64_t low, std::ui
     return quotient;
 }
 
+std::uint32_t crc32c(std::uint32_t accumulator, std::uint64_t value, unsigned width) {
+    constexpr std::uint32_t reflected_polynomial = 0x82f63b78U;
+    for (unsigned byte = 0; byte < width / 8; ++byte) {
+        accumulator ^= static_cast<std::uint8_t>(value);
+        value >>= 8;
+        for (unsigned bit = 0; bit < 8; ++bit) {
+            const auto mask = 0U - (accumulator & 1U);
+            accumulator = (accumulator >> 1) ^ (reflected_polynomial & mask);
+        }
+    }
+    return accumulator;
+}
+
 } // namespace
 
 void Cpu::step() {
@@ -1240,6 +1253,15 @@ void Cpu::step() {
     case 0xfd:
         flags_ |= flag_df;
         return;
+    case 0xf5:
+        flags_ ^= flag_cf;
+        return;
+    case 0xf8:
+        flags_ &= ~flag_cf;
+        return;
+    case 0xf9:
+        flags_ |= flag_cf;
+        return;
     case 0x0f: {
         const auto second = fetch8();
         const auto xmm_low_float = [&](unsigned index) {
@@ -1257,6 +1279,16 @@ void Cpu::step() {
         };
         if (second == 0x38) {
             const auto third = fetch8();
+            if ((third == 0xf0 || third == 0xf1) && repeat_prefix == 0xf2) { // CRC32
+                const auto decoded = decode_rm(rex);
+                const auto source_width =
+                    third == 0xf0 ? 8U : ((rex & 8) != 0 ? 64U : (operand16 ? 16U : 32U));
+                const auto source = read_operand(decoded.rm, source_width);
+                const auto accumulator = static_cast<std::uint32_t>(registers_[decoded.reg]);
+                const auto result = crc32c(accumulator, source, source_width);
+                write_register(decoded.reg, (rex & 8) != 0 ? 64U : 32U, result);
+                return;
+            }
             if (third == 0x00 && operand16) { // PSHUFB xmm, xmm/m128
                 const auto decoded = decode_rm(rex);
                 const auto control =

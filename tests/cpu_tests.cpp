@@ -306,6 +306,78 @@ void test_bit_count_instructions() {
     require((cpu.flags() & (1ULL << 6)) == 0, "TZCNT zero operand zero flag");
 }
 
+void test_crc32_instruction() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    constexpr std::uint64_t stack_address = 0x400000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    memory.map(stack_address, 0x1000, winemu::Read | winemu::Write, "stack");
+    const std::uint8_t code[] = {
+        0xf2, 0x0f, 0x38, 0xf0, 0xcc,             // crc32 ecx, ah
+        0x66, 0xf2, 0x0f, 0x38, 0xf1, 0x17,       // crc32 edx, word ptr [rdi]
+        0xf2, 0x44, 0x0f, 0x38, 0xf1, 0x47, 0x04, // crc32 r8d, dword ptr [rdi + 4]
+        0x31, 0xc0,                               // xor eax, eax
+        0xf9,                                     // stc
+        0xf5,                                     // cmc
+        0xf8,                                     // clc
+        0xf9,                                     // stc
+        0xf2, 0x4c, 0x0f, 0x38, 0xf1, 0x0e,       // crc32 r9, qword ptr [rsi]
+        0xf2, 0x44, 0x0f, 0x38, 0xf0, 0xcb,       // crc32 r9d, bl
+        0xc3,
+    };
+    memory.write(code_address, code);
+    memory.write16(data_address, 0x1234);
+    memory.write32(data_address + 4, 0xdeadbeefU);
+    memory.write64(data_address + 0xff8, 0x3837363534333231ULL); // "12345678"
+    memory.write64(stack_address + 0xff8, 0xdeadbeef);
+    winemu::Cpu cpu(memory);
+    cpu.reset(code_address, stack_address + 0xff8);
+    cpu.set_reg(winemu::Rax, 0xab00);
+    cpu.set_reg(winemu::Rbx, 0x39); // '9'
+    cpu.set_reg(winemu::Rcx, 0xffffffff12345678ULL);
+    cpu.set_reg(winemu::Rdx, 0xffffffff89abcdefULL);
+    cpu.set_reg(winemu::R8, 0xffffffff0badf00dULL);
+    cpu.set_reg(winemu::R9, 0xffffffffffffffffULL);
+    cpu.set_reg(winemu::Rdi, data_address);
+    cpu.set_reg(winemu::Rsi, data_address + 0xff8);
+    while (cpu.rip() != 0xdeadbeef) {
+        cpu.step();
+    }
+    require(cpu.reg(winemu::Rcx) == 0xc0912609U, "CRC32 byte register and zero extension");
+    require(cpu.reg(winemu::Rdx) == 0x1f22f279U, "CRC32 word memory source");
+    require(cpu.reg(winemu::R8) == 0x59e31c6eU, "CRC32 dword memory and REX destination");
+    require(cpu.reg(winemu::R9) == 0x1cf96d7cU, "CRC32C standard vector and qword source");
+    constexpr std::uint64_t status_flags =
+        (1ULL << 0) | (1ULL << 2) | (1ULL << 4) | (1ULL << 6) | (1ULL << 7) | (1ULL << 11);
+    require((cpu.flags() & status_flags) == ((1ULL << 0) | (1ULL << 2) | (1ULL << 6)),
+            "CRC32 preserves arithmetic flags");
+
+    constexpr std::uint64_t code32_address = 0x10000000;
+    constexpr std::uint64_t data32_address = 0x10001000;
+    constexpr std::uint64_t stack32_address = 0x10002000;
+    winemu::Memory memory32;
+    memory32.map(code32_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute,
+                 "x86 code");
+    memory32.map(data32_address, 0x1000, winemu::Read | winemu::Write, "x86 data");
+    memory32.map(stack32_address, 0x1000, winemu::Read | winemu::Write, "x86 stack");
+    const std::uint8_t code32[] = {
+        0xf2, 0x0f, 0x38, 0xf1, 0x0d, 0x00, 0x10, 0x00, 0x10, // crc32 ecx, dword ptr [10001000h]
+        0xc3,
+    };
+    memory32.write(code32_address, code32);
+    memory32.write32(data32_address, 0xdeadbeefU);
+    memory32.write32(stack32_address + 0xffc, 0xdeadbeefU);
+    winemu::Cpu cpu32(memory32);
+    cpu32.reset(code32_address, stack32_address + 0xffc, false);
+    cpu32.set_reg(winemu::Rcx, 0x0badf00dU);
+    while (cpu32.rip() != 0xdeadbeef) {
+        cpu32.step();
+    }
+    require(cpu32.reg(winemu::Rcx) == 0x59e31c6eU, "CRC32 PE32 absolute memory source");
+}
+
 void test_extended_ssse3() {
     constexpr std::uint64_t code_address = 0x200000000ULL;
     constexpr std::uint64_t data_address = 0x300000000ULL;

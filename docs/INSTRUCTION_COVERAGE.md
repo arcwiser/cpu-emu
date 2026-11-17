@@ -31,7 +31,7 @@ they can unlock while keeping non-CPU blockers visible.
 | MMX moves/state | Legacy multimedia/game code | Complete `MOVD`/`MOVQ`, register/memory widths, MMX↔x87 state rules | Encoding matrix and state-transition regressions | Media APIs and timing |
 | SSE/SSE2 audit | Notepad, GameMaker, Chromium startup | Finish register/memory/prefix variants and exact scalar lane preservation | Generated form matrix plus current app probes | Threads/COM/graphics for deeper progress |
 | SSE3/SSSE3 | Modern runtimes and codecs | Complete advertised-family requirements beyond selected operations | Family tests with `CPUID` remaining gated until complete | DLL loading and exception delivery |
-| SSE4.1/SSE4.2 | Chromium/V8 and newer application libraries | Complete packed integer forms, string compare, CRC behavior | V8 startup delta plus independent opcode regressions | Guest processes, threads, mapped sections |
+| SSE4.1/SSE4.2 | Chromium/V8 and newer application libraries | Complete packed integer forms and string compare after the initial CRC32 subset | V8 startup delta plus independent opcode regressions | Guest processes, threads, mapped sections |
 | BMI1/BMI2 | Modern compiler output | Widths, zero-input behavior, flags, memory forms, feature gating | Compiler-generated fixture and edge-value tests | Usually not the first current blocker |
 | Exception delivery | Divide/access/illegal-instruction recovery and C++ runtimes | Guest exception records, stack dispatch/unwind, handler ABI | Controlled fault/handler fixtures | Loader metadata and per-thread state |
 | AVX/AVX2 | Newer codecs, browsers, game middleware | VEX decode, YMM state, context switching, `CPUID`/XSAVE contract | Generated encoding/state tests before advertising | Scheduler and exception/context model |
@@ -62,7 +62,7 @@ input, audio, threading, loading, services, and persistence are independent comp
 | 🟩 | `MUL`, `IMUL`, `DIV`, `IDIV` | One-operand and common immediate/two-operand forms |
 | 🟩 | `SHL`/`SAL`, `SHR`, `SAR`, `ROL`, `ROR` | Immediate, one-bit, and `CL` counts where decoded |
 | 🟩 | `CBW`/`CWDE`/`CDQE`, `CWD`/`CDQ`/`CQO` | Mode- and operand-size-aware sign extension |
-| 🟩 | `LAHF`, `SAHF`, `CLC`, `STC`, `CLD`, `STD` | User-mode flag transfer/control used by current guests |
+| 🟩 | `LAHF`, `SAHF`, `CLC`, `STC`, `CMC`, `CLD`, `STD` | User-mode flag transfer/control used by current guests |
 | 🟩 | `NOP`, multi-byte NOP/prefetch hints, `WAIT`/`FWAIT` | Hints are architecturally inert; deferred x87 faults are not modeled |
 
 ## Control flow and conditions
@@ -120,7 +120,7 @@ The x87 stack and control word are independent state; they are not aliases of XM
 | SSE4.1 | 🟨 | `PTEST`, `PACKUSDW`, signed/unsigned packed min/max subset, `PMULLD` |
 | MXCSR | 🟨 | `LDMXCSR`, `STMXCSR`; complete SIMD exception delivery is not modeled |
 | MMX | 🟧 | Initial decode/state only; the MMX `MOVD`/`MOVQ` matrix remains incomplete |
-| SSE4.2 | ⬜ | String/CRC family not implemented or advertised |
+| SSE4.2 | 🟧 | `CRC32` byte/word/dword/qword register and memory sources; string-compare forms remain unimplemented and the family is not advertised |
 | AVX/AVX2/AVX-512 | ⬜ | VEX/EVEX decode and extended vector state not implemented |
 | AES/PCLMUL/SHA | ⬜ | Not implemented or advertised |
 
@@ -136,7 +136,7 @@ CVTSI2SS   CVTTSS2SI  CVTSS2SD   CVTSD2SS   PSHUFD     PSHUFLW    PSHUFHW
 PADDB/W/D/Q            PSUBB/W/D/Q           PUNPCKL/HBW/WD/DQ
 PSRLDQ     PSLLDQ     PMOVMSKB   PSHUFB     PHADD*     PHSUB*
 PMADDUBSW  PSIGNB/W/D  PMULHRSW  PALIGNR    PABSB/W/D  PTEST
-PACKUSDW   PMIN*/PMAX*            PMULLD
+PACKUSDW   PMIN*/PMAX*            PMULLD     CRC32
 ```
 
 `MIN*`, `MAX*`, `PHADD*`, and `PHSUB*` denote only the decoded variants in the current source.

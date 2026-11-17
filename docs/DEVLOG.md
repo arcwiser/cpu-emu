@@ -4,6 +4,17 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-18 — Initial SSE4.2 CRC32 and missing carry controls
+
+- Implemented the mandatory-`F2` `CRC32` encodings for byte, word, dword, and qword sources using
+  the reflected CRC32C polynomial. Register and checked-memory forms work in PE32 and PE32+, REX
+  destinations zero-extend the 32-bit result, and architectural flags remain unchanged.
+- Added regressions for high-byte registers, 16/32-bit memory, a qword at the end of a mapped page,
+  extended registers, PE32 absolute addressing, and the standard `123456789` CRC32C vector.
+- The new flag-preservation regression exposed that `CLC` and `STC` were documented but absent.
+  Implemented both plus `CMC`, with carry-only semantics. SSE4.2 remains hidden from `CPUID`
+  because packed-string comparison instructions are still missing.
+
 ## 2026-11-18 — LineDDA points re-enter guest code safely
 
 - Added a dedicated `LineDDA` adapter so GDI receives a host bridge rather than a guest procedure
