@@ -714,6 +714,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(1);
         break;
     }
+    case Api::IsDebuggerPresent:
+        // A host debugger attached to CPUEmu does not debug the isolated guest process model.
+        cpu.set_reg(Rax, FALSE);
+        finish_call();
+        break;
     case Api::GetCurrentProcessId:
         cpu.set_reg(Rax, ::GetCurrentProcessId());
         finish_call();

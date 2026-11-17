@@ -21,7 +21,7 @@ explicit adapter.
 
 | Area | APIs and behavior | Current limits |
 | --- | --- | --- |
-| Process lifecycle | `ExitProcess`, CRT exit functions, `TerminateProcess` | Single guest process |
+| Process lifecycle | `ExitProcess`, CRT exit functions, `TerminateProcess`, `IsDebuggerPresent` | Single guest process; host debugger state is intentionally not exposed as guest debugger state |
 | Import binding | `LoadLibraryA`/`GetProcAddress` under the guest's own activation context | Side-by-Side assemblies such as Common-Controls v6 bind as Windows binds them for the guest; contexts are created from the guest image's embedded manifest |
 | Window classes | `RegisterClassW`, `RegisterClassExW`, `CreateWindowExW` under the guest's resource module | Class menu names resolve against the guest image, so class menus load; child controls are real host windows |
 | Modal dialogs | `DialogBoxParamW`, `EndDialog` | Resource templates resolve from the guest image; Windows retains only a host bridge while guest dialog procedures, initialization values, and nested-dialog state remain in the runtime |

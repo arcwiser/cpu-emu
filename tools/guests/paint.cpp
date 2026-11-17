@@ -624,6 +624,9 @@ int run_sync_selftest() {
         }
     };
 
+    check(IsDebuggerPresent() == FALSE,
+          "sync selftest: guest process has no attached guest debugger");
+
     IDirect3D9Ex *direct3d = nullptr;
     const HRESULT direct3d_result = Direct3DCreate9Ex(D3D_SDK_VERSION, &direct3d);
     check(SUCCEEDED(direct3d_result) && direct3d != nullptr,

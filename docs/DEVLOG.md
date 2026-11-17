@@ -342,6 +342,9 @@ this file is the companion log of development decisions.
   architectural rule that an ESP-based memory destination is calculated after the stack advances.
 - The follow-up Undertale probe executes the saved-flags `POP` and reaches
   `KERNEL32!IsDebuggerPresent` after 15,149,348 instructions.
+- Added an isolated guest-process implementation of `IsDebuggerPresent`; a debugger attached to
+  the CPUEmu host is not misreported as a debugger attached inside the emulated process. Undertale
+  advances to `UnhandledExceptionFilter` after 15,149,358 instructions.
 
 ## 2026-11-08 — Undertale PE32 window creation
 

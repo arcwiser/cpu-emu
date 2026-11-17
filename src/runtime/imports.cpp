@@ -139,6 +139,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::TimeConversion;
     } else if (kernel_module && name == "GetTimeZoneInformation") {
         api = Api::TimeZoneInformation;
+    } else if (kernel_module && name == "IsDebuggerPresent") {
+        api = Api::IsDebuggerPresent;
     } else if (kernel_module && name == "GetCurrentProcessId") {
         api = Api::GetCurrentProcessId;
     } else if (kernel_module && name == "GetCurrentThreadId") {

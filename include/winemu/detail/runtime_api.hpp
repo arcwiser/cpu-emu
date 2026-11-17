@@ -32,6 +32,7 @@ enum class RuntimeApi {
     GetSystemTimeAsFileTime,
     TimeConversion,
     TimeZoneInformation,
+    IsDebuggerPresent,
     GetCurrentProcessId,
     GetCurrentThreadId,
     StartupInfo,
