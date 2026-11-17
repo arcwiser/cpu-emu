@@ -13,6 +13,7 @@ void test_pshufb();
 void test_packed_absolute_values();
 void test_bit_count_instructions();
 void test_crc32_instruction();
+void test_movbe_instruction();
 void test_extended_ssse3();
 void test_sse3_float_operations();
 void test_sign_extend_accumulator();

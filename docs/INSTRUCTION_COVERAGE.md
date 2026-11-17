@@ -55,7 +55,7 @@ input, audio, threading, loading, services, and persistence are independent comp
 
 | Status | Implemented mnemonic groups | Important scope |
 | :---: | --- | --- |
-| 🟩 | `MOV`, immediate `MOV`, `MOVSX`, `MOVZX`, `LEA`, `XCHG` | Register and checked-memory forms across implemented widths |
+| 🟩 | `MOV`, immediate `MOV`, `MOVSX`, `MOVZX`, `MOVBE`, `LEA`, `XCHG` | Register and checked-memory forms across implemented widths; `MOVBE` covers 16/32/64-bit endian conversion |
 | 🟩 | `PUSH`, `POP`, `PUSHF`, `POPF`, `LEAVE` | Mode-correct stack width and x86 callback stacks |
 | 🟩 | `ADD`, `ADC`, `SUB`, `SBB`, `CMP`, `INC`, `DEC`, `NEG` | Arithmetic flags and immediate groups |
 | 🟩 | `AND`, `OR`, `XOR`, `TEST`, `NOT` | Register, memory, and immediate groups |

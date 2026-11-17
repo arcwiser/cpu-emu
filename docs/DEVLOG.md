@@ -4,6 +4,17 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-18 — MOVBE load/store matrix
+
+- Implemented unprefixed `0F 38 F0/F1` `MOVBE` loads and stores for 16-, 32-, and 64-bit operands,
+  sharing the opcode bytes with—but remaining correctly distinct from—the mandatory-`F2` `CRC32`
+  family.
+- Added PE32 and PE32+ regressions covering loads, stores, upper-bit preservation/zero-extension,
+  REX destinations, a qword read at a mapping boundary, unchanged flags, absolute addressing, and
+  rejection of the architecturally invalid register-source form.
+- `CPUID` continues to hide MOVBE because implementing an instruction does not by itself authorize
+  advertising its feature bit to general guest software.
+
 ## 2026-11-18 — Initial SSE4.2 CRC32 and missing carry controls
 
 - Implemented the mandatory-`F2` `CRC32` encodings for byte, word, dword, and qword sources using

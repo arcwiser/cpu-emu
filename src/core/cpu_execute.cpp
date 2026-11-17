@@ -1279,6 +1279,29 @@ void Cpu::step() {
         };
         if (second == 0x38) {
             const auto third = fetch8();
+            if ((third == 0xf0 || third == 0xf1) && repeat_prefix == 0) { // MOVBE
+                const auto decoded = decode_rm(rex);
+                if (decoded.rm.is_register) {
+                    throw Error("MOVBE requires a memory operand");
+                }
+                const auto swap_bytes = [&](std::uint64_t value) {
+                    if (width == 16) {
+                        return static_cast<std::uint64_t>(
+                            static_cast<std::uint16_t>((value << 8) | (value >> 8)));
+                    }
+                    if (width == 32) {
+                        return static_cast<std::uint64_t>(
+                            _byteswap_ulong(static_cast<unsigned long>(value)));
+                    }
+                    return _byteswap_uint64(value);
+                };
+                if (third == 0xf0) {
+                    write_register(decoded.reg, width, swap_bytes(read_operand(decoded.rm, width)));
+                } else {
+                    write_operand(decoded.rm, width, swap_bytes(read_register(decoded.reg, width)));
+                }
+                return;
+            }
             if ((third == 0xf0 || third == 0xf1) && repeat_prefix == 0xf2) { // CRC32
                 const auto decoded = decode_rm(rex);
                 const auto source_width =

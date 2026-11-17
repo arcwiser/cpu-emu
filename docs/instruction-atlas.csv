@@ -4,6 +4,7 @@ Broad,Core integer,MOVSX
 Broad,Core integer,MOVZX
 Broad,Core integer,LEA
 Broad,Core integer,XCHG
+Broad,Core integer,MOVBE
 Broad,Core integer,ADD
 Broad,Core integer,ADC
 Broad,Core integer,SUB

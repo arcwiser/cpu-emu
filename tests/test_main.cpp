@@ -14,6 +14,7 @@ int main() {
         test_packed_absolute_values();
         test_bit_count_instructions();
         test_crc32_instruction();
+        test_movbe_instruction();
         test_extended_ssse3();
         test_sse3_float_operations();
         test_sign_extend_accumulator();

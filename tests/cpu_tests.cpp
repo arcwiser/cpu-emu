@@ -1,6 +1,7 @@
 #include "test_suite.hpp"
 
 #include "winemu/cpu.hpp"
+#include "winemu/error.hpp"
 #include "winemu/memory.hpp"
 
 #include <array>
@@ -376,6 +377,84 @@ void test_crc32_instruction() {
         cpu32.step();
     }
     require(cpu32.reg(winemu::Rcx) == 0x59e31c6eU, "CRC32 PE32 absolute memory source");
+}
+
+void test_movbe_instruction() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    constexpr std::uint64_t stack_address = 0x400000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    memory.map(stack_address, 0x1000, winemu::Read | winemu::Write, "stack");
+    const std::uint8_t code[] = {
+        0x66, 0x0f, 0x38, 0xf0, 0x0f,       // movbe cx, word ptr [rdi]
+        0x0f, 0x38, 0xf0, 0x57, 0x04,       // movbe edx, dword ptr [rdi + 4]
+        0x4c, 0x0f, 0x38, 0xf0, 0x06,       // movbe r8, qword ptr [rsi]
+        0x66, 0x0f, 0x38, 0xf1, 0x4f, 0x10, // movbe word ptr [rdi + 10h], cx
+        0x0f, 0x38, 0xf1, 0x57, 0x14,       // movbe dword ptr [rdi + 14h], edx
+        0x4c, 0x0f, 0x38, 0xf1, 0x47, 0x18, // movbe qword ptr [rdi + 18h], r8
+        0xc3,
+    };
+    memory.write(code_address, code);
+    memory.write16(data_address, 0x1234);
+    memory.write32(data_address + 4, 0x11223344);
+    memory.write64(data_address + 0xff8, 0x0102030405060708ULL);
+    memory.write64(stack_address + 0xff8, 0xdeadbeef);
+    winemu::Cpu cpu(memory);
+    cpu.reset(code_address, stack_address + 0xff8);
+    cpu.set_reg(winemu::Rcx, 0xffffffffffff0000ULL);
+    cpu.set_reg(winemu::Rdx, 0xffffffffffffffffULL);
+    cpu.set_reg(winemu::R8, 0xffffffffffffffffULL);
+    cpu.set_reg(winemu::Rdi, data_address);
+    cpu.set_reg(winemu::Rsi, data_address + 0xff8);
+    while (cpu.rip() != 0xdeadbeef) {
+        cpu.step();
+    }
+    require(cpu.reg(winemu::Rcx) == 0xffffffffffff3412ULL,
+            "MOVBE word load preserves upper register bits");
+    require(cpu.reg(winemu::Rdx) == 0x44332211U, "MOVBE dword load zero extends");
+    require(cpu.reg(winemu::R8) == 0x0807060504030201ULL,
+            "MOVBE qword boundary load and REX destination");
+    require(memory.read16(data_address + 0x10) == 0x1234, "MOVBE word store");
+    require(memory.read32(data_address + 0x14) == 0x11223344, "MOVBE dword store");
+    require(memory.read64(data_address + 0x18) == 0x0102030405060708ULL, "MOVBE qword store");
+    require(cpu.flags() == 2, "MOVBE leaves flags unchanged");
+
+    const std::uint8_t invalid_code[] = {0x0f, 0x38, 0xf0, 0xc1}; // register source is invalid
+    memory.write(code_address + 0x100, invalid_code);
+    cpu.reset(code_address + 0x100, stack_address + 0xff8);
+    bool rejected_register_form = false;
+    try {
+        cpu.step();
+    } catch (const winemu::Error &) {
+        rejected_register_form = true;
+    }
+    require(rejected_register_form, "MOVBE rejects register source encoding");
+
+    constexpr std::uint64_t code32_address = 0x10000000;
+    constexpr std::uint64_t data32_address = 0x10001000;
+    constexpr std::uint64_t stack32_address = 0x10002000;
+    winemu::Memory memory32;
+    memory32.map(code32_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute,
+                 "x86 code");
+    memory32.map(data32_address, 0x1000, winemu::Read | winemu::Write, "x86 data");
+    memory32.map(stack32_address, 0x1000, winemu::Read | winemu::Write, "x86 stack");
+    const std::uint8_t code32[] = {
+        0x0f, 0x38, 0xf0, 0x0d, 0x00, 0x10, 0x00, 0x10, // movbe ecx, [10001000h]
+        0x0f, 0x38, 0xf1, 0x0d, 0x04, 0x10, 0x00, 0x10, // movbe [10001004h], ecx
+        0xc3,
+    };
+    memory32.write(code32_address, code32);
+    memory32.write32(data32_address, 0xa1b2c3d4U);
+    memory32.write32(stack32_address + 0xffc, 0xdeadbeefU);
+    winemu::Cpu cpu32(memory32);
+    cpu32.reset(code32_address, stack32_address + 0xffc, false);
+    while (cpu32.rip() != 0xdeadbeef) {
+        cpu32.step();
+    }
+    require(cpu32.reg(winemu::Rcx) == 0xd4c3b2a1U, "MOVBE PE32 absolute load");
+    require(memory32.read32(data32_address + 4) == 0xa1b2c3d4U, "MOVBE PE32 absolute store");
 }
 
 void test_extended_ssse3() {
