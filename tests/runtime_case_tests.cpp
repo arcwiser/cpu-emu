@@ -78,8 +78,8 @@ void test_paint_selftest() {
 }
 
 void test_timer_callback_lifetime() {
-    // Paint deliberately leaves a long-lived windowless callback timer registered. Reusing the
-    // Runtime must cancel that host timer before replacing the guest CPU and memory.
+    // Paint deliberately leaves a long-lived windowless callback timer and modeless dialog
+    // registered. Reusing the Runtime must release both before replacing the guest CPU and memory.
     const std::filesystem::path apps(WINEMU_TEST_APPS_DIR);
     std::ostringstream output;
     winemu::Runtime runtime(output);

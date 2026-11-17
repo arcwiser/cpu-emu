@@ -23,6 +23,11 @@ Runtime::~Runtime() {
     for (const auto &timer : window_timers_) {
         ::KillTimer(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(timer.window)), timer.id);
     }
+    for (const auto &[window, callback] : dialog_callbacks_) {
+        if (!callback.modal) {
+            ::DestroyWindow(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(window)));
+        }
+    }
     for (const auto &[token, record] : window_subclasses_) {
         ::RemoveWindowSubclass(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(record.window)),
                                detail::window_subclass_bridge, token);

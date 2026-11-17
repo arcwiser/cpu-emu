@@ -69,9 +69,12 @@ bool timer_callback_seen = false;
 bool callback_selftest_reported = false;
 UINT_PTR callback_timer_id = 0;
 UINT_PTR retained_timer_id = 0;
+HWND retained_modeless_dialog = nullptr;
 bool legacy_window_callback_seen = false;
 bool dialog_callback_seen = false;
 bool nested_dialog_callback_seen = false;
+bool modeless_dialog_init_seen = false;
+bool modeless_dialog_message_seen = false;
 HWND expected_enum_child = nullptr;
 HWND expected_enum_grandchild = nullptr;
 HWND expected_enum_parent = nullptr;
@@ -99,6 +102,18 @@ INT_PTR CALLBACK test_dialog_procedure(HWND dialog, UINT message, WPARAM, LPARAM
                         test_dialog_procedure, 0x87654321);
     EndDialog(dialog, translated && value == 73 && nested_result == 0x1111 ? 0x2468 : 0x1357);
     return TRUE;
+}
+
+INT_PTR CALLBACK test_modeless_dialog_procedure(HWND, UINT message, WPARAM, LPARAM parameter) {
+    if (message == WM_INITDIALOG) {
+        modeless_dialog_init_seen = parameter == 0x31415926;
+        return TRUE;
+    }
+    if (message == WM_APP + 4) {
+        modeless_dialog_message_seen = true;
+        return TRUE;
+    }
+    return FALSE;
 }
 
 BOOL CALLBACK test_window_enum_procedure(HWND window, LPARAM parameter) {
@@ -282,8 +297,11 @@ LRESULT CALLBACK paint_window_procedure(HWND window, UINT message, WPARAM word_p
                 message_timer != 0 && KillTimer(window, message_timer) != FALSE;
             callback_timer_id = SetTimer(window, 0x43, 10, paint_timer_procedure);
             retained_timer_id = SetTimer(nullptr, 0, 60000, paint_timer_procedure);
+            retained_modeless_dialog =
+                CreateDialogParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_CALLBACK_TEST),
+                                   window, test_modeless_dialog_procedure, 0x31415926);
             if (!invalid_timer_rejected || !message_timer_valid || callback_timer_id == 0 ||
-                retained_timer_id == 0 ||
+                retained_timer_id == 0 || retained_modeless_dialog == nullptr ||
                 SetWindowSubclass(window, paint_subclass_procedure, subclass_id,
                                   subclass_reference) == FALSE) {
                 write_stdout("PAINT SUBCLASS SELFTEST FAILED\r\n");
@@ -292,6 +310,9 @@ LRESULT CALLBACK paint_window_procedure(HWND window, UINT message, WPARAM word_p
                 }
                 if (retained_timer_id != 0) {
                     KillTimer(nullptr, retained_timer_id);
+                }
+                if (retained_modeless_dialog != nullptr) {
+                    DestroyWindow(retained_modeless_dialog);
                 }
                 PostQuitMessage(1);
             } else {
@@ -643,6 +664,33 @@ int run_sync_selftest() {
                           test_dialog_procedure, 0) == -1 &&
               GetLastError() != ERROR_SUCCESS,
           "sync selftest: reject missing dialog resource");
+
+    const HWND modeless_dialog =
+        CreateDialogParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_CALLBACK_TEST), nullptr,
+                           test_modeless_dialog_procedure, 0x31415926);
+    check(modeless_dialog != nullptr && modeless_dialog_init_seen,
+          "sync selftest: create modeless dialog callback");
+    if (modeless_dialog != nullptr) {
+        SendMessageW(modeless_dialog, WM_APP + 4, 0, 0);
+        check(modeless_dialog_message_seen,
+              "sync selftest: dispatch persistent modeless dialog callback");
+        check(DestroyWindow(modeless_dialog) != FALSE,
+              "sync selftest: destroy modeless dialog callback window");
+    }
+    SetLastError(ERROR_SUCCESS);
+    check(CreateDialogParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDD_CALLBACK_TEST),
+                             nullptr, nullptr, 0) == nullptr &&
+              GetLastError() == ERROR_INVALID_PARAMETER,
+          "sync selftest: reject null modeless dialog callback");
+    SetLastError(ERROR_SUCCESS);
+    check(CreateDialogParamW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(0x7fff), nullptr,
+                             test_modeless_dialog_procedure, 0) == nullptr &&
+              GetLastError() != ERROR_SUCCESS,
+          "sync selftest: reject missing modeless dialog resource");
+    SetLastError(ERROR_SUCCESS);
+    check(DestroyWindow(reinterpret_cast<HWND>(0xdead)) == FALSE &&
+              GetLastError() == ERROR_INVALID_WINDOW_HANDLE,
+          "sync selftest: reject invalid window destruction handle");
 
     expected_enum_parent = CreateWindowExW(0, L"STATIC", L"enumeration parent", WS_POPUP, 0, 0, 100,
                                            100, nullptr, nullptr, nullptr, nullptr);

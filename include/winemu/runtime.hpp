@@ -37,6 +37,7 @@ class Runtime {
     std::intptr_t invoke_dialog_proc(Cpu &cpu, std::uint64_t window, std::uint32_t message,
                                      std::uint64_t word_parameter, std::int64_t long_parameter,
                                      std::uint32_t &exit_code, bool &exited);
+    void close_faulted_dialog(std::uint64_t window);
     bool invoke_window_enum(Cpu &cpu, std::uint64_t window, std::uint32_t &exit_code, bool &exited);
     void invoke_timer_proc(Cpu &cpu, std::uint64_t window, std::uint64_t timer_id,
                            std::uint32_t tick_count, std::uint32_t &exit_code, bool &exited);
@@ -111,12 +112,13 @@ class Runtime {
     std::unordered_map<std::uint16_t, std::uint64_t> atom_window_procedures_;
     std::unordered_map<std::uint64_t, std::uint64_t> window_procedures_;
     std::uint64_t creating_window_procedure_ = 0;
-    struct PendingDialog {
+    struct DialogCallback {
         std::uint64_t procedure;
         std::uint64_t init_parameter;
+        bool modal;
     };
-    std::vector<PendingDialog> pending_dialogs_;
-    std::unordered_map<std::uint64_t, std::uint64_t> dialog_procedures_;
+    std::vector<DialogCallback> pending_dialogs_;
+    std::unordered_map<std::uint64_t, DialogCallback> dialog_callbacks_;
     struct PendingWindowEnumeration {
         std::uint64_t procedure;
         std::uint64_t parameter;

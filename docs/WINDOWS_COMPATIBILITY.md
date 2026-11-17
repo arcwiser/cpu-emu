@@ -25,6 +25,7 @@ explicit adapter.
 | Import binding | `LoadLibraryA`/`GetProcAddress` under the guest's own activation context | Side-by-Side assemblies such as Common-Controls v6 bind as Windows binds them for the guest; contexts are created from the guest image's embedded manifest |
 | Window classes | `RegisterClassW`, `RegisterClassExW`, `CreateWindowExW` under the guest's resource module | Class menu names resolve against the guest image, so class menus load; child controls are real host windows |
 | Modal dialogs | `DialogBoxParamW`, `EndDialog` | Resource templates resolve from the guest image; Windows retains only a host bridge while guest dialog procedures, initialization values, and nested-dialog state remain in the runtime |
+| Modeless dialogs | `CreateDialogParamW`, `DestroyWindow` | Resource templates and guest callback ownership use the dialog bridge on PE32 and PE32+; callback faults destroy modeless windows rather than applying modal `EndDialog` semantics |
 | Window enumeration | `EnumWindows`, `EnumChildWindows` | Synchronous callbacks re-enter guest code; top-level enumeration is filtered to windows owned by CPUEmu, and nested enumeration state remains runtime-owned |
 | Window timers | `SetTimer`, `KillTimer` | Message-only timers use the native queue; retained procedures are stored as guest addresses and invoked only through the interpreter, then removed on kill, registered guest-window destruction, or runtime teardown |
 | Subclassing | `SetWindowSubclass`, `GetWindowSubclass`, `RemoveWindowSubclass`, `DefSubclassProc`, and comctl32 v6 ordinals 410–413 | Common Controls retains only a host bridge and opaque token; six-argument guest procedures re-enter the interpreter, use the normal message-pointer marshaler, and can continue the native chain |
@@ -63,8 +64,8 @@ escape emulation or retain unsafe guest state:
 - Vectored exception handlers and native language exception callbacks.
 - General COM objects whose interface pointers and vtables have not been proxied into guest
   memory.
-- Modeless/indirect dialogs, font enumeration, printing, and other APIs that retain or
-  synchronously invoke callbacks without a dedicated adapter.
+- Indirect dialogs, font enumeration, printing, and other APIs that retain or synchronously invoke
+  callbacks without a dedicated adapter.
 - WaveOut, DirectSound, WASAPI, Media Foundation, and other streaming or callback-driven audio
   interfaces.
 

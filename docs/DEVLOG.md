@@ -4,6 +4,20 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-18 — Modeless resource dialogs retain safe guest callbacks
+
+- Added a dedicated `CreateDialogParamW` adapter. Resource templates resolve from the guest image,
+  while the native dialog stores only CPUEmu's bridge and the interpreted procedure remains in a
+  runtime-owned record for the dialog's full lifetime.
+- Added explicit `DestroyWindow` dispatch so both PE32 and PE32+ guests close modeless dialogs with
+  callback-fault propagation and retained window/timer/edit ownership cleanup.
+- Dialog records now distinguish modal from modeless ownership. Callback faults use `EndDialog`
+  for modal dialogs and `DestroyWindow` for modeless dialogs; runtime reset and destruction also
+  destroy any surviving modeless windows before guest memory is replaced.
+- Extended Paint coverage with initialization parameters, later message re-entry, explicit
+  destruction, invalid callback and missing-resource failures, plus runtime reuse with an
+  intentionally retained modeless dialog.
+
 ## 2026-11-18 — Window timer callbacks stay inside the interpreter
 
 - Added dedicated `SetTimer` and `KillTimer` adapters. Native USER32 retains only CPUEmu's bridge;
