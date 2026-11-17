@@ -15,6 +15,7 @@
 #include <commctrl.h>
 // Common Dialogs also depends on the base Windows declarations.
 #include <commdlg.h>
+#include <d3d9.h>
 
 #include <cstdint>
 #include <cwchar>
@@ -622,6 +623,44 @@ int run_sync_selftest() {
             ok = false;
         }
     };
+
+    IDirect3D9Ex *direct3d = nullptr;
+    const HRESULT direct3d_result = Direct3DCreate9Ex(D3D_SDK_VERSION, &direct3d);
+    check(SUCCEEDED(direct3d_result) && direct3d != nullptr,
+          "sync selftest: create Direct3D9Ex proxy");
+    if (direct3d != nullptr) {
+        const UINT adapter_count = direct3d->GetAdapterCount();
+        check(adapter_count != 0, "sync selftest: enumerate Direct3D adapters");
+        if (adapter_count != 0) {
+            D3DADAPTER_IDENTIFIER9 identifier{};
+            check(SUCCEEDED(direct3d->GetAdapterIdentifier(0, 0, &identifier)) &&
+                      identifier.Description[0] != '\0',
+                  "sync selftest: query Direct3D adapter identifier");
+            D3DDISPLAYMODE mode{};
+            check(SUCCEEDED(direct3d->GetAdapterDisplayMode(0, &mode)) && mode.Width != 0 &&
+                      mode.Height != 0,
+                  "sync selftest: query Direct3D display mode");
+            D3DCAPS9 capabilities{};
+            check(SUCCEEDED(direct3d->GetDeviceCaps(0, D3DDEVTYPE_HAL, &capabilities)),
+                  "sync selftest: query Direct3D device capabilities");
+        }
+        IDirect3D9Ex *queried = nullptr;
+        check(SUCCEEDED(direct3d->QueryInterface(__uuidof(IDirect3D9Ex),
+                                                 reinterpret_cast<void **>(&queried))) &&
+                  queried == direct3d,
+              "sync selftest: Direct3D QueryInterface lifetime");
+        if (queried != nullptr) {
+            queried->Release();
+        }
+        IDirect3DDevice9Ex *device = reinterpret_cast<IDirect3DDevice9Ex *>(1);
+        check(FAILED(direct3d->CreateDeviceEx(0, D3DDEVTYPE_HAL, nullptr, 0, nullptr, nullptr,
+                                              &device)) &&
+                  device == nullptr,
+              "sync selftest: fail closed before Direct3D device proxy");
+        direct3d->Release();
+    }
+    check(FAILED(Direct3DCreate9Ex(D3D_SDK_VERSION, nullptr)),
+          "sync selftest: reject null Direct3D output");
 
     OPENFILENAMEW invalid_dialog{};
     check(GetOpenFileNameW(&invalid_dialog) == FALSE && CommDlgExtendedError() == CDERR_STRUCTSIZE,

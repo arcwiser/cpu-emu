@@ -35,7 +35,7 @@ reproducible blocker.
 | Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; file open, Save, and Save As work for tested paths; UTF-8 Unicode text and a 52,138-character document save and reopen exactly | Edited-content Save As, UTF-16/legacy encodings, long interactive sessions, and broader editor behavior remain unverified |
 | Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
-| Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates the `YYGameMakerYY` native window, initializes a safe DirectInput proxy, enumerates display modes, and reaches `Direct3DCreate9Ex` after about 15.1M instructions | The HWND is created but not visibly shown/rendering yet; Direct3D 9, active input, streaming audio, and full Steamworks interfaces remain |
+| Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates the `YYGameMakerYY` native window, initializes safe DirectInput and `IDirect3D9Ex` proxies, and completes Direct3D adapter/capability discovery | The 2026-11-18 probe stops at unsupported opcode `0x8C` after 15,149,324 instructions; the HWND is not visibly rendering and Direct3D device creation, active input, streaming audio, and full Steamworks interfaces remain |
 | Discord / Chromium | 🔴 Blocked | Loads the installed x64 image and advances through more than 2.6 million V8 startup instructions | Blocked by guest threads/processes, DLL loading, exceptions, mapped sections, and broader SIMD support |
 
 ## Undertale subsystem board
@@ -49,7 +49,7 @@ reproducible blocker.
 | Window class/callback | ✅ | Registers `YYGameMakerYY`; interpreted `WM_NCCREATE`/`WM_CREATE` run |
 | Visible window | 🚧 | Native HWND exists, but GameMaker has not shown/rendered it before graphics setup |
 | Input discovery | ✅ | Guest-owned inert DirectInput proxy completes optional discovery |
-| Direct3D 9Ex | 🚧 | Current first unsupported boundary: `Direct3DCreate9Ex` |
+| Direct3D 9Ex | 🚧 | Creation and adapter/capability discovery succeed; device creation and rendering are not implemented |
 | Audio | ○ | Basic synchronous WinMM only; GameMaker streaming path not reached |
 | Playable | ○ | Requires rendering, input, audio, persistence, and sustained loop |
 

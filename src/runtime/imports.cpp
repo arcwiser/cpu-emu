@@ -450,6 +450,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GuestFontEnumeration;
     } else if (name == "LineDDA") {
         api = Api::GuestLineDda;
+    } else if (name == "Direct3DCreate9Ex") {
+        api = Api::Direct3DCreate9Ex;
     } else if (name == "DirectInput8Create") {
         api = Api::DirectInputCreate;
     } else if (name == "ResolveDelayLoadedAPI") {

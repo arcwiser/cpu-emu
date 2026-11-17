@@ -324,6 +324,18 @@ this file is the companion log of development decisions.
 - Undertale now completes optional input discovery, reads the desktop modes, and reaches
   `Direct3DCreate9Ex` after 15,130,126 interpreted instructions.
 
+## 2026-11-18 — Direct3D 9Ex adapter discovery
+
+- Added guest-owned `IDirect3D9Ex` objects backed by host Direct3D solely for adapter, mode,
+  format, capability, monitor, and LUID discovery. Pointer-free results are range-checked and
+  copied into guest memory; native COM pointers never cross the boundary.
+- Added reference tracking, interface-query validation, runtime teardown, and a guest regression
+  covering creation, discovery, QueryInterface lifetime, invalid output, and fail-closed device
+  creation. Rendering devices remain deliberately unsupported pending a guest-owned device proxy.
+- A recorded Undertale probe completed adapter count, device caps, adapter identifier, and monitor
+  queries, then stopped at unsupported opcode `0x8C` after 15,149,324 instructions. No visible
+  rendering or device creation is claimed.
+
 ## 2026-11-08 — Undertale PE32 window creation
 
 - Added PE32-safe `WNDCLASSEXW`, `CREATESTRUCTW`, `WINDOWPOS`, rectangle, resource, and window-text

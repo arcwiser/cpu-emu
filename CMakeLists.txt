@@ -23,7 +23,7 @@ add_library(winemu_core
     src/runtime/strings.cpp
 )
 target_include_directories(winemu_core PUBLIC include)
-target_link_libraries(winemu_core PUBLIC advapi32 comctl32 comdlg32 ole32 shell32 urlmon winmm)
+target_link_libraries(winemu_core PUBLIC advapi32 comctl32 comdlg32 d3d9 dxguid ole32 shell32 urlmon winmm)
 target_compile_options(winemu_core PRIVATE
     $<$<CXX_COMPILER_ID:Clang>:-Wall -Wextra -Wpedantic -Werror>
 )
@@ -97,6 +97,7 @@ add_custom_command(
             ${CMAKE_BINARY_DIR}/test-apps/paint.res -std=c++20 -O2
             -municode -D_DLL -D_MT -Xclang --dependent-lib=msvcrt
             -o ${CMAKE_BINARY_DIR}/test-apps/paint.exe -luser32 -lgdi32 -lcomctl32 -lcomdlg32
+            -ld3d9 -ldxguid
             -Wl,-subsystem:windows
     DEPENDS tools/guests/paint.cpp tools/guests/paint_resource.h
             ${CMAKE_BINARY_DIR}/test-apps/paint.res

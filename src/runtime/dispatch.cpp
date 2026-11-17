@@ -28,6 +28,7 @@
 // Common Dialogs depends on the base Windows declarations above.
 #include <cderr.h>
 #include <commdlg.h>
+#include <d3d9.h>
 #include <urlmon.h>
 
 extern "C" __declspec(dllimport) wchar_t **__stdcall CommandLineToArgvW(const wchar_t *, int *);
@@ -3856,6 +3857,314 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         cpu.set_reg(Rax, result);
         finish_call(6);
+        break;
+    }
+    case Api::Direct3DCreate9Ex: {
+        constexpr std::uint32_t invalid_argument = 0x80070057U;
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        const auto output = argument(1);
+        const auto write_pointer = [&](std::uint64_t address, std::uint64_t value) {
+            if (guest_is_64_bit_) {
+                cpu.memory().write64(address, value);
+            } else {
+                cpu.memory().write32(address, static_cast<std::uint32_t>(value));
+            }
+        };
+        if (output == 0 || !cpu.memory().contains(output, pointer_size)) {
+            cpu.set_reg(Rax, invalid_argument);
+            finish_call(2);
+            break;
+        }
+        write_pointer(output, 0);
+        IDirect3D9Ex *host = nullptr;
+        const auto result =
+            static_cast<std::uint32_t>(::Direct3DCreate9Ex(static_cast<UINT>(argument(0)), &host));
+        if (FAILED(static_cast<HRESULT>(result)) || host == nullptr) {
+            cpu.set_reg(Rax, result);
+            finish_call(2);
+            break;
+        }
+        if (direct3d9_ex_vtable_ == 0) {
+            constexpr std::uint32_t method_count = 22;
+            direct3d9_ex_vtable_ = allocate(method_count * pointer_size);
+            for (std::uint32_t index = 0; index < method_count; ++index) {
+                const auto thunk = next_thunk_;
+                next_thunk_ += 0x100;
+                thunks_.emplace(thunk, Api::Direct3D9ExMethod);
+                thunk_names_.emplace(thunk, "IDirect3D9Ex#" + std::to_string(index));
+                direct3d9_ex_methods_.emplace(thunk, index);
+                write_pointer(direct3d9_ex_vtable_ + index * pointer_size, thunk);
+            }
+        }
+        const auto object = allocate(pointer_size);
+        write_pointer(object, direct3d9_ex_vtable_);
+        direct3d9_ex_objects_.emplace(object, Direct3D9Object{host, 1});
+        write_pointer(output, object);
+        cpu.set_reg(Rax, result);
+        finish_call(2);
+        break;
+    }
+    case Api::Direct3D9ExMethod: {
+        constexpr std::uint32_t invalid_argument = 0x80070057U;
+        constexpr std::uint32_t no_interface = 0x80004002U;
+        constexpr std::uint32_t not_available = 0x8876086aU;
+        static constexpr unsigned argument_counts[] = {3, 1, 1, 2, 1, 4, 3, 5, 3, 6, 7,
+                                                       7, 6, 5, 4, 2, 7, 3, 5, 4, 8, 3};
+        const auto method = direct3d9_ex_methods_.at(cpu.rip());
+        if (method >= std::size(argument_counts)) {
+            throw Error("invalid Direct3D9Ex proxy method");
+        }
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        const auto write_pointer = [&](std::uint64_t address, std::uint64_t value) {
+            if (guest_is_64_bit_) {
+                cpu.memory().write64(address, value);
+            } else {
+                cpu.memory().write32(address, static_cast<std::uint32_t>(value));
+            }
+        };
+        const auto copy_to_guest = [&](std::uint64_t address, const auto &value) {
+            if (address == 0 || !cpu.memory().contains(address, sizeof(value))) {
+                return false;
+            }
+            std::vector<std::uint8_t> bytes(sizeof(value));
+            std::memcpy(bytes.data(), &value, sizeof(value));
+            cpu.memory().write(address, bytes);
+            return true;
+        };
+        const auto object = argument(0);
+        auto object_iterator = direct3d9_ex_objects_.find(object);
+        if (object_iterator == direct3d9_ex_objects_.end()) {
+            cpu.set_reg(Rax, invalid_argument);
+            finish_call(argument_counts[method]);
+            break;
+        }
+        auto *host = static_cast<IDirect3D9Ex *>(object_iterator->second.host);
+        std::uint64_t result = 0;
+        switch (method) {
+        case 0: { // QueryInterface
+            const auto iid_address = argument(1);
+            const auto output = argument(2);
+            if (iid_address == 0 || output == 0 ||
+                !cpu.memory().contains(iid_address, sizeof(GUID)) ||
+                !cpu.memory().contains(output, pointer_size)) {
+                result = invalid_argument;
+                break;
+            }
+            write_pointer(output, 0);
+            GUID iid{};
+            const auto bytes = cpu.memory().read(iid_address, sizeof(iid));
+            std::memcpy(&iid, bytes.data(), bytes.size());
+            if (!IsEqualGUID(iid, IID_IUnknown) && !IsEqualGUID(iid, IID_IDirect3D9) &&
+                !IsEqualGUID(iid, IID_IDirect3D9Ex)) {
+                result = no_interface;
+                break;
+            }
+            host->AddRef();
+            ++object_iterator->second.references;
+            write_pointer(output, object);
+            break;
+        }
+        case 1:
+            host->AddRef();
+            result = ++object_iterator->second.references;
+            break;
+        case 2: {
+            const auto host_result = host->Release();
+            if (--object_iterator->second.references == 0) {
+                direct3d9_ex_objects_.erase(object_iterator);
+            }
+            result = host_result;
+            break;
+        }
+        case 3:
+            // A guest callback cannot be registered as a native rasterizer procedure.
+            result = not_available;
+            break;
+        case 4:
+            result = host->GetAdapterCount();
+            break;
+        case 5: {
+            D3DADAPTER_IDENTIFIER9 identifier{};
+            if (argument(3) == 0 || !cpu.memory().contains(argument(3), sizeof(identifier))) {
+                result = invalid_argument;
+            } else {
+                result = static_cast<std::uint32_t>(host->GetAdapterIdentifier(
+                    static_cast<UINT>(argument(1)), static_cast<DWORD>(argument(2)), &identifier));
+                if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                    copy_to_guest(argument(3), identifier);
+                }
+            }
+            break;
+        }
+        case 6:
+            result = host->GetAdapterModeCount(static_cast<UINT>(argument(1)),
+                                               static_cast<D3DFORMAT>(argument(2)));
+            break;
+        case 7: {
+            D3DDISPLAYMODE mode{};
+            if (argument(4) == 0 || !cpu.memory().contains(argument(4), sizeof(mode))) {
+                result = invalid_argument;
+            } else {
+                result = static_cast<std::uint32_t>(host->EnumAdapterModes(
+                    static_cast<UINT>(argument(1)), static_cast<D3DFORMAT>(argument(2)),
+                    static_cast<UINT>(argument(3)), &mode));
+                if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                    copy_to_guest(argument(4), mode);
+                }
+            }
+            break;
+        }
+        case 8: {
+            D3DDISPLAYMODE mode{};
+            if (argument(2) == 0 || !cpu.memory().contains(argument(2), sizeof(mode))) {
+                result = invalid_argument;
+            } else {
+                result = static_cast<std::uint32_t>(
+                    host->GetAdapterDisplayMode(static_cast<UINT>(argument(1)), &mode));
+                if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                    copy_to_guest(argument(2), mode);
+                }
+            }
+            break;
+        }
+        case 9:
+            result = static_cast<std::uint32_t>(host->CheckDeviceType(
+                static_cast<UINT>(argument(1)), static_cast<D3DDEVTYPE>(argument(2)),
+                static_cast<D3DFORMAT>(argument(3)), static_cast<D3DFORMAT>(argument(4)),
+                static_cast<BOOL>(argument(5))));
+            break;
+        case 10:
+            result = static_cast<std::uint32_t>(host->CheckDeviceFormat(
+                static_cast<UINT>(argument(1)), static_cast<D3DDEVTYPE>(argument(2)),
+                static_cast<D3DFORMAT>(argument(3)), static_cast<DWORD>(argument(4)),
+                static_cast<D3DRESOURCETYPE>(argument(5)), static_cast<D3DFORMAT>(argument(6))));
+            break;
+        case 11: {
+            DWORD quality = 0;
+            const auto quality_output = argument(6);
+            if (quality_output != 0 && !cpu.memory().contains(quality_output, sizeof(quality))) {
+                result = invalid_argument;
+            } else {
+                result = static_cast<std::uint32_t>(host->CheckDeviceMultiSampleType(
+                    static_cast<UINT>(argument(1)), static_cast<D3DDEVTYPE>(argument(2)),
+                    static_cast<D3DFORMAT>(argument(3)), static_cast<BOOL>(argument(4)),
+                    static_cast<D3DMULTISAMPLE_TYPE>(argument(5)),
+                    quality_output == 0 ? nullptr : &quality));
+                if (quality_output != 0) {
+                    copy_to_guest(quality_output, quality);
+                }
+            }
+            break;
+        }
+        case 12:
+            result = static_cast<std::uint32_t>(host->CheckDepthStencilMatch(
+                static_cast<UINT>(argument(1)), static_cast<D3DDEVTYPE>(argument(2)),
+                static_cast<D3DFORMAT>(argument(3)), static_cast<D3DFORMAT>(argument(4)),
+                static_cast<D3DFORMAT>(argument(5))));
+            break;
+        case 13:
+            result = static_cast<std::uint32_t>(host->CheckDeviceFormatConversion(
+                static_cast<UINT>(argument(1)), static_cast<D3DDEVTYPE>(argument(2)),
+                static_cast<D3DFORMAT>(argument(3)), static_cast<D3DFORMAT>(argument(4))));
+            break;
+        case 14: {
+            D3DCAPS9 capabilities{};
+            if (argument(3) == 0 || !cpu.memory().contains(argument(3), sizeof(capabilities))) {
+                result = invalid_argument;
+            } else {
+                result = static_cast<std::uint32_t>(
+                    host->GetDeviceCaps(static_cast<UINT>(argument(1)),
+                                        static_cast<D3DDEVTYPE>(argument(2)), &capabilities));
+                if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                    copy_to_guest(argument(3), capabilities);
+                }
+            }
+            break;
+        }
+        case 15:
+            result = reinterpret_cast<std::uintptr_t>(
+                host->GetAdapterMonitor(static_cast<UINT>(argument(1))));
+            break;
+        case 16:
+        case 20: {
+            const auto output = method == 16 ? argument(6) : argument(7);
+            if (output == 0 || !cpu.memory().contains(output, pointer_size)) {
+                result = invalid_argument;
+            } else {
+                write_pointer(output, 0);
+                result = not_available;
+            }
+            break;
+        }
+        case 17: {
+            D3DDISPLAYMODEFILTER filter{};
+            const auto filter_address = argument(2);
+            if (filter_address == 0 || !cpu.memory().contains(filter_address, sizeof(filter))) {
+                result = 0;
+            } else {
+                const auto bytes = cpu.memory().read(filter_address, sizeof(filter));
+                std::memcpy(&filter, bytes.data(), bytes.size());
+                result = host->GetAdapterModeCountEx(static_cast<UINT>(argument(1)), &filter);
+            }
+            break;
+        }
+        case 18: {
+            D3DDISPLAYMODEFILTER filter{};
+            D3DDISPLAYMODEEX mode{};
+            const auto filter_address = argument(2);
+            if (filter_address == 0 || argument(4) == 0 ||
+                !cpu.memory().contains(filter_address, sizeof(filter)) ||
+                !cpu.memory().contains(argument(4), sizeof(mode))) {
+                result = invalid_argument;
+            } else {
+                auto bytes = cpu.memory().read(filter_address, sizeof(filter));
+                std::memcpy(&filter, bytes.data(), bytes.size());
+                result = static_cast<std::uint32_t>(
+                    host->EnumAdapterModesEx(static_cast<UINT>(argument(1)), &filter,
+                                             static_cast<UINT>(argument(3)), &mode));
+                if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                    copy_to_guest(argument(4), mode);
+                }
+            }
+            break;
+        }
+        case 19: {
+            D3DDISPLAYMODEEX mode{};
+            D3DDISPLAYROTATION rotation{};
+            if (argument(2) == 0 || !cpu.memory().contains(argument(2), sizeof(mode)) ||
+                (argument(3) != 0 && !cpu.memory().contains(argument(3), sizeof(rotation)))) {
+                result = invalid_argument;
+            } else {
+                result = static_cast<std::uint32_t>(host->GetAdapterDisplayModeEx(
+                    static_cast<UINT>(argument(1)), &mode, argument(3) == 0 ? nullptr : &rotation));
+                if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                    copy_to_guest(argument(2), mode);
+                    if (argument(3) != 0) {
+                        copy_to_guest(argument(3), rotation);
+                    }
+                }
+            }
+            break;
+        }
+        case 21: {
+            LUID luid{};
+            if (argument(2) == 0 || !cpu.memory().contains(argument(2), sizeof(luid))) {
+                result = invalid_argument;
+            } else {
+                result = static_cast<std::uint32_t>(
+                    host->GetAdapterLUID(static_cast<UINT>(argument(1)), &luid));
+                if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                    copy_to_guest(argument(2), luid);
+                }
+            }
+            break;
+        }
+        default:
+            result = not_available;
+            break;
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(argument_counts[method]);
         break;
     }
     case Api::DirectInputCreate: {
