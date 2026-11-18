@@ -172,6 +172,7 @@ enum class RuntimeApi {
     DirectInputMethod,
     ResolveDelayLoadedAPI,
     SHGetKnownFolderPath,
+    GuestSpecialFolderPath,
     CoCreateInstance,
     AccPropServicesMethod,
     ApplicationDocumentListsMethod,

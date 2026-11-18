@@ -469,6 +469,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::ResolveDelayLoadedAPI;
     } else if (name == "SHGetKnownFolderPath") {
         api = Api::SHGetKnownFolderPath;
+    } else if (name == "SHGetSpecialFolderPathA" || name == "SHGetSpecialFolderPathW") {
+        api = Api::GuestSpecialFolderPath;
     } else if (name == "CoCreateInstance") {
         api = Api::CoCreateInstance;
     } else if (name == "WindowsCreateString") {

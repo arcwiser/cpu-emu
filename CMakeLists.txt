@@ -97,7 +97,7 @@ add_custom_command(
             ${CMAKE_BINARY_DIR}/test-apps/paint.res -std=c++20 -O2
             -municode -D_DLL -D_MT -Xclang --dependent-lib=msvcrt
             -o ${CMAKE_BINARY_DIR}/test-apps/paint.exe -luser32 -lgdi32 -lcomctl32 -lcomdlg32
-            -ld3d9 -ldxguid
+            -ld3d9 -ldxguid -lshell32
             -Wl,-subsystem:windows
     DEPENDS tools/guests/paint.cpp tools/guests/paint_resource.h
             ${CMAKE_BINARY_DIR}/test-apps/paint.res

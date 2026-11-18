@@ -16,6 +16,7 @@
 // Common Dialogs also depends on the base Windows declarations.
 #include <commdlg.h>
 #include <d3d9.h>
+#include <shlobj.h>
 
 #include <cstdint>
 #include <cwchar>
@@ -909,6 +910,14 @@ int run_sync_selftest() {
     check(MapViewOfFile(reinterpret_cast<HANDLE>(0xdead), FILE_MAP_READ, 0, 0, 64) == nullptr &&
               GetLastError() == ERROR_INVALID_HANDLE,
           "sync selftest: reject invalid mapping token");
+
+    char application_data[MAX_PATH]{};
+    check(SHGetSpecialFolderPathA(nullptr, application_data, CSIDL_APPDATA, FALSE) != FALSE &&
+              application_data[0] != '\0',
+          "sync selftest: marshal ANSI special-folder path");
+    check(SHGetSpecialFolderPathA(nullptr, nullptr, CSIDL_APPDATA, FALSE) == FALSE &&
+              GetLastError() == ERROR_INVALID_PARAMETER,
+          "sync selftest: reject null special-folder output");
     check(CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READONLY, 0, 257U * 1024U * 1024U,
                              nullptr) == nullptr &&
               GetLastError() == ERROR_NOT_ENOUGH_MEMORY,

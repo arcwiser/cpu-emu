@@ -51,7 +51,7 @@ explicit adapter.
 ## Marshalled Windows adapters
 
 CPUEmu currently has explicit adapters for `CommandLineToArgvW`, `GetSecurityInfo`, read-only file
-mapping, `FindMimeFromData`, `SHGetKnownFolderPath`, resource loading, cursor/icon/image loading,
+mapping, `FindMimeFromData`, `SHGetKnownFolderPath`, `SHGetSpecialFolderPathA/W`, resource loading, cursor/icon/image loading,
 accelerator loading, window-class registration, window creation, modal resource dialogs, and
 selected WinRT protection-policy calls. Window and dialog bridges re-enter interpreted code
 through `Runtime::invoke_guest`; they never cast a guest procedure to a native function pointer.

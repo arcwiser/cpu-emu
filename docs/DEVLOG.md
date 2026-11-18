@@ -735,6 +735,14 @@ development.
 - Undertale passes its former stack-collision point and advances to `SHGetSpecialFolderPathA`
   after 66,370,113 instructions. The offline Steam messages still are not the active blocker.
 
+## 2026-11-18 — legacy special-folder paths
+
+- Added bounded `SHGetSpecialFolderPathA/W` adapters that keep the native `MAX_PATH` buffers on
+  the host and copy only terminated results into validated guest output ranges.
+- The synchronization fixture covers a real application-data result and null-output rejection.
+  Undertale discovers its save/config folder and reaches `DirectSoundCreate` after 66,394,276
+  instructions, making DirectSound the first observed audio blocker.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

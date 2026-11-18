@@ -5526,6 +5526,66 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call();
         break;
     }
+    case Api::GuestSpecialFolderPath: {
+        constexpr std::size_t path_capacity = MAX_PATH;
+        const auto output = argument(1);
+        const auto wide = thunk_name.ends_with("W");
+        const auto byte_capacity = path_capacity * (wide ? sizeof(wchar_t) : sizeof(char));
+        if (output == 0 || !cpu.memory().contains(output, byte_capacity)) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, 0);
+            finish_call(4);
+            break;
+        }
+        BOOL result = FALSE;
+        const auto shell = LoadLibraryW(L"shell32.dll");
+        if (wide) {
+            std::array<wchar_t, path_capacity> path{};
+            using SpecialFolderPath = BOOL(WINAPI *)(HWND, wchar_t *, int, BOOL);
+            const auto function = reinterpret_cast<SpecialFolderPath>(
+                shell == nullptr ? nullptr : GetProcAddress(shell, "SHGetSpecialFolderPathW"));
+            result =
+                function == nullptr
+                    ? FALSE
+                    : function(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(0))),
+                               path.data(), static_cast<int>(argument(2)), argument(3) != 0);
+            if (result != FALSE) {
+                path.back() = L'\0';
+                const auto length = static_cast<std::size_t>(
+                    std::find(path.begin(), path.end(), L'\0') - path.begin());
+                cpu.memory().write(output, std::span<const std::uint8_t>(
+                                               reinterpret_cast<const std::uint8_t *>(path.data()),
+                                               (length + 1) * sizeof(wchar_t)));
+            }
+        } else {
+            std::array<char, path_capacity> path{};
+            using SpecialFolderPath = BOOL(WINAPI *)(HWND, char *, int, BOOL);
+            const auto function = reinterpret_cast<SpecialFolderPath>(
+                shell == nullptr ? nullptr : GetProcAddress(shell, "SHGetSpecialFolderPathA"));
+            result =
+                function == nullptr
+                    ? FALSE
+                    : function(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(0))),
+                               path.data(), static_cast<int>(argument(2)), argument(3) != 0);
+            if (result != FALSE) {
+                path.back() = '\0';
+                const auto length = static_cast<std::size_t>(
+                    std::find(path.begin(), path.end(), '\0') - path.begin());
+                cpu.memory().write(
+                    output, std::span<const std::uint8_t>(
+                                reinterpret_cast<const std::uint8_t *>(path.data()), length + 1));
+            }
+        }
+        if (shell != nullptr) {
+            FreeLibrary(shell);
+        }
+        if (result == FALSE) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+        finish_call(4);
+        break;
+    }
     case Api::CoCreateInstance: {
         const auto class_id = cpu.reg(Rcx);
         const auto interface_id = cpu.reg(R9);

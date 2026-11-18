@@ -35,7 +35,7 @@ reproducible blocker.
 | Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; file open, Save, and Save As work for tested paths; UTF-8 Unicode text and a 52,138-character document save and reopen exactly | Edited-content Save As, UTF-16/legacy encodings, long interactive sessions, and broader editor behavior remain unverified |
 | Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
-| Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates and shows the `YYGameMakerYY` native window, initializes safe DirectInput and Direct3D proxies, creates a real host-backed device, applies initial render/sampler state, completes startup math, decodes textures, creates/locks/binds guest-owned buffers, and sustains arena-backed heap activity | The 2026-11-18 probe advances to unsupported `SHGetSpecialFolderPathA` after 66,370,113 instructions; the window is shown but a verified first rendered game frame, surfaces/shaders/swap chains, draw/presentation, active input, streaming audio, and full Steamworks interfaces remain |
+| Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates and shows the `YYGameMakerYY` native window, initializes safe DirectInput and Direct3D proxies, creates a real host-backed device, applies initial render/sampler state, completes startup math, decodes textures, creates/locks/binds guest-owned buffers, sustains arena-backed heap activity, and discovers its application-data folder | The 2026-11-18 probe reaches audio initialization and stops at unsupported `DirectSoundCreate` after 66,394,276 instructions; a verified first rendered game frame, surfaces/shaders/swap chains, draw/presentation, active input/audio, and full Steamworks interfaces remain |
 | Discord / Chromium | 🔴 Blocked | Loads the installed x64 image and advances through more than 2.6 million V8 startup instructions | Blocked by guest threads/processes, DLL loading, exceptions, mapped sections, and broader SIMD support |
 
 ## Undertale subsystem board
@@ -50,7 +50,7 @@ reproducible blocker.
 | Visible window | 🚧 | GameMaker calls `ShowWindow` and `UpdateWindow` on its native HWND; a visible rendered game frame has not yet been verified |
 | Input discovery | ✅ | Guest-owned inert DirectInput proxy completes optional discovery |
 | Direct3D 9Ex | 🚧 | Adapter/device creation, PE32-safe structure marshaling, device texture and vertex/index-buffer creation/binding, checked buffer staging locks, and D3DX file/in-memory texture paths are adapted; surface/shader/swap-chain/draw/presentation paths remain |
-| Audio | ○ | Basic synchronous WinMM only; GameMaker streaming path not reached |
+| Audio | 🚧 | Basic synchronous WinMM works; GameMaker now reaches `DirectSoundCreate`, but DirectSound objects and streaming buffers are not yet adapted |
 | Playable | ○ | Requires rendering, input, audio, persistence, and sustained loop |
 
 ## Audio status
