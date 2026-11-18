@@ -121,6 +121,20 @@ void Cpu::step() {
         --x87_depth_;
         x87_top_ = static_cast<std::uint8_t>((x87_top_ + 1) & 7);
     };
+    const auto x87_compare = [&](long double left, long double right) {
+        constexpr std::uint16_t condition_mask = 0x4700;
+        constexpr std::uint16_t c0 = 0x0100;
+        constexpr std::uint16_t c2 = 0x0400;
+        constexpr std::uint16_t c3 = 0x4000;
+        x87_status_ &= ~condition_mask;
+        if (std::isnan(left) || std::isnan(right)) {
+            x87_status_ |= c0 | c2 | c3;
+        } else if (left < right) {
+            x87_status_ |= c0;
+        } else if (left == right) {
+            x87_status_ |= c3;
+        }
+    };
 
     if (opcode >= 0xb0 && opcode <= 0xb7) {
         const auto raw = static_cast<std::uint8_t>(opcode - 0xb0);
@@ -573,17 +587,51 @@ void Cpu::step() {
     }
     case 0xd8: {
         const auto decoded = decode_rm(rex);
-        if (decoded.rm.is_register || x87_depth_ == 0) {
-            throw Error("unsupported x87 D8 instruction");
+        if (x87_depth_ == 0) {
+            throw Error("x87 stack underflow");
+        }
+        const auto operation = decoded.reg & 7;
+        if (decoded.rm.is_register) {
+            const auto target = static_cast<std::size_t>(decoded.rm.register_index & 7);
+            if (target >= x87_depth_) {
+                throw Error("x87 stack underflow");
+            }
+            const auto operand = x87_[target];
+            if (operation == 0) { // FADD ST(0), ST(i)
+                x87_[0] += operand;
+            } else if (operation == 1) { // FMUL ST(0), ST(i)
+                x87_[0] *= operand;
+            } else if (operation == 2 || operation == 3) { // FCOM/FCOMP ST(i)
+                x87_compare(x87_[0], operand);
+                if (operation == 3) {
+                    x87_pop();
+                }
+            } else if (operation == 4) { // FSUB ST(0), ST(i)
+                x87_[0] -= operand;
+            } else if (operation == 5) { // FSUBR ST(0), ST(i)
+                x87_[0] = operand - x87_[0];
+            } else if (operation == 6) { // FDIV ST(0), ST(i)
+                x87_[0] /= operand;
+            } else { // FDIVR ST(0), ST(i)
+                x87_[0] = operand / x87_[0];
+            }
+            return;
         }
         const auto operand =
             static_cast<long double>(std::bit_cast<float>(memory_.read32(decoded.rm.address)));
-        switch (decoded.reg & 7) {
+        switch (operation) {
         case 0:
             x87_[0] += operand;
             return;
         case 1:
             x87_[0] *= operand;
+            return;
+        case 2:
+        case 3:
+            x87_compare(x87_[0], operand);
+            if (operation == 3) {
+                x87_pop();
+            }
             return;
         case 4:
             x87_[0] -= operand;
@@ -597,9 +645,8 @@ void Cpu::step() {
         case 7:
             x87_[0] = operand / x87_[0];
             return;
-        default:
-            throw Error("unsupported x87 D8 comparison instruction");
         }
+        throw Error("invalid x87 D8 operation");
     }
     case 0xd9: {
         const auto decoded = decode_rm(rex);
@@ -783,18 +830,7 @@ void Cpu::step() {
                 if (x87_depth_ == 0 || target >= x87_depth_) {
                     throw Error("x87 stack underflow");
                 }
-                constexpr std::uint16_t condition_mask = 0x4700;
-                constexpr std::uint16_t c0 = 0x0100;
-                constexpr std::uint16_t c2 = 0x0400;
-                constexpr std::uint16_t c3 = 0x4000;
-                x87_status_ &= ~condition_mask;
-                if (std::isnan(x87_[0]) || std::isnan(x87_[target])) {
-                    x87_status_ |= c0 | c2 | c3;
-                } else if (x87_[0] < x87_[target]) {
-                    x87_status_ |= c0;
-                } else if (x87_[0] == x87_[target]) {
-                    x87_status_ |= c3;
-                }
+                x87_compare(x87_[0], x87_[target]);
                 if (operation == 5) {
                     x87_pop();
                 }

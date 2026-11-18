@@ -661,6 +661,15 @@ development.
 - Undertale follows the real comparison branch and advances to register-form `FSUB ST(0), ST(2)`
   after 15,223,654 instructions.
 
+## 2026-11-18 — x87 D8 register arithmetic
+
+- Completed the `D8` register-destination arithmetic matrix for ST(0), plus register and
+  single-memory `FCOM`/`FCOMP`, using the shared status-word comparison path.
+- Added value regressions for all six arithmetic directions and comparison regressions for result
+  flags and pop/TOP behavior.
+- Undertale clears the current CPU instruction blockers, advances 708 instructions, and reaches
+  its first `D3DXCreateTextureFromFileInMemoryEx` call after 15,224,362 instructions.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,
