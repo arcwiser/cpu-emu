@@ -704,11 +704,51 @@ void Cpu::step() {
     }
     case 0xdc: {
         const auto decoded = decode_rm(rex);
-        if (!decoded.rm.is_register && (decoded.reg & 7) == 1 && x87_depth_ != 0) { // FMUL m64
-            x87_[0] *= std::bit_cast<double>(memory_.read64(decoded.rm.address));
+        if (x87_depth_ == 0) {
+            throw Error("x87 stack underflow");
+        }
+        const auto operation = decoded.reg & 7;
+        if (operation != 0 && operation != 1 && operation != 4 && operation != 5 &&
+            operation != 6 && operation != 7) {
+            throw Error("unsupported x87 DC comparison instruction");
+        }
+        if (decoded.rm.is_register) {
+            const auto target = static_cast<std::size_t>(decoded.rm.register_index & 7);
+            if (target >= x87_depth_) {
+                throw Error("x87 stack underflow");
+            }
+            const auto top = x87_[0];
+            if (operation == 0) { // FADD ST(i), ST(0)
+                x87_[target] += top;
+            } else if (operation == 1) { // FMUL ST(i), ST(0)
+                x87_[target] *= top;
+            } else if (operation == 4) { // FSUBR ST(i), ST(0)
+                x87_[target] = top - x87_[target];
+            } else if (operation == 5) { // FSUB ST(i), ST(0)
+                x87_[target] -= top;
+            } else if (operation == 6) { // FDIVR ST(i), ST(0)
+                x87_[target] = top / x87_[target];
+            } else { // FDIV ST(i), ST(0)
+                x87_[target] /= top;
+            }
             return;
         }
-        throw Error("unsupported x87 DC instruction");
+        const auto operand =
+            static_cast<long double>(std::bit_cast<double>(memory_.read64(decoded.rm.address)));
+        if (operation == 0) { // FADD m64real
+            x87_[0] += operand;
+        } else if (operation == 1) { // FMUL m64real
+            x87_[0] *= operand;
+        } else if (operation == 4) { // FSUB m64real
+            x87_[0] -= operand;
+        } else if (operation == 5) { // FSUBR m64real
+            x87_[0] = operand - x87_[0];
+        } else if (operation == 6) { // FDIV m64real
+            x87_[0] /= operand;
+        } else { // FDIVR m64real
+            x87_[0] = operand / x87_[0];
+        }
+        return;
     }
     case 0xdd: {
         const auto decoded = decode_rm(rex);

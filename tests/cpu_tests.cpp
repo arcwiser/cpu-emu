@@ -340,6 +340,61 @@ void test_x87_stack_exchange() {
     require(rejected, "x87 FXCH rejects an unavailable stack register");
 }
 
+void test_x87_double_arithmetic() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    memory.write64(data_address, std::bit_cast<std::uint64_t>(6.0));
+    memory.write64(data_address + 8, std::bit_cast<std::uint64_t>(2.0));
+    winemu::Cpu cpu(memory);
+
+    const auto run_register = [&](std::uint8_t operation, std::uint8_t offset) {
+        const std::uint8_t code[] = {
+            0xdd, 0x07,              // fld qword ptr [rdi]
+            0xdd, 0x47,      0x08,   // fld qword ptr [rdi+8]
+            0xdc, operation,         // arithmetic ST(1), ST(0)
+            0xd9, 0xc9,              // fxch st(1)
+            0xdd, 0x5f,      offset, // fstp qword ptr [rdi+offset]
+        };
+        memory.write(code_address, code);
+        cpu.reset(code_address, data_address + 0xff8);
+        cpu.set_reg(winemu::Rdi, data_address);
+        for (unsigned instruction = 0; instruction < 5; ++instruction) {
+            cpu.step();
+        }
+        return std::bit_cast<double>(memory.read64(data_address + offset));
+    };
+    const auto run_memory = [&](std::uint8_t operation, std::uint8_t offset) {
+        const std::uint8_t code[] = {
+            0xdd, 0x07,              // fld qword ptr [rdi]
+            0xdc, operation, 0x08,   // arithmetic qword ptr [rdi+8]
+            0xdd, 0x5f,      offset, // fstp qword ptr [rdi+offset]
+        };
+        memory.write(code_address, code);
+        cpu.reset(code_address, data_address + 0xff8);
+        cpu.set_reg(winemu::Rdi, data_address);
+        for (unsigned instruction = 0; instruction < 3; ++instruction) {
+            cpu.step();
+        }
+        return std::bit_cast<double>(memory.read64(data_address + offset));
+    };
+
+    require(run_register(0xc1, 0x20) == 8.0, "x87 register FADD");
+    require(run_register(0xc9, 0x28) == 12.0, "x87 register FMUL");
+    require(run_register(0xe1, 0x30) == -4.0, "x87 register FSUBR");
+    require(run_register(0xe9, 0x38) == 4.0, "x87 register FSUB");
+    require(run_register(0xf1, 0x40) == 1.0 / 3.0, "x87 register FDIVR");
+    require(run_register(0xf9, 0x48) == 3.0, "x87 register FDIV");
+    require(run_memory(0x47, 0x50) == 8.0, "x87 double-memory FADD");
+    require(run_memory(0x4f, 0x58) == 12.0, "x87 double-memory FMUL");
+    require(run_memory(0x67, 0x60) == 4.0, "x87 double-memory FSUB");
+    require(run_memory(0x6f, 0x68) == -4.0, "x87 double-memory FSUBR");
+    require(run_memory(0x77, 0x70) == 3.0, "x87 double-memory FDIV");
+    require(run_memory(0x7f, 0x78) == 1.0 / 3.0, "x87 double-memory FDIVR");
+}
+
 void test_packed_float_conversions() {
     constexpr std::uint64_t code_address = 0x200000000ULL;
     constexpr std::uint64_t data_address = 0x300000000ULL;
