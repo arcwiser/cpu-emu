@@ -5,6 +5,7 @@
 #include "winemu/log.hpp"
 
 #include <algorithm>
+#include <utility>
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -112,6 +113,21 @@ bool Memory::protect(std::uint64_t base, std::uint64_t size, std::uint8_t permis
         }
     }
     regions_.insert(regions_.end(), additions.begin(), additions.end());
+    std::sort(regions_.begin(), regions_.end(),
+              [](const Region &left, const Region &right) { return left.base < right.base; });
+    std::vector<Region> coalesced;
+    coalesced.reserve(regions_.size());
+    for (const auto &region : regions_) {
+        if (!coalesced.empty() && coalesced.back().base + coalesced.back().size == region.base &&
+            coalesced.back().permissions == region.permissions &&
+            coalesced.back().name == region.name &&
+            coalesced.back().data + coalesced.back().size == region.data) {
+            coalesced.back().size += region.size;
+        } else {
+            coalesced.push_back(region);
+        }
+    }
+    regions_ = std::move(coalesced);
     region_cache_.clear();
     return true;
 }

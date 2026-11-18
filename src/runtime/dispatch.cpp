@@ -126,12 +126,76 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     };
     const auto allocate = [&](std::uint64_t requested_size) {
         const auto size = std::max<std::uint64_t>(requested_size, 1);
-        const auto mapped_size = (size + 0xffff) & ~0xffffULL;
-        const auto address = heap_next_;
-        heap_next_ += mapped_size;
-        cpu.memory().map(address, mapped_size, Read | Write, "guest heap");
+        if (size > std::numeric_limits<std::uint64_t>::max() - 0xf) {
+            throw Error("guest heap allocation size overflow");
+        }
+        const auto mapped_size = (size + 0xf) & ~0xfULL;
+        auto address = std::uint64_t{};
+        const auto reusable =
+            std::min_element(free_heap_blocks_.begin(), free_heap_blocks_.end(),
+                             [&](const auto &left, const auto &right) {
+                                 const auto left_fits = left.second >= mapped_size;
+                                 const auto right_fits = right.second >= mapped_size;
+                                 if (left_fits != right_fits) {
+                                     return left_fits;
+                                 }
+                                 return left_fits && left.second < right.second;
+                             });
+        if (reusable != free_heap_blocks_.end() && reusable->second >= mapped_size) {
+            address = reusable->first;
+            reusable->first += mapped_size;
+            reusable->second -= mapped_size;
+            if (reusable->second == 0) {
+                free_heap_blocks_.erase(reusable);
+            }
+            if (!cpu.memory().protect(address, mapped_size, Read | Write)) {
+                throw Error("cannot restore guest heap allocation permissions");
+            }
+        } else {
+            constexpr std::uint64_t arena_granularity = 0x10000;
+            constexpr std::uint64_t default_arena_size = 0x100000;
+            if (mapped_size > std::numeric_limits<std::uint64_t>::max() - (arena_granularity - 1)) {
+                throw Error("guest heap arena size overflow");
+            }
+            const auto arena_size =
+                std::max(default_arena_size,
+                         (mapped_size + arena_granularity - 1) & ~(arena_granularity - 1));
+            address = heap_next_;
+            if (arena_size > std::numeric_limits<std::uint64_t>::max() - heap_next_) {
+                throw Error("guest heap address overflow");
+            }
+            heap_next_ += arena_size;
+            cpu.memory().map(address, arena_size, Read | Write, "guest heap arena");
+            if (arena_size != mapped_size) {
+                free_heap_blocks_.emplace_back(address + mapped_size, arena_size - mapped_size);
+            }
+        }
         heap_sizes_.emplace(address, size);
+        heap_mapped_sizes_.emplace(address, mapped_size);
+        constexpr std::size_t clear_chunk_size = 0x10000;
+        const std::array<std::uint8_t, clear_chunk_size> zeros{};
+        for (std::uint64_t offset = 0; offset < mapped_size; offset += clear_chunk_size) {
+            const auto chunk = static_cast<std::size_t>(
+                std::min<std::uint64_t>(clear_chunk_size, mapped_size - offset));
+            cpu.memory().write(address + offset,
+                               std::span<const std::uint8_t>(zeros.data(), chunk));
+        }
         return address;
+    };
+    const auto free_allocation = [&](std::uint64_t address) {
+        const auto size = heap_sizes_.find(address);
+        const auto mapped = heap_mapped_sizes_.find(address);
+        if (size == heap_sizes_.end() || mapped == heap_mapped_sizes_.end()) {
+            return false;
+        }
+        if (!cpu.memory().protect(address, mapped->second, 0)) {
+            return false;
+        }
+        free_heap_blocks_.emplace_back(address, mapped->second);
+        heap_sizes_.erase(size);
+        heap_mapped_sizes_.erase(mapped);
+        std::sort(free_heap_blocks_.begin(), free_heap_blocks_.end());
+        return true;
     };
     const auto write_guest_pointer = [&](std::uint64_t address, std::uint64_t value) {
         if (guest_is_64_bit_) {
@@ -634,6 +698,23 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             finish_call(4);
             break;
         }
+        if (thunk_name.ends_with("!CreateWaitableTimerW")) {
+            if (argument(0) != 0) {
+                last_error_ = ERROR_NOT_SUPPORTED;
+                cpu.set_reg(Rax, 0);
+            } else {
+                const auto name = isolate_name(argument(2));
+                ::SetLastError(ERROR_SUCCESS);
+                const auto handle = ::CreateWaitableTimerW(nullptr, argument(1) != 0,
+                                                           name.empty() ? nullptr : name.c_str());
+                cpu.set_reg(Rax, add_handle(handle));
+                if (handle != nullptr) {
+                    last_error_ = ::GetLastError();
+                }
+            }
+            finish_call(3);
+            break;
+        }
 
         const auto host_handle = find_handle(argument(0));
         if (host_handle == nullptr) {
@@ -662,6 +743,33 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 last_error_ = ::GetLastError();
             }
             cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+        } else if (thunk_name.ends_with("!SetWaitableTimer")) {
+            const auto due_time_address = argument(1);
+            if (due_time_address == 0 ||
+                !cpu.memory().contains(due_time_address, sizeof(LONGLONG))) {
+                last_error_ = ERROR_INVALID_PARAMETER;
+                cpu.set_reg(Rax, 0);
+            } else if (argument(3) != 0 || argument(4) != 0) {
+                // A host timer thread must never execute a guest completion routine natively.
+                last_error_ = ERROR_NOT_SUPPORTED;
+                cpu.set_reg(Rax, 0);
+            } else {
+                LARGE_INTEGER due_time{};
+                due_time.QuadPart = static_cast<LONGLONG>(cpu.memory().read64(due_time_address));
+                const auto set =
+                    ::SetWaitableTimer(host_handle, &due_time, static_cast<LONG>(argument(2)),
+                                       nullptr, nullptr, argument(5) != 0);
+                if (set == FALSE) {
+                    last_error_ = ::GetLastError();
+                }
+                cpu.set_reg(Rax, set != FALSE ? 1 : 0);
+            }
+        } else if (thunk_name.ends_with("!CancelWaitableTimer")) {
+            const auto cancelled = ::CancelWaitableTimer(host_handle);
+            if (cancelled == FALSE) {
+                last_error_ = ::GetLastError();
+            }
+            cpu.set_reg(Rax, cancelled != FALSE ? 1 : 0);
         } else {
             BOOL result = FALSE;
             if (thunk_name.ends_with("!ReleaseMutex")) {
@@ -677,6 +785,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             cpu.set_reg(Rax, result != FALSE ? 1 : 0);
         }
         finish_call(thunk_name.ends_with("!WaitForSingleObjectEx") ? 3
+                    : thunk_name.ends_with("!SetWaitableTimer")    ? 6
                     : thunk_name.ends_with("!ReleaseSemaphore")    ? 3
                     : thunk_name.ends_with("!WaitForSingleObject") ? 2
                                                                    : 1);
@@ -2489,10 +2598,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         if (thunk_name.ends_with("!UnmapViewOfFile")) {
             const auto address = argument(0);
             const auto found = mapped_views_.find(address);
-            const auto result = found != mapped_views_.end() && cpu.memory().unmap_owned(address);
+            const auto mapped = heap_mapped_sizes_.find(address);
+            const auto result = found != mapped_views_.end() &&
+                                mapped != heap_mapped_sizes_.end() && free_allocation(address);
             if (result) {
                 mapped_views_.erase(found);
-                heap_sizes_.erase(address);
             } else {
                 last_error_ = ERROR_INVALID_ADDRESS;
             }
@@ -3179,24 +3289,40 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         const bool local_reallocate = thunk_name.ends_with("LocalReAlloc");
         const auto old_address = argument(heap_reallocate ? 2 : 0);
         const auto new_size = argument(heap_reallocate ? 3 : 1);
+        const auto old = heap_sizes_.find(old_address);
+        if (old_address != 0 && old == heap_sizes_.end()) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, 0);
+            finish_call(heap_reallocate ? 4 : local_reallocate ? 3 : 2);
+            break;
+        }
         const auto new_address = allocate(new_size);
-        if (const auto old = heap_sizes_.find(old_address); old != heap_sizes_.end()) {
+        if (old != heap_sizes_.end()) {
             const auto copy_size = static_cast<std::size_t>(std::min(old->second, new_size));
             const auto bytes = cpu.memory().read(old_address, copy_size);
             cpu.memory().write(new_address, bytes);
+            static_cast<void>(free_allocation(old_address));
         }
         cpu.set_reg(Rax, new_address);
         finish_call(heap_reallocate ? 4 : local_reallocate ? 3 : 2);
         break;
     }
     case Api::FreeRcx:
+        if (argument(0) != 0 && !free_allocation(argument(0))) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+        }
         cpu.set_reg(Rax, 0);
         finish_call(1);
         break;
-    case Api::HeapFree:
-        cpu.set_reg(Rax, 1);
+    case Api::HeapFree: {
+        const auto result = free_allocation(argument(2));
+        if (!result) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+        }
+        cpu.set_reg(Rax, result ? 1 : 0);
         finish_call(3);
         break;
+    }
     case Api::HeapDestroy:
         cpu.set_reg(Rax, 1);
         finish_call(1);
@@ -3650,6 +3776,21 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         creating_window_procedure_ = 0;
         cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(result));
         finish_call(12);
+        break;
+    }
+    case Api::GuestShowWindow: {
+        const auto window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(0)));
+        const auto updating = thunk_name.ends_with("!UpdateWindow");
+        const auto result =
+            updating ? ::UpdateWindow(window) : ::ShowWindow(window, static_cast<int>(argument(1)));
+        if (auto exception = detail::take_callback_exception(); exception != nullptr) {
+            std::rethrow_exception(exception);
+        }
+        if (updating && result == FALSE) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, result != FALSE ? 1 : 0);
+        finish_call(updating ? 1 : 2);
         break;
     }
     case Api::DialogBoxParamW: {

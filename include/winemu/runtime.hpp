@@ -92,6 +92,8 @@ class Runtime {
     // Every adapter must validate a token through its owning table before touching host state.
     std::uint64_t heap_next_ = 0x0000'0006'0000'0000ULL;
     std::unordered_map<std::uint64_t, std::uint64_t> heap_sizes_;
+    std::unordered_map<std::uint64_t, std::uint64_t> heap_mapped_sizes_;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> free_heap_blocks_;
     std::uint64_t guest_image_base_ = 0;
     std::uint64_t next_module_handle_ = 0x7fe0'0000ULL;
     std::unordered_map<std::uint64_t, std::string> guest_modules_;

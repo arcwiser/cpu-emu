@@ -161,11 +161,13 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
                 name == "ReleaseSRWLockShared" || name == "TryAcquireSRWLockExclusive" ||
                 name == "TryAcquireSRWLockShared")) {
         api = Api::GuestSrwLock;
-    } else if (kernel_module && (name == "CreateMutexExW" || name == "CreateSemaphoreExW" ||
-                                 name == "OpenSemaphoreW" || name == "CreateEventExW" ||
-                                 name == "WaitForSingleObject" || name == "WaitForSingleObjectEx" ||
-                                 name == "ReleaseMutex" || name == "ReleaseSemaphore" ||
-                                 name == "SetEvent" || name == "ResetEvent")) {
+    } else if (kernel_module &&
+               (name == "CreateMutexExW" || name == "CreateSemaphoreExW" ||
+                name == "OpenSemaphoreW" || name == "CreateEventExW" ||
+                name == "CreateWaitableTimerW" || name == "SetWaitableTimer" ||
+                name == "CancelWaitableTimer" || name == "WaitForSingleObject" ||
+                name == "WaitForSingleObjectEx" || name == "ReleaseMutex" ||
+                name == "ReleaseSemaphore" || name == "SetEvent" || name == "ResetEvent")) {
         api = Api::GuestSynchronization;
     } else if (kernel_module &&
                (name == "InterlockedIncrement" || name == "InterlockedDecrement" ||
@@ -437,6 +439,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GuestRegisterClassW;
     } else if (name == "CreateWindowExW") {
         api = Api::CreateWindowExW;
+    } else if (name == "ShowWindow" || name == "UpdateWindow") {
+        api = Api::GuestShowWindow;
     } else if (name == "DialogBoxParamW") {
         api = Api::DialogBoxParamW;
     } else if (name == "CreateDialogParamW") {

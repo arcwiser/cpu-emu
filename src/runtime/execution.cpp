@@ -101,6 +101,8 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     guest_exception_filter_ = 0;
     heap_next_ = 0x0000'0006'0000'0000ULL;
     heap_sizes_.clear();
+    heap_mapped_sizes_.clear();
+    free_heap_blocks_.clear();
     next_module_handle_ = 0x7fe0'0000ULL;
     guest_modules_.clear();
     for (const auto &[guest_handle, host_handle] : find_handles_) {
@@ -409,6 +411,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     heap_next_ += argv_allocation_size;
     memory.map(argv_storage, argv_allocation_size, Read | Write, "guest argv");
     heap_sizes_.emplace(argv_storage, argv_allocation_size);
+    heap_mapped_sizes_.emplace(argv_storage, argv_allocation_size);
     const auto wide_pointer_array = argv_storage;
     const auto narrow_pointer_array = argv_storage + 0x800;
     auto narrow_string_next = argv_storage + 0x1000;

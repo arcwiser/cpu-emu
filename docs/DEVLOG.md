@@ -721,6 +721,20 @@ development.
 - Undertale passes the renderer's `SQRTSD`, the CRT `FRNDINT`, and its subsequent double compare;
   the next non-CPU work exposed the guest heap's one-mapping-per-allocation exhaustion behavior.
 
+## 2026-11-18 — waitable timers, window display, and reusable heap arenas
+
+- Added guest-token-backed waitable timers with checked due-time input and native wait behavior;
+  guest APC routines and security attributes fail closed. Added `ShowWindow`/`UpdateWindow`
+  forwarding with synchronous guest callback-fault propagation.
+- Replaced the one-64-KiB-mapping-per-allocation heap with 16-byte-aligned guest arenas, real
+  free/reallocate ownership, inaccessible released spans, best-fit reuse, and double-free
+  rejection. Free spans never merge across distinct host backing allocations.
+- Restoring permissions now coalesces compatible adjacent memory regions, so reused ranges can
+  safely cross a former protection boundary without crossing host backing. Regressions cover
+  heap content preservation/reuse and cross-boundary access after protection restoration.
+- Undertale passes its former stack-collision point and advances to `SHGetSpecialFolderPathA`
+  after 66,370,113 instructions. The offline Steam messages still are not the active blocker.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

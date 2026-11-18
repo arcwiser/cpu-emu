@@ -674,6 +674,12 @@ int run_sync_selftest() {
             CreateWindowExW(0, L"STATIC", L"CPUEmu D3D fixture", WS_POPUP, 0, 0, 64, 64, nullptr,
                             nullptr, GetModuleHandleW(nullptr), nullptr);
         check(device_window != nullptr, "sync selftest: create Direct3D device window");
+        if (device_window != nullptr) {
+            check(ShowWindow(device_window, SW_SHOW) == FALSE &&
+                      UpdateWindow(device_window) != FALSE &&
+                      ShowWindow(device_window, SW_HIDE) != FALSE,
+                  "sync selftest: show, update, and hide native guest window");
+        }
         D3DPRESENT_PARAMETERS presentation{};
         presentation.BackBufferWidth = 64;
         presentation.BackBufferHeight = 64;
@@ -1116,6 +1122,31 @@ int run_sync_selftest() {
         check(ResetEvent(event) != FALSE, "sync selftest: reset event");
     }
 
+    const HANDLE timer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+    check(timer != nullptr, "sync selftest: waitable timer creation");
+    if (timer != nullptr) {
+        check(WaitForSingleObject(timer, 0) == WAIT_TIMEOUT,
+              "sync selftest: inactive waitable timer wait");
+        LARGE_INTEGER due_time{};
+        due_time.QuadPart = -10000;
+        check(SetWaitableTimer(timer, &due_time, 0, nullptr, nullptr, FALSE) != FALSE,
+              "sync selftest: arm waitable timer");
+        check(WaitForSingleObject(timer, 1000) == WAIT_OBJECT_0,
+              "sync selftest: signaled waitable timer wait");
+        check(SetWaitableTimer(timer, &due_time, 0, reinterpret_cast<PTIMERAPCROUTINE>(1), nullptr,
+                               FALSE) == FALSE &&
+                  GetLastError() == ERROR_NOT_SUPPORTED,
+              "sync selftest: reject guest waitable timer callback");
+        check(SetWaitableTimer(timer, reinterpret_cast<LARGE_INTEGER *>(1), 0, nullptr, nullptr,
+                               FALSE) == FALSE &&
+                  GetLastError() == ERROR_INVALID_PARAMETER,
+              "sync selftest: reject invalid waitable timer due time");
+    }
+    check(CreateWaitableTimerW(reinterpret_cast<SECURITY_ATTRIBUTES *>(1), FALSE, nullptr) ==
+                  nullptr &&
+              GetLastError() == ERROR_NOT_SUPPORTED,
+          "sync selftest: reject waitable timer security attributes");
+
     SRWLOCK lock{};
     InitializeSRWLock(&lock);
     AcquireSRWLockExclusive(&lock);
@@ -1152,6 +1183,36 @@ int run_sync_selftest() {
     }
     if (event != nullptr) {
         CloseHandle(event);
+    }
+    if (timer != nullptr) {
+        CloseHandle(timer);
+    }
+
+    const HANDLE process_heap = GetProcessHeap();
+    auto *heap_block = static_cast<unsigned char *>(HeapAlloc(process_heap, 0, 32));
+    check(heap_block != nullptr, "sync selftest: allocate guest heap block");
+    if (heap_block != nullptr) {
+        for (unsigned index = 0; index < 32; ++index) {
+            heap_block[index] = static_cast<unsigned char>(index);
+        }
+        auto *grown = static_cast<unsigned char *>(HeapReAlloc(process_heap, 0, heap_block, 64));
+        bool preserved = grown != nullptr && HeapSize(process_heap, 0, grown) == 64;
+        for (unsigned index = 0; preserved && index < 32; ++index) {
+            preserved = grown[index] == static_cast<unsigned char>(index);
+        }
+        check(preserved, "sync selftest: grow guest heap block and preserve contents");
+        if (grown != nullptr) {
+            check(HeapFree(process_heap, 0, grown) != FALSE,
+                  "sync selftest: free guest heap block");
+            auto *reused = HeapAlloc(process_heap, 0, 16);
+            check(reused == grown || reused == heap_block,
+                  "sync selftest: reuse released guest heap address range");
+            check(HeapFree(process_heap, 0, reused) != FALSE,
+                  "sync selftest: free reused guest heap block");
+            check(HeapFree(process_heap, 0, reused) == FALSE &&
+                      GetLastError() == ERROR_INVALID_PARAMETER,
+                  "sync selftest: reject guest heap double free");
+        }
     }
 
     write_stdout(ok ? "SYNC SELFTEST PASSED\r\n" : "SYNC SELFTEST FAILED\r\n");

@@ -152,6 +152,7 @@ enum class RuntimeApi {
     LoadAcceleratorsW,
     GuestRegisterClassW,
     CreateWindowExW,
+    GuestShowWindow,
     DialogBoxParamW,
     CreateDialogParamW,
     EndDialog,

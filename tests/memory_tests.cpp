@@ -48,6 +48,14 @@ void test_memory() {
     require(write_rejected, "protect must invalidate the region cache for that page");
     require(memory.read32(0x210000800ULL) == 0x22222222U, "protected fragment stays readable");
 
+    require(memory.protect(0x200000400ULL, 0x40, winemu::Read), "protect middle of owned mapping");
+    require(memory.protect(0x200000400ULL, 0x40, winemu::Read | winemu::Write),
+            "restore middle mapping permissions");
+    const std::uint8_t crossing_write[] = {0, 1, 2, 3, 4, 5, 6, 7};
+    memory.write(0x2000003fcULL, crossing_write);
+    require(memory.read(0x2000003fcULL, sizeof(crossing_write))[7] == 7,
+            "restored adjacent regions coalesce for cross-boundary access");
+
     memory.map(0x220000000ULL, 0x1000, winemu::Read | winemu::Write, "owned view");
     memory.write8(0x220000fffULL, 0x5a);
     require(!memory.unmap_owned(0x220000001ULL), "owned mapping rejects an interior address");
