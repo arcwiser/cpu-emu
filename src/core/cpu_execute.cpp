@@ -617,6 +617,10 @@ void Cpu::step() {
                 x87_push(x87_[decoded.rm.register_index]);
                 return;
             }
+            if ((decoded.reg & 7) == 1 && decoded.rm.register_index < x87_depth_) { // FXCH ST(i)
+                std::swap(x87_[0], x87_[decoded.rm.register_index]);
+                return;
+            }
             if ((decoded.reg & 7) == 5) {
                 switch (decoded.rm.register_index) {
                 case Rax: // FLD1

@@ -630,6 +630,12 @@ development.
 - Undertale advances another 171 instructions through mixed x87/SSE transform work and now stops
   at `FXCH ST(1)` after 15,222,671 instructions.
 
+## 2026-11-18 — x87 stack exchange
+
+- Added bounded `FXCH ST(i)` behavior with value-order and unavailable-register regressions.
+- Undertale passes `FXCH ST(1)` and reaches the register form of x87 `FMUL` after 15,222,673
+  instructions.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

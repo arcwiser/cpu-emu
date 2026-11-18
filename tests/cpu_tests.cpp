@@ -299,6 +299,47 @@ void test_x87_sign_operations() {
     require(rejected, "x87 unary sign operations reject stack underflow");
 }
 
+void test_x87_stack_exchange() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    const std::uint8_t code[] = {
+        0xd9, 0x07,       // fld dword ptr [rdi]
+        0xd9, 0x47, 0x04, // fld dword ptr [rdi+4]
+        0xd9, 0xc9,       // fxch st(1)
+        0xdd, 0x5f, 0x08, // fstp qword ptr [rdi+8]
+        0xdd, 0x5f, 0x10, // fstp qword ptr [rdi+10h]
+    };
+    memory.write(code_address, code);
+    memory.write32(data_address, std::bit_cast<std::uint32_t>(1.25f));
+    memory.write32(data_address + 4, std::bit_cast<std::uint32_t>(9.5f));
+    winemu::Cpu cpu(memory);
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    for (unsigned instruction = 0; instruction < 5; ++instruction) {
+        cpu.step();
+    }
+    require(memory.read64(data_address + 8) == std::bit_cast<std::uint64_t>(1.25),
+            "x87 FXCH moves the selected register to ST(0)");
+    require(memory.read64(data_address + 0x10) == std::bit_cast<std::uint64_t>(9.5),
+            "x87 FXCH preserves the prior ST(0)");
+
+    const std::uint8_t underflow[] = {0xd9, 0x07, 0xd9, 0xc9};
+    memory.write(code_address, underflow);
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    cpu.step();
+    bool rejected = false;
+    try {
+        cpu.step();
+    } catch (const winemu::Error &) {
+        rejected = true;
+    }
+    require(rejected, "x87 FXCH rejects an unavailable stack register");
+}
+
 void test_packed_float_conversions() {
     constexpr std::uint64_t code_address = 0x200000000ULL;
     constexpr std::uint64_t data_address = 0x300000000ULL;

@@ -103,7 +103,7 @@ The x87 stack and control word are independent state; they are not aliases of XM
 
 | Status | Implemented operations |
 | :---: | --- |
-| 🟧 | `FLD` for `m32real`, `m64real`, and `ST(i)`; constants `FLD1`, `FLDL2T`, `FLDL2E`, `FLDPI`, `FLDLG2`, `FLDLN2`, `FLDZ` |
+| 🟧 | `FLD` for `m32real`, `m64real`, and `ST(i)`; `FXCH ST(i)`; constants `FLD1`, `FLDL2T`, `FLDL2E`, `FLDPI`, `FLDLG2`, `FLDLN2`, `FLDZ` |
 | 🟧 | `FST`/`FSTP` for `m32real` and `m64real` |
 | 🟧 | Memory `FADD`, `FMUL`, `FSUB`, reverse subtract, `FDIV`, reverse divide in implemented D8/DC forms |
 | 🟧 | `FADDP`, `FMULP`, `FSUBP`, `FSUBRP`, `FDIVP`, `FDIVRP`, `FCHS`, `FABS`, `FSIN`, `FCOS` |
