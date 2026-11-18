@@ -261,6 +261,34 @@ void test_x87_pop_arithmetic() {
     require(run(0xf9, 0x48) == 2.0 / 3.0, "x87 FDIVP result and pop");
 }
 
+void test_packed_float_conversions() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    const std::uint8_t code[] = {
+        0x0f, 0x5a, 0x07,             // cvtps2pd xmm0, qword ptr [rdi]
+        0x66, 0x0f, 0x5a, 0xc8,       // cvtpd2ps xmm1, xmm0
+        0xf3, 0x0f, 0x7f, 0x4f, 0x10, // movdqu [rdi+10h], xmm1
+    };
+    memory.write(code_address, code);
+    const auto first = std::bit_cast<std::uint32_t>(1.5f);
+    const auto second = std::bit_cast<std::uint32_t>(-2.25f);
+    memory.write64(data_address,
+                   static_cast<std::uint64_t>(first) | (static_cast<std::uint64_t>(second) << 32));
+    winemu::Cpu cpu(memory);
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    cpu.step();
+    cpu.step();
+    cpu.step();
+    require(memory.read32(data_address + 0x10) == first &&
+                memory.read32(data_address + 0x14) == second,
+            "CVTPS2PD/CVTPD2PS packed lane round trip");
+    require(memory.read64(data_address + 0x18) == 0, "CVTPD2PS clears the upper destination lanes");
+}
+
 void test_pshufd() {
     winemu::Memory memory;
     memory.map(0x200000000ULL, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");

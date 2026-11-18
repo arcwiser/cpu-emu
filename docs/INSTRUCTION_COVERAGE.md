@@ -115,8 +115,8 @@ The x87 stack and control word are independent state; they are not aliases of XM
 
 | Family | Status | Implemented or observed forms |
 | --- | :---: | --- |
-| SSE | 🟨 | Scalar single moves/arithmetic and conversions; packed single arithmetic; logical operations; unpack and shuffle forms used by current guests |
-| SSE2 | 🟨 | Packed double arithmetic; scalar double conversions; XMM moves; packed integer add/subtract, compare, unpack, shuffle, byte shifts, `PMOVMSKB` subsets, and `LFENCE`/`MFENCE`/`SFENCE` ordering |
+| SSE | 🟨 | Scalar single moves/arithmetic and conversions; packed single arithmetic; `CVTPS2PD`; logical operations; unpack and shuffle forms used by current guests |
+| SSE2 | 🟨 | Packed double arithmetic; scalar double conversions; `CVTPD2PS`; XMM moves; packed integer add/subtract, compare, unpack, shuffle, byte shifts, `PMOVMSKB` subsets, and `LFENCE`/`MFENCE`/`SFENCE` ordering |
 | SSE3 | 🟨 | `MOVDDUP`, `LDDQU`, horizontal add/subtract, alternating add/subtract |
 | SSSE3 | 🟨 | `PSHUFB`, horizontal packed add/subtract variants, `PMADDUBSW`, `PSIGNB/W/D`, `PMULHRSW`, `PALIGNR`, `PABSB/W/D` |
 | SSE4.1 | 🟨 | `PTEST`, `PACKUSDW`, signed/unsigned packed min/max subset, `PMULLD` |
@@ -134,7 +134,8 @@ This checklist is intentionally mnemonic-level, not a guarantee for every encodi
 MOVSS      MOVSD      MOVQ(XMM)  MOVDDUP    LDDQU      MOVAPS/MOVUPS-family moves
 ADDSS      SUBSS      MULSS      DIVSS      ADDPS      SUBPS      MULPS      DIVPS
 ADDPD      SUBPD      MULPD      DIVPD      MIN*/MAX*  ORPS/ORPD  UNPCKLPS
-CVTSI2SS   CVTTSS2SI  CVTSS2SD   CVTSD2SS   PSHUFD     PSHUFLW    PSHUFHW
+CVTSI2SS   CVTTSS2SI  CVTSS2SD   CVTSD2SS   CVTPS2PD   CVTPD2PS   PSHUFD
+PSHUFLW    PSHUFHW
 PADDB/W/D/Q            PSUBB/W/D/Q           PUNPCKL/HBW/WD/DQ
 PSRLDQ     PSLLDQ     PMOVMSKB   PSHUFB     PHADD*     PHSUB*
 PMADDUBSW  PSIGNB/W/D  PMULHRSW  PALIGNR    PABSB/W/D  PTEST

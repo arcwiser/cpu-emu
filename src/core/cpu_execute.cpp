@@ -1914,6 +1914,32 @@ void Cpu::step() {
             set_xmm_low_float(decoded.reg, static_cast<float>(value));
             return;
         }
+        if (repeat_prefix == 0 && second == 0x5a) {
+            const auto decoded = decode_rm(rex);
+            if (operand16) { // CVTPD2PS
+                const auto source =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                const auto low = std::bit_cast<std::uint32_t>(
+                    static_cast<float>(std::bit_cast<double>(source[0])));
+                const auto high = std::bit_cast<std::uint32_t>(
+                    static_cast<float>(std::bit_cast<double>(source[1])));
+                xmm_[decoded.reg] = {
+                    static_cast<std::uint64_t>(low) | (static_cast<std::uint64_t>(high) << 32), 0};
+            } else { // CVTPS2PD
+                const auto packed = decoded.rm.is_register ? xmm_[decoded.rm.register_index][0]
+                                                           : memory_.read64(decoded.rm.address);
+                const auto low = std::bit_cast<float>(static_cast<std::uint32_t>(packed));
+                const auto high = std::bit_cast<float>(static_cast<std::uint32_t>(packed >> 32));
+                xmm_[decoded.reg] = {
+                    std::bit_cast<std::uint64_t>(static_cast<double>(low)),
+                    std::bit_cast<std::uint64_t>(static_cast<double>(high)),
+                };
+            }
+            return;
+        }
         if (repeat_prefix == 0xf3 && second == 0x2c) {
             // CVTTSS2SI: scalar float to signed integer with truncation.
             const auto decoded = decode_rm(rex);

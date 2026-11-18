@@ -605,6 +605,15 @@ development.
   `WM_NCCREATE`/`WM_CREATE` delivery, and the live `GetMessageW` message loop.
 - `--limit 500` on Notepad produces the register dump + rip history fault report.
 
+## 2026-11-18 — Packed cross-precision conversions
+
+- Added register and checked-memory forms of `CVTPS2PD` and `CVTPD2PS`, including the required
+  upper-lane clearing behavior of the legacy `CVTPD2PS` destination.
+- Added a compact lane round-trip regression covering both conversions and destination clearing.
+- The Undertale probe advances from `CVTPS2PD` after 15,222,460 instructions to `ANDPD` after
+  15,222,461 instructions. This is CPU progress only; the existing window is still not visibly
+  rendering.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,
