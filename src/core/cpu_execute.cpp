@@ -135,6 +135,16 @@ void Cpu::step() {
             x87_status_ |= c3;
         }
     };
+    const auto x87_compare_flags = [&](long double left, long double right) {
+        flags_ &= ~(flag_of | flag_sf | flag_zf | flag_af | flag_pf | flag_cf);
+        if (std::isnan(left) || std::isnan(right)) {
+            flags_ |= flag_zf | flag_pf | flag_cf;
+        } else if (left < right) {
+            flags_ |= flag_cf;
+        } else if (left == right) {
+            flags_ |= flag_zf;
+        }
+    };
 
     if (opcode >= 0xb0 && opcode <= 0xb7) {
         const auto raw = static_cast<std::uint8_t>(opcode - 0xb0);
@@ -742,6 +752,15 @@ void Cpu::step() {
     }
     case 0xdb: {
         const auto decoded = decode_rm(rex);
+        if (decoded.rm.is_register &&
+            ((decoded.reg & 7) == 5 || (decoded.reg & 7) == 6)) { // FUCOMI/FCOMI ST,ST(i)
+            const auto target = static_cast<std::size_t>(decoded.rm.register_index & 7);
+            if (x87_depth_ == 0 || target >= x87_depth_) {
+                throw Error("x87 stack underflow");
+            }
+            x87_compare_flags(x87_[0], x87_[target]);
+            return;
+        }
         if (!decoded.rm.is_register && (decoded.reg & 7) == 0) { // FILD m32int
             x87_push(static_cast<long double>(
                 static_cast<std::int32_t>(memory_.read32(decoded.rm.address))));
@@ -887,6 +906,16 @@ void Cpu::step() {
     }
     case 0xdf: {
         const auto decoded = decode_rm(rex);
+        if (decoded.rm.is_register &&
+            ((decoded.reg & 7) == 5 || (decoded.reg & 7) == 6)) { // FUCOMIP/FCOMIP ST,ST(i)
+            const auto target = static_cast<std::size_t>(decoded.rm.register_index & 7);
+            if (x87_depth_ == 0 || target >= x87_depth_) {
+                throw Error("x87 stack underflow");
+            }
+            x87_compare_flags(x87_[0], x87_[target]);
+            x87_pop();
+            return;
+        }
         if (decoded.rm.is_register && (decoded.reg & 7) == 4 &&
             decoded.rm.register_index == Rax) { // FNSTSW AX
             const auto status =

@@ -497,6 +497,52 @@ void test_x87_comparison_status() {
     }
     require(memory.read64(data_address + 0x10) == std::bit_cast<std::uint64_t>(7.0),
             "x87 register FSTP copies ST(0) before popping");
+
+    const auto compare_flags = [&](std::uint8_t opcode, std::uint8_t modrm, double left,
+                                   double right) {
+        const std::uint8_t code[] = {
+            0xdd,   0x07,        // fld qword ptr [rdi]
+            0xdd,   0x47,  0x08, // fld qword ptr [rdi+8]
+            opcode, modrm,       // f[u]comi[p] st, st(1)
+        };
+        memory.write(code_address, code);
+        memory.write64(data_address, std::bit_cast<std::uint64_t>(right));
+        memory.write64(data_address + 8, std::bit_cast<std::uint64_t>(left));
+        cpu.reset(code_address, data_address + 0xff8);
+        cpu.set_reg(winemu::Rdi, data_address);
+        cpu.step();
+        cpu.step();
+        cpu.step();
+        return cpu.flags();
+    };
+    constexpr std::uint64_t integer_conditions = (1ULL << 0) | (1ULL << 2) | (1ULL << 6);
+    for (const auto [opcode, modrm] : {std::pair{std::uint8_t{0xdb}, std::uint8_t{0xe9}},
+                                       std::pair{std::uint8_t{0xdb}, std::uint8_t{0xf1}},
+                                       std::pair{std::uint8_t{0xdf}, std::uint8_t{0xe9}},
+                                       std::pair{std::uint8_t{0xdf}, std::uint8_t{0xf1}}}) {
+        require((compare_flags(opcode, modrm, 3.0, 2.0) & integer_conditions) == 0,
+                "x87 FCOMI greater integer flags");
+        require((compare_flags(opcode, modrm, 2.0, 3.0) & integer_conditions) == 1,
+                "x87 FCOMI less integer flags");
+        require((compare_flags(opcode, modrm, 3.0, 3.0) & integer_conditions) == (1ULL << 6),
+                "x87 FCOMI equal integer flags");
+        require((compare_flags(opcode, modrm, std::numeric_limits<double>::quiet_NaN(), 3.0) &
+                 integer_conditions) == integer_conditions,
+                "x87 FCOMI unordered integer flags");
+    }
+    const std::uint8_t pop_integer_compare[] = {
+        0xdd, 0x07,       // fld qword ptr [rdi]
+        0xdd, 0x47, 0x08, // fld qword ptr [rdi+8]
+        0xdf, 0xf1,       // fcomip st, st(1)
+        0xdf, 0xe0,       // fnstsw ax
+    };
+    memory.write(code_address, pop_integer_compare);
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    for (unsigned instruction = 0; instruction < 4; ++instruction) {
+        cpu.step();
+    }
+    require((cpu.reg(winemu::Rax) & 0x3800) == 0x3800, "x87 FCOMIP pops one stack entry");
 }
 
 void test_x87_register_arithmetic() {

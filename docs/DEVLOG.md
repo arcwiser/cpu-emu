@@ -703,6 +703,15 @@ development.
   parent lifetime, `QueryInterface`, binding, invalid output, and teardown. Undertale passes both
   observed vertex-buffer creations and reaches x87 `FCOMIP` after 15,252,462 instructions.
 
+## 2026-11-18 — x87 integer-flag comparisons
+
+- Added all register encodings of `FUCOMI`, `FCOMI`, `FUCOMIP`, and `FCOMIP`, including ordered
+  and unordered `ZF`/`PF`/`CF` results, architectural clearing of `OF`/`SF`/`AF`, stack-depth
+  validation, and pop behavior.
+- Focused regressions cover greater, less, equal, NaN/unordered, all four opcode families, and the
+  physical TOP change after a popping comparison. Undertale passes its `FCOMIP ST(0), ST(1)` and
+  reaches `CreateWaitableTimerW` after 15,252,701 instructions.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,
