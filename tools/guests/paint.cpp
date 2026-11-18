@@ -670,6 +670,58 @@ int run_sync_selftest() {
         if (queried != nullptr) {
             queried->Release();
         }
+        HWND device_window =
+            CreateWindowExW(0, L"STATIC", L"CPUEmu D3D fixture", WS_POPUP, 0, 0, 64, 64, nullptr,
+                            nullptr, GetModuleHandleW(nullptr), nullptr);
+        check(device_window != nullptr, "sync selftest: create Direct3D device window");
+        D3DPRESENT_PARAMETERS presentation{};
+        presentation.BackBufferWidth = 64;
+        presentation.BackBufferHeight = 64;
+        presentation.BackBufferFormat = D3DFMT_UNKNOWN;
+        presentation.BackBufferCount = 1;
+        presentation.SwapEffect = D3DSWAPEFFECT_DISCARD;
+        presentation.hDeviceWindow = device_window;
+        presentation.Windowed = TRUE;
+        IDirect3DDevice9 *base_device = nullptr;
+        check(device_window != nullptr &&
+                  SUCCEEDED(direct3d->CreateDevice(0, D3DDEVTYPE_HAL, device_window,
+                                                   D3DCREATE_SOFTWARE_VERTEXPROCESSING,
+                                                   &presentation, &base_device)) &&
+                  base_device != nullptr,
+              "sync selftest: create Direct3D9 device proxy");
+        if (base_device != nullptr) {
+            D3DCAPS9 device_caps{};
+            check(SUCCEEDED(base_device->GetDeviceCaps(&device_caps)),
+                  "sync selftest: query Direct3D device caps");
+            check(FAILED(base_device->GetDeviceCaps(nullptr)),
+                  "sync selftest: reject null Direct3D device caps output");
+            D3DDEVICE_CREATION_PARAMETERS creation{};
+            check(SUCCEEDED(base_device->GetCreationParameters(&creation)) &&
+                      creation.hFocusWindow == device_window,
+                  "sync selftest: marshal Direct3D creation parameters");
+            check(SUCCEEDED(base_device->BeginScene()) &&
+                      SUCCEEDED(
+                          base_device->Clear(0, nullptr, D3DCLEAR_TARGET, 0xff102030, 1.0f, 0)) &&
+                      SUCCEEDED(base_device->EndScene()),
+                  "sync selftest: execute Direct3D scene methods");
+            IDirect3DDevice9 *queried_device = nullptr;
+            check(SUCCEEDED(base_device->QueryInterface(
+                      __uuidof(IDirect3DDevice9), reinterpret_cast<void **>(&queried_device))) &&
+                      queried_device == base_device,
+                  "sync selftest: Direct3D device QueryInterface lifetime");
+            if (queried_device != nullptr) {
+                queried_device->Release();
+            }
+            void *unsupported_device_interface = reinterpret_cast<void *>(1);
+            check(base_device->QueryInterface(__uuidof(IDirect3DTexture9),
+                                              &unsupported_device_interface) == E_NOINTERFACE &&
+                      unsupported_device_interface == nullptr,
+                  "sync selftest: reject unsupported Direct3D device interface");
+            base_device->Release();
+        }
+        if (device_window != nullptr) {
+            DestroyWindow(device_window);
+        }
         IDirect3DDevice9Ex *device = reinterpret_cast<IDirect3DDevice9Ex *>(1);
         check(FAILED(direct3d->CreateDeviceEx(0, D3DDEVTYPE_HAL, nullptr, 0, nullptr, nullptr,
                                               &device)) &&

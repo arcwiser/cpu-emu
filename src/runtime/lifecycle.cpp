@@ -21,6 +21,13 @@ Runtime::Runtime(std::ostream &output) : output_(output) {
 }
 
 Runtime::~Runtime() {
+    for (const auto &[guest_object, object] : direct3d_device9_objects_) {
+        static_cast<void>(guest_object);
+        auto *host = static_cast<IDirect3DDevice9 *>(object.host);
+        for (std::uint32_t reference = 0; reference < object.references; ++reference) {
+            host->Release();
+        }
+    }
     for (const auto &[guest_object, object] : direct3d9_ex_objects_) {
         static_cast<void>(guest_object);
         auto *host = static_cast<IDirect3D9Ex *>(object.host);

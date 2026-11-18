@@ -35,7 +35,7 @@ reproducible blocker.
 | Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; file open, Save, and Save As work for tested paths; UTF-8 Unicode text and a 52,138-character document save and reopen exactly | Edited-content Save As, UTF-16/legacy encodings, long interactive sessions, and broader editor behavior remain unverified |
 | Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
-| Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates the `YYGameMakerYY` native window, initializes safe DirectInput and `IDirect3D9Ex` proxies, completes Direct3D adapter/capability discovery without corrupting the PE32 stack, and reaches device creation | The 2026-11-18 probe attempts `IDirect3D9Ex::CreateDevice` three times, then exits through the runner's graphics failure path with `-1` after 15,201,662 instructions; the HWND is not visibly rendering and the device/resource/shader proxies, active input, streaming audio, and full Steamworks interfaces remain |
+| Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates the `YYGameMakerYY` native window, initializes safe DirectInput and `IDirect3D9Ex` proxies, completes adapter discovery, and creates a real host-backed `IDirect3DDevice9` on its first attempt | The 2026-11-18 probe stops at `SHLD r/m32, r32, CL` after 15,206,998 instructions; the HWND is not visibly rendering and resource/shader/surface proxies, active input, streaming audio, and full Steamworks interfaces remain |
 | Discord / Chromium | 🔴 Blocked | Loads the installed x64 image and advances through more than 2.6 million V8 startup instructions | Blocked by guest threads/processes, DLL loading, exceptions, mapped sections, and broader SIMD support |
 
 ## Undertale subsystem board
@@ -49,7 +49,7 @@ reproducible blocker.
 | Window class/callback | ✅ | Registers `YYGameMakerYY`; interpreted `WM_NCCREATE`/`WM_CREATE` run |
 | Visible window | 🚧 | Native HWND exists, but GameMaker has not shown/rendered it before graphics setup |
 | Input discovery | ✅ | Guest-owned inert DirectInput proxy completes optional discovery |
-| Direct3D 9Ex | 🚧 | Creation and adapter/capability discovery succeed with PE32-safe structure extents; device creation is the current first blocker |
+| Direct3D 9Ex | 🚧 | Adapter discovery and base device creation succeed with PE32-safe structure marshaling; resource, shader, surface, swap-chain, and presentation paths remain |
 | Audio | ○ | Basic synchronous WinMM only; GameMaker streaming path not reached |
 | Playable | ○ | Requires rendering, input, audio, persistence, and sustained loop |
 

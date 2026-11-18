@@ -11,6 +11,7 @@
 #include "winemu/log.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <cstring>
 #include <cwctype>
@@ -4094,9 +4095,95 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             result = reinterpret_cast<std::uintptr_t>(
                 host->GetAdapterMonitor(static_cast<UINT>(argument(1))));
             break;
-        case 16:
+        case 16: {
+            const auto parameters_address = argument(5);
+            const auto output = argument(6);
+            const auto parameters_size = guest_is_64_bit_ ? 64U : 56U;
+            if (output == 0 || !cpu.memory().contains(output, pointer_size)) {
+                result = invalid_argument;
+            } else if (parameters_address == 0 ||
+                       !cpu.memory().contains(parameters_address, parameters_size)) {
+                write_pointer(output, 0);
+                result = invalid_argument;
+            } else {
+                write_pointer(output, 0);
+                const auto read32 = [&](std::uint64_t offset) {
+                    return cpu.memory().read32(parameters_address + offset);
+                };
+                D3DPRESENT_PARAMETERS parameters{};
+                parameters.BackBufferWidth = read32(0);
+                parameters.BackBufferHeight = read32(4);
+                parameters.BackBufferFormat = static_cast<D3DFORMAT>(read32(8));
+                parameters.BackBufferCount = read32(12);
+                parameters.MultiSampleType = static_cast<D3DMULTISAMPLE_TYPE>(read32(16));
+                parameters.MultiSampleQuality = read32(20);
+                parameters.SwapEffect = static_cast<D3DSWAPEFFECT>(read32(24));
+                parameters.hDeviceWindow = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(
+                    guest_is_64_bit_ ? cpu.memory().read64(parameters_address + 32) : read32(28)));
+                const auto tail = guest_is_64_bit_ ? 40U : 32U;
+                parameters.Windowed = static_cast<BOOL>(read32(tail));
+                parameters.EnableAutoDepthStencil = static_cast<BOOL>(read32(tail + 4));
+                parameters.AutoDepthStencilFormat = static_cast<D3DFORMAT>(read32(tail + 8));
+                parameters.Flags = read32(tail + 12);
+                parameters.FullScreen_RefreshRateInHz = read32(tail + 16);
+                parameters.PresentationInterval = read32(tail + 20);
+                IDirect3DDevice9 *host_device = nullptr;
+                result = static_cast<std::uint32_t>(host->CreateDevice(
+                    static_cast<UINT>(argument(1)), static_cast<D3DDEVTYPE>(argument(2)),
+                    reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(3))),
+                    static_cast<DWORD>(argument(4)), &parameters, &host_device));
+                if (SUCCEEDED(static_cast<HRESULT>(result)) && host_device != nullptr) {
+                    cpu.memory().write32(parameters_address, parameters.BackBufferWidth);
+                    cpu.memory().write32(parameters_address + 4, parameters.BackBufferHeight);
+                    cpu.memory().write32(parameters_address + 8, parameters.BackBufferFormat);
+                    cpu.memory().write32(parameters_address + 12, parameters.BackBufferCount);
+                    cpu.memory().write32(parameters_address + 16, parameters.MultiSampleType);
+                    cpu.memory().write32(parameters_address + 20, parameters.MultiSampleQuality);
+                    cpu.memory().write32(parameters_address + 24, parameters.SwapEffect);
+                    if (guest_is_64_bit_) {
+                        cpu.memory().write64(
+                            parameters_address + 32,
+                            reinterpret_cast<std::uintptr_t>(parameters.hDeviceWindow));
+                    } else {
+                        cpu.memory().write32(
+                            parameters_address + 28,
+                            static_cast<std::uint32_t>(
+                                reinterpret_cast<std::uintptr_t>(parameters.hDeviceWindow)));
+                    }
+                    cpu.memory().write32(parameters_address + tail, parameters.Windowed);
+                    cpu.memory().write32(parameters_address + tail + 4,
+                                         parameters.EnableAutoDepthStencil);
+                    cpu.memory().write32(parameters_address + tail + 8,
+                                         parameters.AutoDepthStencilFormat);
+                    cpu.memory().write32(parameters_address + tail + 12, parameters.Flags);
+                    cpu.memory().write32(parameters_address + tail + 16,
+                                         parameters.FullScreen_RefreshRateInHz);
+                    cpu.memory().write32(parameters_address + tail + 20,
+                                         parameters.PresentationInterval);
+                    if (direct3d_device9_vtable_ == 0) {
+                        constexpr std::uint32_t device_method_count = 119;
+                        direct3d_device9_vtable_ = allocate(device_method_count * pointer_size);
+                        for (std::uint32_t index = 0; index < device_method_count; ++index) {
+                            const auto thunk = next_thunk_;
+                            next_thunk_ += 0x100;
+                            thunks_.emplace(thunk, Api::Direct3DDevice9Method);
+                            thunk_names_.emplace(thunk,
+                                                 "IDirect3DDevice9#" + std::to_string(index));
+                            direct3d_device9_methods_.emplace(thunk, index);
+                            write_pointer(direct3d_device9_vtable_ + index * pointer_size, thunk);
+                        }
+                    }
+                    const auto guest_device = allocate(pointer_size);
+                    write_pointer(guest_device, direct3d_device9_vtable_);
+                    direct3d_device9_objects_.emplace(
+                        guest_device, Direct3DDevice9Object{host_device, 1, object});
+                    write_pointer(output, guest_device);
+                }
+            }
+            break;
+        }
         case 20: {
-            const auto output = method == 16 ? argument(6) : argument(7);
+            const auto output = argument(7);
             if (output == 0 || !cpu.memory().contains(output, pointer_size)) {
                 result = invalid_argument;
             } else {
@@ -4170,6 +4257,304 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         default:
             result = not_available;
+            break;
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(argument_counts[method]);
+        break;
+    }
+    case Api::Direct3DDevice9Method: {
+        constexpr std::uint32_t invalid_argument = 0x80070057U;
+        constexpr std::uint32_t no_interface = 0x80004002U;
+        constexpr std::uint32_t not_available = 0x8876086aU;
+        static constexpr unsigned argument_counts[] = {
+            3,  1, 1, 1, 1, 1, 2, 2, 3, 2, 4, 4, 2, 3, 3, 1, 2, 5, 5, 3, 2, 4, 3, 9,
+            10, 8, 7, 7, 9, 9, 5, 3, 3, 3, 6, 4, 7, 3, 3, 2, 2, 1, 1, 7, 3, 3, 3, 2,
+            2,  2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 2, 2, 2, 3, 3, 4, 4, 4, 4, 2, 3,
+            3,  2, 2, 2, 2, 2, 1, 2, 1, 4, 7, 5, 9, 7, 3, 2, 2, 2, 2, 3, 2, 2, 4, 4,
+            4,  4, 4, 4, 5, 5, 3, 3, 2, 2, 3, 2, 2, 4, 4, 4, 4, 4, 4, 4, 4, 2, 3,
+        };
+        static_assert(std::size(argument_counts) == 119);
+        const auto method = direct3d_device9_methods_.at(cpu.rip());
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        const auto write_pointer = [&](std::uint64_t address, std::uint64_t value) {
+            if (guest_is_64_bit_) {
+                cpu.memory().write64(address, value);
+            } else {
+                cpu.memory().write32(address, static_cast<std::uint32_t>(value));
+            }
+        };
+        const auto copy_to_guest = [&](std::uint64_t address, const auto &value) {
+            if (address == 0 || !cpu.memory().contains(address, sizeof(value))) {
+                return false;
+            }
+            const auto *bytes = reinterpret_cast<const std::uint8_t *>(&value);
+            cpu.memory().write(address, std::span<const std::uint8_t>(bytes, sizeof(value)));
+            return true;
+        };
+        const auto read_value = [&](std::uint64_t address, auto &value) {
+            if (address == 0 || !cpu.memory().contains(address, sizeof(value))) {
+                return false;
+            }
+            const auto bytes = cpu.memory().read(address, sizeof(value));
+            std::memcpy(&value, bytes.data(), bytes.size());
+            return true;
+        };
+        const auto guest_device = argument(0);
+        auto object_iterator = direct3d_device9_objects_.find(guest_device);
+        if (object_iterator == direct3d_device9_objects_.end()) {
+            cpu.set_reg(Rax, invalid_argument);
+            finish_call(argument_counts[method]);
+            break;
+        }
+        auto *host_device = static_cast<IDirect3DDevice9 *>(object_iterator->second.host);
+        std::uint64_t result = not_available;
+        switch (method) {
+        case 0: {
+            const auto iid_address = argument(1);
+            const auto output = argument(2);
+            if (iid_address == 0 || output == 0 ||
+                !cpu.memory().contains(iid_address, sizeof(GUID)) ||
+                !cpu.memory().contains(output, pointer_size)) {
+                result = invalid_argument;
+                break;
+            }
+            write_pointer(output, 0);
+            GUID iid{};
+            const auto bytes = cpu.memory().read(iid_address, sizeof(iid));
+            std::memcpy(&iid, bytes.data(), bytes.size());
+            if (!IsEqualGUID(iid, IID_IUnknown) && !IsEqualGUID(iid, IID_IDirect3DDevice9)) {
+                result = no_interface;
+                break;
+            }
+            host_device->AddRef();
+            ++object_iterator->second.references;
+            write_pointer(output, guest_device);
+            result = 0;
+            break;
+        }
+        case 1:
+            host_device->AddRef();
+            result = ++object_iterator->second.references;
+            break;
+        case 2: {
+            result = host_device->Release();
+            if (--object_iterator->second.references == 0) {
+                direct3d_device9_objects_.erase(object_iterator);
+            }
+            break;
+        }
+        case 3:
+            result = static_cast<std::uint32_t>(host_device->TestCooperativeLevel());
+            break;
+        case 4:
+            result = host_device->GetAvailableTextureMem();
+            break;
+        case 5:
+            result = static_cast<std::uint32_t>(host_device->EvictManagedResources());
+            break;
+        case 6: {
+            const auto output = argument(1);
+            auto parent = direct3d9_ex_objects_.find(object_iterator->second.parent);
+            if (output == 0 || !cpu.memory().contains(output, pointer_size) ||
+                parent == direct3d9_ex_objects_.end()) {
+                result = invalid_argument;
+            } else {
+                auto *host_parent = static_cast<IDirect3D9Ex *>(parent->second.host);
+                host_parent->AddRef();
+                ++parent->second.references;
+                write_pointer(output, parent->first);
+                result = 0;
+            }
+            break;
+        }
+        case 7: {
+            D3DCAPS9 capabilities{};
+            result = copy_to_guest(argument(1), capabilities)
+                         ? static_cast<std::uint32_t>(host_device->GetDeviceCaps(&capabilities))
+                         : invalid_argument;
+            if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                copy_to_guest(argument(1), capabilities);
+            }
+            break;
+        }
+        case 8: {
+            D3DDISPLAYMODE mode{};
+            result = copy_to_guest(argument(2), mode)
+                         ? static_cast<std::uint32_t>(
+                               host_device->GetDisplayMode(static_cast<UINT>(argument(1)), &mode))
+                         : invalid_argument;
+            if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                copy_to_guest(argument(2), mode);
+            }
+            break;
+        }
+        case 9: {
+            D3DDEVICE_CREATION_PARAMETERS parameters{};
+            const auto output = argument(1);
+            const auto guest_size = guest_is_64_bit_ ? 24U : 16U;
+            if (output == 0 || !cpu.memory().contains(output, guest_size)) {
+                result = invalid_argument;
+            } else {
+                result =
+                    static_cast<std::uint32_t>(host_device->GetCreationParameters(&parameters));
+                if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                    cpu.memory().write32(output, parameters.AdapterOrdinal);
+                    cpu.memory().write32(output + 4, parameters.DeviceType);
+                    if (guest_is_64_bit_) {
+                        cpu.memory().write64(
+                            output + 8, reinterpret_cast<std::uintptr_t>(parameters.hFocusWindow));
+                        cpu.memory().write32(output + 16, parameters.BehaviorFlags);
+                    } else {
+                        cpu.memory().write32(
+                            output + 8, static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(
+                                            parameters.hFocusWindow)));
+                        cpu.memory().write32(output + 12, parameters.BehaviorFlags);
+                    }
+                }
+            }
+            break;
+        }
+        case 11:
+            host_device->SetCursorPosition(static_cast<int>(argument(1)),
+                                           static_cast<int>(argument(2)),
+                                           static_cast<DWORD>(argument(3)));
+            result = 0;
+            break;
+        case 12:
+            result = host_device->ShowCursor(static_cast<BOOL>(argument(1)));
+            break;
+        case 15:
+            result = host_device->GetNumberOfSwapChains();
+            break;
+        case 20:
+            result = static_cast<std::uint32_t>(
+                host_device->SetDialogBoxMode(static_cast<BOOL>(argument(1))));
+            break;
+        case 41:
+            result = static_cast<std::uint32_t>(host_device->BeginScene());
+            break;
+        case 42:
+            result = static_cast<std::uint32_t>(host_device->EndScene());
+            break;
+        case 43: {
+            const auto count = static_cast<DWORD>(argument(1));
+            std::vector<D3DRECT> rectangles;
+            if (count != 0) {
+                if (argument(2) == 0 || count > 0x10000 ||
+                    !cpu.memory().contains(argument(2), count * sizeof(D3DRECT))) {
+                    result = invalid_argument;
+                    break;
+                }
+                rectangles.resize(count);
+                const auto bytes = cpu.memory().read(argument(2), count * sizeof(D3DRECT));
+                std::memcpy(rectangles.data(), bytes.data(), bytes.size());
+            }
+            result = static_cast<std::uint32_t>(host_device->Clear(
+                count, rectangles.empty() ? nullptr : rectangles.data(),
+                static_cast<DWORD>(argument(3)), static_cast<D3DCOLOR>(argument(4)),
+                std::bit_cast<float>(static_cast<std::uint32_t>(argument(5))),
+                static_cast<DWORD>(argument(6))));
+            break;
+        }
+        case 44: {
+            D3DMATRIX matrix{};
+            result = read_value(argument(2), matrix)
+                         ? static_cast<std::uint32_t>(host_device->SetTransform(
+                               static_cast<D3DTRANSFORMSTATETYPE>(argument(1)), &matrix))
+                         : invalid_argument;
+            break;
+        }
+        case 47: {
+            D3DVIEWPORT9 viewport{};
+            result = read_value(argument(1), viewport)
+                         ? static_cast<std::uint32_t>(host_device->SetViewport(&viewport))
+                         : invalid_argument;
+            break;
+        }
+        case 49: {
+            D3DMATERIAL9 material{};
+            result = read_value(argument(1), material)
+                         ? static_cast<std::uint32_t>(host_device->SetMaterial(&material))
+                         : invalid_argument;
+            break;
+        }
+        case 51: {
+            D3DLIGHT9 light{};
+            result = read_value(argument(2), light)
+                         ? static_cast<std::uint32_t>(
+                               host_device->SetLight(static_cast<DWORD>(argument(1)), &light))
+                         : invalid_argument;
+            break;
+        }
+        case 53:
+            result = static_cast<std::uint32_t>(host_device->LightEnable(
+                static_cast<DWORD>(argument(1)), static_cast<BOOL>(argument(2))));
+            break;
+        case 55: {
+            std::array<float, 4> plane{};
+            result = read_value(argument(2), plane)
+                         ? static_cast<std::uint32_t>(host_device->SetClipPlane(
+                               static_cast<DWORD>(argument(1)), plane.data()))
+                         : invalid_argument;
+            break;
+        }
+        case 57:
+            result = static_cast<std::uint32_t>(host_device->SetRenderState(
+                static_cast<D3DRENDERSTATETYPE>(argument(1)), static_cast<DWORD>(argument(2))));
+            break;
+        case 65:
+            if (argument(2) == 0) {
+                result = static_cast<std::uint32_t>(
+                    host_device->SetTexture(static_cast<DWORD>(argument(1)), nullptr));
+            }
+            break;
+        case 67:
+            result = static_cast<std::uint32_t>(host_device->SetTextureStageState(
+                static_cast<DWORD>(argument(1)), static_cast<D3DTEXTURESTAGESTATETYPE>(argument(2)),
+                static_cast<DWORD>(argument(3))));
+            break;
+        case 69:
+            result = static_cast<std::uint32_t>(host_device->SetSamplerState(
+                static_cast<DWORD>(argument(1)), static_cast<D3DSAMPLERSTATETYPE>(argument(2)),
+                static_cast<DWORD>(argument(3))));
+            break;
+        case 73:
+            result = static_cast<std::uint32_t>(
+                host_device->SetCurrentTexturePalette(static_cast<UINT>(argument(1))));
+            break;
+        case 75: {
+            RECT rectangle{};
+            result = read_value(argument(1), rectangle)
+                         ? static_cast<std::uint32_t>(host_device->SetScissorRect(&rectangle))
+                         : invalid_argument;
+            break;
+        }
+        case 77:
+            result = static_cast<std::uint32_t>(
+                host_device->SetSoftwareVertexProcessing(static_cast<BOOL>(argument(1))));
+            break;
+        case 78:
+            result = host_device->GetSoftwareVertexProcessing();
+            break;
+        case 79:
+            result = static_cast<std::uint32_t>(host_device->SetNPatchMode(
+                std::bit_cast<float>(static_cast<std::uint32_t>(argument(1)))));
+            break;
+        case 89:
+            result =
+                static_cast<std::uint32_t>(host_device->SetFVF(static_cast<DWORD>(argument(1))));
+            break;
+        case 102:
+            result = static_cast<std::uint32_t>(host_device->SetStreamSourceFreq(
+                static_cast<UINT>(argument(1)), static_cast<UINT>(argument(2))));
+            break;
+        case 104:
+            if (argument(1) == 0) {
+                result = static_cast<std::uint32_t>(host_device->SetIndices(nullptr));
+            }
+            break;
+        default:
             break;
         }
         cpu.set_reg(Rax, result);

@@ -352,6 +352,11 @@ this file is the companion log of development decisions.
 - Undertale now passes the cookie check, attempts `IDirect3D9Ex::CreateDevice` three times, and
   exits through its normal graphics-initialization failure path with `-1` after 15,201,662
   instructions. Device creation is the current first blocker; guest SEH was not invoked.
+- Added a guest-owned 119-slot `IDirect3DDevice9` proxy with PE32/PE32+ presentation-parameter
+  marshaling, host COM lifetime tracking, capability/creation queries, scene/clear operations, and
+  common pointer-free render-state setters. Pointer-retaining resource methods remain refused.
+- Undertale creates the host-backed device on its first attempt, queries its caps, and advances to
+  `SHLD r/m32, r32, CL` after 15,206,998 instructions.
 
 ## 2026-11-08 — Undertale PE32 window creation
 

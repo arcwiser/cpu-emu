@@ -162,6 +162,7 @@ enum class RuntimeApi {
     GuestLineDda,
     Direct3DCreate9Ex,
     Direct3D9ExMethod,
+    Direct3DDevice9Method,
     DirectInputCreate,
     DirectInputMethod,
     ResolveDelayLoadedAPI,

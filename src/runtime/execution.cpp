@@ -141,6 +141,16 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     pending_window_enumerations_.clear();
     pending_font_enumerations_.clear();
     pending_line_dda_.clear();
+    for (const auto &[guest_object, object] : direct3d_device9_objects_) {
+        static_cast<void>(guest_object);
+        auto *host = static_cast<IDirect3DDevice9 *>(object.host);
+        for (std::uint32_t reference = 0; reference < object.references; ++reference) {
+            host->Release();
+        }
+    }
+    direct3d_device9_objects_.clear();
+    direct3d_device9_vtable_ = 0;
+    direct3d_device9_methods_.clear();
     for (const auto &[guest_object, object] : direct3d9_ex_objects_) {
         static_cast<void>(guest_object);
         auto *host = static_cast<IDirect3D9Ex *>(object.host);
