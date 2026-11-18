@@ -670,6 +670,18 @@ development.
 - Undertale clears the current CPU instruction blockers, advances 708 instructions, and reaches
   its first `D3DXCreateTextureFromFileInMemoryEx` call after 15,224,362 instructions.
 
+## 2026-11-18 — guest-owned Direct3D textures
+
+- Added a guest-owned 22-slot `IDirect3DTexture9` proxy with parent-device retention,
+  `IUnknown`/resource/base-texture lifetime and metadata methods, level descriptions, dirty-rect
+  forwarding, device `CreateTexture`, and texture bind/unbind support.
+- Added `D3DXCreateTextureFromFileInMemoryEx` using a bounded copy of untrusted guest image data,
+  PE32-safe image-info/palette output marshaling, and the host system D3DX decoder. Native texture
+  and lock pointers never enter guest memory; surface and lock methods still fail closed.
+- Expanded the Paint synchronization fixture to cover texture creation, metadata, parent lifetime,
+  `QueryInterface`, binding, invalid output, and teardown. Undertale successfully decodes its first
+  embedded texture and advances to `D3DXCreateTextureFromFileW` after 15,224,537 instructions.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

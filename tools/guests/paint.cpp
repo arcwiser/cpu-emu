@@ -712,6 +712,41 @@ int run_sync_selftest() {
             if (queried_device != nullptr) {
                 queried_device->Release();
             }
+            IDirect3DTexture9 *texture = nullptr;
+            check(SUCCEEDED(base_device->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
+                                                       &texture, nullptr)) &&
+                      texture != nullptr,
+                  "sync selftest: create Direct3D texture proxy");
+            if (texture != nullptr) {
+                D3DSURFACE_DESC description{};
+                check(texture->GetLevelCount() == 1 &&
+                          SUCCEEDED(texture->GetLevelDesc(0, &description)) &&
+                          description.Width == 4 && description.Height == 4,
+                      "sync selftest: query Direct3D texture description");
+                IDirect3DDevice9 *texture_device = nullptr;
+                check(SUCCEEDED(texture->GetDevice(&texture_device)) &&
+                          texture_device == base_device,
+                      "sync selftest: retain Direct3D texture device owner");
+                if (texture_device != nullptr) {
+                    texture_device->Release();
+                }
+                IDirect3DTexture9 *queried_texture = nullptr;
+                check(SUCCEEDED(
+                          texture->QueryInterface(__uuidof(IDirect3DTexture9),
+                                                  reinterpret_cast<void **>(&queried_texture))) &&
+                          queried_texture == texture,
+                      "sync selftest: Direct3D texture QueryInterface lifetime");
+                if (queried_texture != nullptr) {
+                    queried_texture->Release();
+                }
+                check(SUCCEEDED(base_device->SetTexture(0, texture)) &&
+                          SUCCEEDED(base_device->SetTexture(0, nullptr)),
+                      "sync selftest: bind and unbind Direct3D texture proxy");
+                texture->Release();
+            }
+            check(FAILED(base_device->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
+                                                    nullptr, nullptr)),
+                  "sync selftest: reject null Direct3D texture output");
             void *unsupported_device_interface = reinterpret_cast<void *>(1);
             check(base_device->QueryInterface(__uuidof(IDirect3DTexture9),
                                               &unsupported_device_interface) == E_NOINTERFACE &&
