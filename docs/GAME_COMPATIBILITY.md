@@ -50,7 +50,7 @@ reproducible blocker.
 | Visible window | 🚧 | GameMaker calls `ShowWindow` and `UpdateWindow` on its native HWND; a visible rendered game frame has not yet been verified |
 | Input discovery | ✅ | Guest-owned inert DirectInput proxy completes optional discovery |
 | Direct3D 9Ex | 🚧 | Adapter/device creation, PE32-safe structure marshaling, device texture and vertex/index-buffer creation/binding, checked buffer staging locks, and D3DX file/in-memory texture paths are adapted; surface/shader/swap-chain/draw/presentation paths remain |
-| Audio | 🚧 | Basic synchronous WinMM and guest-owned base `IDirectSound` discovery work; sound buffers, playback, and streaming are not yet adapted |
+| Audio | 🚧 | Basic synchronous WinMM and guest-owned base `IDirectSound` discovery work; Undertale's OpenAL context/source initialization currently fails, and streaming is not yet adapted |
 | Playable | ○ | Requires rendering, input, audio, persistence, and sustained loop |
 
 ## Audio status

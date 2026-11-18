@@ -441,6 +441,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::CreateWindowExW;
     } else if (name == "ShowWindow" || name == "UpdateWindow") {
         api = Api::GuestShowWindow;
+    } else if (name == "GetForegroundWindow") {
+        api = Api::GuestForegroundWindow;
     } else if (name == "DialogBoxParamW") {
         api = Api::DialogBoxParamW;
     } else if (name == "CreateDialogParamW") {

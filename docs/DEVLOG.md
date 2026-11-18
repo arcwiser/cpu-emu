@@ -755,6 +755,18 @@ development.
 - Undertale passes DirectSound discovery and advances to `GetForegroundWindow` after 66,392,948
   instructions. The offline Steam failure remains a handled startup path, not this blocker.
 
+## 2026-11-18 — isolated foreground-window queries
+
+- Added `GetForegroundWindow` routing that returns a native HWND only when it belongs to a window
+  procedure registered with the current runtime. An unrelated host desktop window is reported as
+  null instead of leaking another process's handle into guest state.
+- The synchronization fixture covers the permitted guest-window/null result after a foreground
+  request; Windows may deny focus transfer to a headless test process, so the regression accepts
+  that documented native outcome while rejecting every unrelated HWND.
+- Undertale passes its former foreground query and reaches the 100,000,000-instruction limit in a
+  sustained loop. OpenAL reports context/source initialization errors, and no visible rendered
+  frame or working audio is claimed yet.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

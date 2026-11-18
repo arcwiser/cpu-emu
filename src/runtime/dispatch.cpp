@@ -3796,6 +3796,15 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(updating ? 1 : 2);
         break;
     }
+    case Api::GuestForegroundWindow: {
+        const auto foreground = ::GetForegroundWindow();
+        const auto window = reinterpret_cast<std::uint64_t>(foreground);
+        // A host desktop window belongs to a different process. Expose only windows whose
+        // procedures are registered with this Runtime, matching the guest process boundary.
+        cpu.set_reg(Rax, window_procedures_.contains(window) ? window : 0);
+        finish_call(0);
+        break;
+    }
     case Api::DialogBoxParamW: {
         const auto module_value = argument(0);
         const auto template_value = argument(1);

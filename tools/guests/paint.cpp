@@ -965,6 +965,11 @@ int run_sync_selftest() {
                               0, 100, 100, nullptr, nullptr, nullptr, nullptr);
     check(legacy_window != nullptr, "sync selftest: create legacy registered window");
     if (legacy_window != nullptr) {
+        ShowWindow(legacy_window, SW_SHOW);
+        SetForegroundWindow(legacy_window);
+        const auto foreground_window = GetForegroundWindow();
+        check(foreground_window == nullptr || foreground_window == legacy_window,
+              "sync selftest: isolate foreground query to process-owned window");
         check(SendMessageW(legacy_window, WM_APP + 2, 0, 0) == 0x1234 &&
                   legacy_window_callback_seen,
               "sync selftest: dispatch legacy registered window callback");
