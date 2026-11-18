@@ -712,6 +712,15 @@ development.
   physical TOP change after a popping comparison. Undertale passes its `FCOMIP ST(0), ST(1)` and
   reaches `CreateWaitableTimerW` after 15,252,701 instructions.
 
+## 2026-11-18 — SSE square root and x87 runtime rounding
+
+- Added register and memory forms of `SQRTPS`, `SQRTPD`, `SQRTSS`, and `SQRTSD`, preserving the
+  untouched scalar lanes and covering packed results and negative masked-invalid results.
+- Added control-word-aware `FRNDINT` for all four rounding modes and completed `DC` register and
+  double-memory `FCOM`/`FCOMP`, including status and pop behavior.
+- Undertale passes the renderer's `SQRTSD`, the CRT `FRNDINT`, and its subsequent double compare;
+  the next non-CPU work exposed the guest heap's one-mapping-per-allocation exhaustion behavior.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

@@ -105,8 +105,8 @@ The x87 stack and control word are independent state; they are not aliases of XM
 | :---: | --- |
 | 🟧 | `FLD` for `m32real`, `m64real`, and `ST(i)`; `FXCH ST(i)`; constants `FLD1`, `FLDL2T`, `FLDL2E`, `FLDPI`, `FLDLG2`, `FLDLN2`, `FLDZ` |
 | 🟧 | `FST`/`FSTP` for `m32real`, `m64real`, and `ST(i)`; `FUCOM`/`FUCOMP` with C0/C2/C3 and TOP status reporting; `FUCOMI`/`FCOMI`/`FUCOMIP`/`FCOMIP` with integer condition flags |
-| 🟧 | `FADD`, `FMUL`, `FSUB`, reverse subtract, `FDIV`, reverse divide in D8 ST(0)/single-memory and DC ST(i)/double-memory forms; D8 `FCOM`/`FCOMP` register and memory forms |
-| 🟧 | `FADDP`, `FMULP`, `FSUBP`, `FSUBRP`, `FDIVP`, `FDIVRP`, `FCHS`, `FABS`, `FSQRT`, `FSIN`, `FCOS` |
+| 🟧 | `FADD`, `FMUL`, `FSUB`, reverse subtract, `FDIV`, reverse divide in D8 ST(0)/single-memory and DC ST(i)/double-memory forms; D8/DC `FCOM`/`FCOMP` register and memory forms |
+| 🟧 | `FADDP`, `FMULP`, `FSUBP`, `FSUBRP`, `FDIVP`, `FDIVRP`, `FCHS`, `FABS`, `FSQRT`, `FRNDINT`, `FSIN`, `FCOS` |
 | 🟧 | `FILD m32int`, `FILD m64int`, `FISTP m64int` with control-word rounding |
 | 🟧 | `FLDCW`, `FNSTCW`, `FNSTSW AX`, `FNCLEX`, `FNINIT`, `WAIT` |
 | ⬜ | Remaining comparison and integer-conversion encodings, 80-bit memory values, BCD, remainder, remaining transcendental and exception semantics |
@@ -115,8 +115,8 @@ The x87 stack and control word are independent state; they are not aliases of XM
 
 | Family | Status | Implemented or observed forms |
 | --- | :---: | --- |
-| SSE | 🟨 | Scalar single moves/arithmetic and conversions; packed single arithmetic; `CVTPS2PD`; logical operations; unpack and shuffle forms used by current guests |
-| SSE2 | 🟨 | Packed double arithmetic; scalar double conversions; `CVTPD2PS`; XMM moves; packed integer add/subtract, compare, unpack, shuffle, byte shifts, `PMOVMSKB` subsets, and `LFENCE`/`MFENCE`/`SFENCE` ordering |
+| SSE | 🟨 | Scalar single moves/arithmetic and conversions; packed single arithmetic; `SQRTSS`/`SQRTPS`; `CVTPS2PD`; logical operations; unpack and shuffle forms used by current guests |
+| SSE2 | 🟨 | Packed double arithmetic; scalar double conversions; `SQRTSD`/`SQRTPD`; `CVTPD2PS`; XMM moves; packed integer add/subtract, compare, unpack, shuffle, byte shifts, `PMOVMSKB` subsets, and `LFENCE`/`MFENCE`/`SFENCE` ordering |
 | SSE3 | 🟨 | `MOVDDUP`, `LDDQU`, horizontal add/subtract, alternating add/subtract |
 | SSSE3 | 🟨 | `PSHUFB`, horizontal packed add/subtract variants, `PMADDUBSW`, `PSIGNB/W/D`, `PMULHRSW`, `PALIGNR`, `PABSB/W/D` |
 | SSE4.1 | 🟨 | `PTEST`, `PACKUSDW`, signed/unsigned packed min/max subset, `PMULLD` |

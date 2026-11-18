@@ -543,6 +543,64 @@ void test_x87_comparison_status() {
         cpu.step();
     }
     require((cpu.reg(winemu::Rax) & 0x3800) == 0x3800, "x87 FCOMIP pops one stack entry");
+
+    const std::uint8_t double_memory_compare[] = {
+        0xdd, 0x47, 0x08, // fld qword ptr [rdi+8]
+        0xdc, 0x1f,       // fcomp qword ptr [rdi]
+        0xdf, 0xe0,       // fnstsw ax
+    };
+    memory.write(code_address, double_memory_compare);
+    memory.write64(data_address, std::bit_cast<std::uint64_t>(7.0));
+    memory.write64(data_address + 8, std::bit_cast<std::uint64_t>(2.0));
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    cpu.step();
+    cpu.step();
+    cpu.step();
+    require((cpu.reg(winemu::Rax) & conditions) == 0x0100,
+            "x87 DC FCOMP m64real comparison status");
+    require((cpu.reg(winemu::Rax) & 0x3800) == 0, "x87 DC FCOMP m64real pops its stack entry");
+}
+
+void test_x87_rounding() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    const std::uint8_t code[] = {
+        0xd9, 0x2f,       // fldcw word ptr [rdi]
+        0xdd, 0x47, 0x08, // fld qword ptr [rdi+8]
+        0xd9, 0xfc,       // frndint
+        0xdd, 0x5f, 0x10, // fstp qword ptr [rdi+10h]
+    };
+    memory.write(code_address, code);
+    winemu::Cpu cpu(memory);
+    const auto round = [&](std::uint16_t control, double value) {
+        memory.write16(data_address, control);
+        memory.write64(data_address + 8, std::bit_cast<std::uint64_t>(value));
+        cpu.reset(code_address, data_address + 0xff8);
+        cpu.set_reg(winemu::Rdi, data_address);
+        for (unsigned instruction = 0; instruction < 4; ++instruction) {
+            cpu.step();
+        }
+        return std::bit_cast<double>(memory.read64(data_address + 0x10));
+    };
+    require(round(0x037f, 2.75) == 3.0, "x87 FRNDINT round-to-nearest");
+    require(round(0x077f, -2.25) == -3.0, "x87 FRNDINT round-down");
+    require(round(0x0b7f, 2.25) == 3.0, "x87 FRNDINT round-up");
+    require(round(0x0f7f, -2.75) == -2.0, "x87 FRNDINT truncate");
+
+    const std::uint8_t underflow[] = {0xd9, 0xfc};
+    memory.write(code_address, underflow);
+    cpu.reset(code_address, data_address + 0xff8);
+    bool rejected = false;
+    try {
+        cpu.step();
+    } catch (const winemu::Error &) {
+        rejected = true;
+    }
+    require(rejected, "x87 FRNDINT rejects stack underflow");
 }
 
 void test_x87_register_arithmetic() {
@@ -633,6 +691,63 @@ void test_packed_float_conversions() {
                 memory.read32(data_address + 0x14) == second,
             "CVTPS2PD/CVTPD2PS packed lane round trip");
     require(memory.read64(data_address + 0x18) == 0, "CVTPD2PS clears the upper destination lanes");
+}
+
+void test_sse_square_roots() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    const std::uint8_t code[] = {
+        0x0f, 0x10, 0x07,             // movups xmm0, [rdi]
+        0x0f, 0x51, 0xc0,             // sqrtps xmm0, xmm0
+        0x0f, 0x11, 0x47, 0x40,       // movups [rdi+40h], xmm0
+        0x66, 0x0f, 0x10, 0x4f, 0x10, // movupd xmm1, [rdi+10h]
+        0x66, 0x0f, 0x51, 0xc9,       // sqrtpd xmm1, xmm1
+        0x66, 0x0f, 0x11, 0x4f, 0x50, // movupd [rdi+50h], xmm1
+        0x0f, 0x10, 0x17,             // movups xmm2, [rdi]
+        0xf3, 0x0f, 0x51, 0x57, 0x20, // sqrtss xmm2, [rdi+20h]
+        0x0f, 0x11, 0x57, 0x60,       // movups [rdi+60h], xmm2
+        0x66, 0x0f, 0x10, 0x5f, 0x10, // movupd xmm3, [rdi+10h]
+        0xf2, 0x0f, 0x51, 0x5f, 0x28, // sqrtsd xmm3, [rdi+28h]
+        0x66, 0x0f, 0x11, 0x5f, 0x70, // movupd [rdi+70h], xmm3
+    };
+    memory.write(code_address, code);
+    const auto write_float = [&](std::uint64_t offset, float value) {
+        memory.write32(data_address + offset, std::bit_cast<std::uint32_t>(value));
+    };
+    const auto read_float = [&](std::uint64_t offset) {
+        return std::bit_cast<float>(memory.read32(data_address + offset));
+    };
+    const auto write_double = [&](std::uint64_t offset, double value) {
+        memory.write64(data_address + offset, std::bit_cast<std::uint64_t>(value));
+    };
+    const auto read_double = [&](std::uint64_t offset) {
+        return std::bit_cast<double>(memory.read64(data_address + offset));
+    };
+    write_float(0, 4.0f);
+    write_float(4, 9.0f);
+    write_float(8, 16.0f);
+    write_float(12, -1.0f);
+    write_double(0x10, 36.0);
+    write_double(0x18, 49.0);
+    write_float(0x20, 64.0f);
+    write_double(0x28, 81.0);
+    winemu::Cpu cpu(memory);
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    for (unsigned instruction = 0; instruction < 12; ++instruction) {
+        cpu.step();
+    }
+    require(read_float(0x40) == 2.0f && read_float(0x44) == 3.0f && read_float(0x48) == 4.0f &&
+                std::isnan(read_float(0x4c)),
+            "SSE SQRTPS register lanes and masked-invalid result");
+    require(read_double(0x50) == 6.0 && read_double(0x58) == 7.0, "SSE2 SQRTPD register lanes");
+    require(read_float(0x60) == 8.0f && read_float(0x64) == 9.0f && read_float(0x68) == 16.0f,
+            "SSE SQRTSS memory source preserves upper lanes");
+    require(read_double(0x70) == 9.0 && read_double(0x78) == 49.0,
+            "SSE2 SQRTSD memory source preserves upper lane");
 }
 
 void test_packed_logical_operations() {

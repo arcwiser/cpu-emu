@@ -145,6 +145,18 @@ void Cpu::step() {
             flags_ |= flag_zf;
         }
     };
+    const auto x87_round = [&](long double value) {
+        switch ((x87_control_ >> 10) & 3) {
+        case 1:
+            return std::floor(value);
+        case 2:
+            return std::ceil(value);
+        case 3:
+            return std::trunc(value);
+        default:
+            return std::nearbyint(value);
+        }
+    };
 
     if (opcode >= 0xb0 && opcode <= 0xb7) {
         const auto raw = static_cast<std::uint8_t>(opcode - 0xb0);
@@ -723,6 +735,13 @@ void Cpu::step() {
                 x87_[0] = std::sqrt(x87_[0]);
                 return;
             }
+            if ((decoded.reg & 7) == 7 && decoded.rm.register_index == Rsp) { // FRNDINT
+                if (x87_depth_ == 0) {
+                    throw Error("x87 stack underflow");
+                }
+                x87_[0] = x87_round(x87_[0]);
+                return;
+            }
             throw Error("unsupported x87 D9 register instruction");
         }
         switch (decoded.reg & 7) {
@@ -788,14 +807,17 @@ void Cpu::step() {
             throw Error("x87 stack underflow");
         }
         const auto operation = decoded.reg & 7;
-        if (operation != 0 && operation != 1 && operation != 4 && operation != 5 &&
-            operation != 6 && operation != 7) {
-            throw Error("unsupported x87 DC comparison instruction");
-        }
         if (decoded.rm.is_register) {
             const auto target = static_cast<std::size_t>(decoded.rm.register_index & 7);
             if (target >= x87_depth_) {
                 throw Error("x87 stack underflow");
+            }
+            if (operation == 2 || operation == 3) { // FCOM/FCOMP ST(i)
+                x87_compare(x87_[0], x87_[target]);
+                if (operation == 3) {
+                    x87_pop();
+                }
+                return;
             }
             const auto top = x87_[0];
             if (operation == 0) { // FADD ST(i), ST(0)
@@ -815,7 +837,12 @@ void Cpu::step() {
         }
         const auto operand =
             static_cast<long double>(std::bit_cast<double>(memory_.read64(decoded.rm.address)));
-        if (operation == 0) { // FADD m64real
+        if (operation == 2 || operation == 3) { // FCOM/FCOMP m64real
+            x87_compare(x87_[0], operand);
+            if (operation == 3) {
+                x87_pop();
+            }
+        } else if (operation == 0) { // FADD m64real
             x87_[0] += operand;
         } else if (operation == 1) { // FMUL m64real
             x87_[0] *= operand;
@@ -825,8 +852,10 @@ void Cpu::step() {
             x87_[0] = operand - x87_[0];
         } else if (operation == 6) { // FDIV m64real
             x87_[0] /= operand;
-        } else { // FDIVR m64real
+        } else if (operation == 7) { // FDIVR m64real
             x87_[0] = operand / x87_[0];
+        } else {
+            throw Error("invalid x87 DC operation");
         }
         return;
     }
@@ -929,11 +958,7 @@ void Cpu::step() {
             return;
         }
         if (!decoded.rm.is_register && (decoded.reg & 7) == 7 && x87_depth_ != 0) { // FISTP m64
-            const auto rounding = (x87_control_ >> 10) & 3;
-            const auto rounded = rounding == 1   ? std::floor(x87_[0])
-                                 : rounding == 2 ? std::ceil(x87_[0])
-                                 : rounding == 3 ? std::trunc(x87_[0])
-                                                 : std::nearbyint(x87_[0]);
+            const auto rounded = x87_round(x87_[0]);
             memory_.write64(decoded.rm.address,
                             static_cast<std::uint64_t>(static_cast<std::int64_t>(rounded)));
             x87_pop();
@@ -1841,6 +1866,45 @@ void Cpu::step() {
                 flags_ |= flag_cf;
             } else if (left == right) {
                 flags_ |= flag_zf;
+            }
+            return;
+        }
+        if (second == 0x51) { // SQRTPS/SQRTPD/SQRTSS/SQRTSD
+            const auto decoded = decode_rm(rex);
+            if (repeat_prefix == 0xf2) {
+                const auto value = decoded.rm.is_register
+                                       ? xmm_low_double(decoded.rm.register_index)
+                                       : std::bit_cast<double>(memory_.read64(decoded.rm.address));
+                set_xmm_low_double(decoded.reg, std::sqrt(value));
+            } else if (repeat_prefix == 0xf3) {
+                const auto value = decoded.rm.is_register
+                                       ? xmm_low_float(decoded.rm.register_index)
+                                       : std::bit_cast<float>(memory_.read32(decoded.rm.address));
+                set_xmm_low_float(decoded.reg, std::sqrt(value));
+            } else if (operand16) {
+                const auto source =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                for (unsigned lane = 0; lane < 2; ++lane) {
+                    xmm_[decoded.reg][lane] = std::bit_cast<std::uint64_t>(
+                        std::sqrt(std::bit_cast<double>(source[lane])));
+                }
+            } else {
+                const auto source =
+                    decoded.rm.is_register
+                        ? xmm_[decoded.rm.register_index]
+                        : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
+                                                       memory_.read64(decoded.rm.address + 8)};
+                for (unsigned lane = 0; lane < 4; ++lane) {
+                    const auto shift = (lane % 2) * 32;
+                    const auto value =
+                        std::bit_cast<float>(static_cast<std::uint32_t>(source[lane / 2] >> shift));
+                    const auto result = std::bit_cast<std::uint32_t>(std::sqrt(value));
+                    xmm_[decoded.reg][lane / 2] &= ~(0xffffffffULL << shift);
+                    xmm_[decoded.reg][lane / 2] |= static_cast<std::uint64_t>(result) << shift;
+                }
             }
             return;
         }
