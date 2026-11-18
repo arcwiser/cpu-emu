@@ -266,6 +266,35 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                                                 nullptr, index});
         return guest_buffer;
     };
+    const auto wrap_direct_sound_buffer = [&](IDirectSoundBuffer *host_buffer,
+                                              std::uint64_t guest_sound, std::uint32_t length) {
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        if (direct_sound_buffer_vtable_ == 0) {
+            constexpr std::uint32_t method_count = 21;
+            direct_sound_buffer_vtable_ = allocate(method_count * pointer_size);
+            for (std::uint32_t method = 0; method < method_count; ++method) {
+                const auto thunk = next_thunk_;
+                next_thunk_ += 0x100;
+                thunks_.emplace(thunk, Api::DirectSoundBufferMethod);
+                thunk_names_.emplace(thunk, "IDirectSoundBuffer#" + std::to_string(method));
+                direct_sound_buffer_methods_.emplace(thunk, method);
+                write_guest_pointer(direct_sound_buffer_vtable_ + method * pointer_size, thunk);
+            }
+        }
+        auto parent = direct_sound_objects_.find(guest_sound);
+        if (parent == direct_sound_objects_.end()) {
+            throw Error("DirectSound buffer has no guest device owner");
+        }
+        const auto staging = allocate(length);
+        const auto guest_buffer = allocate(pointer_size);
+        write_guest_pointer(guest_buffer, direct_sound_buffer_vtable_);
+        static_cast<IDirectSound *>(parent->second.host)->AddRef();
+        ++parent->second.references;
+        direct_sound_buffer_objects_.emplace(
+            guest_buffer, DirectSoundBufferObject{host_buffer, 1, guest_sound, staging, length,
+                                                  nullptr, nullptr, 0, 0});
+        return guest_buffer;
+    };
     const auto ensure_locale = [&] {
         if (locale_proxy_ != 0) {
             return;
@@ -2000,6 +2029,15 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     }
     case Api::ReturnZero:
         cpu.set_reg(Rax, 0);
+        if (thunk_name.ends_with("CreateThread") || thunk_name.ends_with("CreateRemoteThread") ||
+            thunk_name.ends_with("CreateRemoteThreadEx") ||
+            thunk_name.ends_with("QueueUserWorkItem") ||
+            thunk_name.ends_with("RegisterWaitForSingleObject") ||
+            thunk_name.ends_with("CreateThreadpoolWork") ||
+            thunk_name.ends_with("CreateThreadpoolWait") ||
+            thunk_name.ends_with("CreateThreadpoolIo")) {
+            last_error_ = ERROR_NOT_SUPPORTED;
+        }
         finish_call(
             thunk_name.find("_cexit") != std::string::npos ||
                     thunk_name.find("_c_exit") != std::string::npos
@@ -2010,6 +2048,15 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                     thunk_name.ends_with("CreateProcessAsUserA")
                 ? 11
             : thunk_name.ends_with("CreateProcessW") || thunk_name.ends_with("CreateProcessA") ? 10
+            : thunk_name.ends_with("CreateRemoteThreadEx")                                     ? 8
+            : thunk_name.ends_with("CreateRemoteThread")                                       ? 7
+            : thunk_name.ends_with("CreateThread")                                             ? 6
+            : thunk_name.ends_with("RegisterWaitForSingleObject")                              ? 6
+            : thunk_name.ends_with("CreateThreadpoolIo")                                       ? 4
+            : thunk_name.ends_with("QueueUserWorkItem") ||
+                    thunk_name.ends_with("CreateThreadpoolWork") ||
+                    thunk_name.ends_with("CreateThreadpoolWait")
+                ? 3
             : thunk_name.ends_with("AddVectoredExceptionHandler") ||
                     thunk_name.ends_with("AddVectoredContinueHandler")
                 ? 2
@@ -3775,6 +3822,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                  "CreateWindowExW -> hwnd=" + log::hex(reinterpret_cast<std::uint64_t>(result)));
         if (result == nullptr) {
             last_error_ = ::GetLastError();
+        } else {
+            const auto window = reinterpret_cast<std::uint64_t>(result);
+            if (window_procedures_.contains(window) && ::GetAncestor(result, GA_ROOT) == result) {
+                guest_foreground_window_ = window;
+            }
         }
         creating_window_procedure_ = 0;
         cpu.set_reg(Rax, reinterpret_cast<std::uint64_t>(result));
@@ -3792,6 +3844,10 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         if (updating && result == FALSE) {
             last_error_ = ::GetLastError();
         }
+        if (!updating && argument(1) != SW_HIDE && window_procedures_.contains(argument(0)) &&
+            ::IsWindowVisible(window) != FALSE) {
+            guest_foreground_window_ = argument(0);
+        }
         cpu.set_reg(Rax, result != FALSE ? 1 : 0);
         finish_call(updating ? 1 : 2);
         break;
@@ -3800,8 +3856,16 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         const auto foreground = ::GetForegroundWindow();
         const auto window = reinterpret_cast<std::uint64_t>(foreground);
         // A host desktop window belongs to a different process. Expose only windows whose
-        // procedures are registered with this Runtime, matching the guest process boundary.
-        cpu.set_reg(Rax, window_procedures_.contains(window) ? window : 0);
+        // procedures are registered with this Runtime. Host focus restrictions can deny a
+        // foreground transfer, so preserve the latest visible top-level guest window as this
+        // runtime's virtual foreground rather than leaking an unrelated HWND or returning it.
+        auto result = window_procedures_.contains(window) ? window : 0;
+        if (result == 0 && window_procedures_.contains(guest_foreground_window_) &&
+            ::IsWindow(reinterpret_cast<HWND>(
+                static_cast<std::uintptr_t>(guest_foreground_window_))) != FALSE) {
+            result = guest_foreground_window_;
+        }
+        cpu.set_reg(Rax, result);
         finish_call(0);
         break;
     }
@@ -3913,6 +3977,9 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         if (result != FALSE) {
             window_procedures_.erase(window);
+            if (guest_foreground_window_ == window) {
+                guest_foreground_window_ = 0;
+            }
             dialog_callbacks_.erase(window);
             edit_memory_handles_.erase(window);
             std::erase_if(window_timers_,
@@ -5449,6 +5516,66 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 direct_sound_objects_.erase(object);
             }
             break;
+        case 3: {
+            const auto description_address = argument(1);
+            const auto output = argument(2);
+            const auto description_size = guest_is_64_bit_ ? 40U : 36U;
+            if (description_address == 0 || output == 0 || argument(3) != 0 ||
+                !cpu.memory().contains(description_address, description_size) ||
+                !cpu.memory().contains(output, pointer_size)) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            write_guest_pointer(output, 0);
+            const auto declared_size = cpu.memory().read32(description_address);
+            const auto buffer_flags = cpu.memory().read32(description_address + 4);
+            const auto buffer_bytes = cpu.memory().read32(description_address + 8);
+            const auto format_address = guest_is_64_bit_
+                                            ? cpu.memory().read64(description_address + 16)
+                                            : cpu.memory().read32(description_address + 16);
+            if (declared_size < description_size ||
+                (buffer_bytes == 0 && (buffer_flags & DSBCAPS_PRIMARYBUFFER) == 0) ||
+                buffer_bytes > 64U * 1024U * 1024U) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            std::vector<std::uint8_t> format_storage;
+            WAVEFORMATEX *format = nullptr;
+            if (format_address != 0) {
+                constexpr std::uint32_t wave_header_size = 18;
+                if (!cpu.memory().contains(format_address, wave_header_size)) {
+                    result = static_cast<HRESULT>(invalid_argument);
+                    break;
+                }
+                const auto extra_size = cpu.memory().read16(format_address + 16);
+                if (extra_size > 4096 ||
+                    !cpu.memory().contains(format_address, wave_header_size + extra_size)) {
+                    result = static_cast<HRESULT>(invalid_argument);
+                    break;
+                }
+                format_storage = cpu.memory().read(format_address, wave_header_size + extra_size);
+                format = reinterpret_cast<WAVEFORMATEX *>(format_storage.data());
+            }
+            DSBUFFERDESC description{};
+            description.dwSize = sizeof(description);
+            description.dwFlags = buffer_flags;
+            description.dwBufferBytes = buffer_bytes;
+            description.dwReserved = cpu.memory().read32(description_address + 12);
+            description.lpwfxFormat = format;
+            const auto algorithm_offset = guest_is_64_bit_ ? 24U : 20U;
+            const auto algorithm = cpu.memory().read(description_address + algorithm_offset,
+                                                     sizeof(description.guid3DAlgorithm));
+            std::memcpy(&description.guid3DAlgorithm, algorithm.data(), algorithm.size());
+            IDirectSoundBuffer *host_buffer = nullptr;
+            result = host_sound->CreateSoundBuffer(&description, &host_buffer, nullptr);
+            if (SUCCEEDED(result) && host_buffer != nullptr) {
+                write_guest_pointer(output, wrap_direct_sound_buffer(host_buffer, guest_sound,
+                                                                     std::max(buffer_bytes, 1U)));
+            } else if (host_buffer != nullptr) {
+                host_buffer->Release();
+            }
+            break;
+        }
         case 4: {
             const auto output = argument(1);
             if (output == 0 || !cpu.memory().contains(output, sizeof(DSCAPS))) {
@@ -5503,6 +5630,297 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             result = host_sound->Initialize(device_guid_pointer);
             break;
         }
+        default:
+            break;
+        }
+        cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+        finish_call(argument_counts[method]);
+        break;
+    }
+    case Api::DirectSoundBufferMethod: {
+        constexpr std::uint32_t invalid_argument = 0x80070057U;
+        constexpr std::uint32_t no_interface = 0x80004002U;
+        static constexpr unsigned argument_counts[] = {3, 1, 1, 2, 3, 4, 2, 2, 2, 2, 3,
+                                                       8, 4, 2, 2, 2, 2, 2, 1, 5, 1};
+        static_assert(std::size(argument_counts) == 21);
+        const auto method = direct_sound_buffer_methods_.at(cpu.rip());
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        const auto guest_buffer = argument(0);
+        auto object = direct_sound_buffer_objects_.find(guest_buffer);
+        if (object == direct_sound_buffer_objects_.end()) {
+            cpu.set_reg(Rax, invalid_argument);
+            finish_call(argument_counts[method]);
+            break;
+        }
+        auto *host_buffer = static_cast<IDirectSoundBuffer *>(object->second.host);
+        HRESULT result = DSERR_UNSUPPORTED;
+        const auto checked_dword_output = [&](std::uint64_t address) {
+            return address != 0 && cpu.memory().contains(address, sizeof(DWORD));
+        };
+        switch (method) {
+        case 0: {
+            const auto iid_address = argument(1);
+            const auto output = argument(2);
+            if (iid_address == 0 || output == 0 ||
+                !cpu.memory().contains(iid_address, sizeof(GUID)) ||
+                !cpu.memory().contains(output, pointer_size)) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            write_guest_pointer(output, 0);
+            GUID iid{};
+            const auto bytes = cpu.memory().read(iid_address, sizeof(iid));
+            std::memcpy(&iid, bytes.data(), bytes.size());
+            if (!IsEqualGUID(iid, IID_IUnknown) && !IsEqualGUID(iid, IID_IDirectSoundBuffer)) {
+                result = static_cast<HRESULT>(no_interface);
+                break;
+            }
+            host_buffer->AddRef();
+            ++object->second.references;
+            write_guest_pointer(output, guest_buffer);
+            result = DS_OK;
+            break;
+        }
+        case 1:
+            host_buffer->AddRef();
+            result = static_cast<HRESULT>(++object->second.references);
+            break;
+        case 2: {
+            if (object->second.references == 1 && object->second.host_region1 != nullptr) {
+                host_buffer->Unlock(object->second.host_region1, object->second.region1_size,
+                                    object->second.host_region2, object->second.region2_size);
+                object->second.host_region1 = nullptr;
+            }
+            result = static_cast<HRESULT>(host_buffer->Release());
+            if (--object->second.references == 0) {
+                const auto parent_address = object->second.parent;
+                if (auto parent = direct_sound_objects_.find(parent_address);
+                    parent != direct_sound_objects_.end()) {
+                    static_cast<IDirectSound *>(parent->second.host)->Release();
+                    if (--parent->second.references == 0) {
+                        direct_sound_objects_.erase(parent);
+                    }
+                }
+                direct_sound_buffer_objects_.erase(object);
+            }
+            break;
+        }
+        case 3: {
+            const auto output = argument(1);
+            if (output == 0 || !cpu.memory().contains(output, sizeof(DSBCAPS))) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            DSBCAPS capabilities{};
+            capabilities.dwSize = sizeof(capabilities);
+            result = host_buffer->GetCaps(&capabilities);
+            if (SUCCEEDED(result)) {
+                const auto *bytes = reinterpret_cast<const std::uint8_t *>(&capabilities);
+                cpu.memory().write(output, {bytes, sizeof(capabilities)});
+            }
+            break;
+        }
+        case 4: {
+            const auto play_output = argument(1);
+            const auto write_output = argument(2);
+            if ((play_output != 0 && !checked_dword_output(play_output)) ||
+                (write_output != 0 && !checked_dword_output(write_output))) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            DWORD play = 0;
+            DWORD write = 0;
+            result = host_buffer->GetCurrentPosition(play_output == 0 ? nullptr : &play,
+                                                     write_output == 0 ? nullptr : &write);
+            if (SUCCEEDED(result)) {
+                if (play_output != 0) {
+                    cpu.memory().write32(play_output, play);
+                }
+                if (write_output != 0) {
+                    cpu.memory().write32(write_output, write);
+                }
+            }
+            break;
+        }
+        case 5: {
+            const auto output = argument(1);
+            const auto output_size = static_cast<std::uint32_t>(argument(2));
+            const auto written_output = argument(3);
+            if ((output_size != 0 && (output == 0 || output_size > 64U * 1024U ||
+                                      !cpu.memory().contains(output, output_size))) ||
+                (written_output != 0 && !checked_dword_output(written_output))) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            std::vector<std::uint8_t> format(output_size);
+            DWORD written = 0;
+            result = host_buffer->GetFormat(
+                output_size == 0 ? nullptr : reinterpret_cast<WAVEFORMATEX *>(format.data()),
+                output_size, written_output == 0 ? nullptr : &written);
+            if (SUCCEEDED(result)) {
+                if (output_size != 0) {
+                    cpu.memory().write(output, format);
+                }
+                if (written_output != 0) {
+                    cpu.memory().write32(written_output, written);
+                }
+            }
+            break;
+        }
+        case 6:
+        case 7:
+        case 8:
+        case 9: {
+            const auto output = argument(1);
+            if (!checked_dword_output(output)) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            DWORD value = 0;
+            if (method == 6) {
+                result = host_buffer->GetVolume(reinterpret_cast<LONG *>(&value));
+            } else if (method == 7) {
+                result = host_buffer->GetPan(reinterpret_cast<LONG *>(&value));
+            } else if (method == 8) {
+                result = host_buffer->GetFrequency(&value);
+            } else {
+                result = host_buffer->GetStatus(&value);
+            }
+            if (SUCCEEDED(result)) {
+                cpu.memory().write32(output, value);
+            }
+            break;
+        }
+        case 11: {
+            if (object->second.host_region1 != nullptr) {
+                result = DSERR_INVALIDCALL;
+                break;
+            }
+            const auto region1_output = argument(3);
+            const auto region1_size_output = argument(4);
+            const auto region2_output = argument(5);
+            const auto region2_size_output = argument(6);
+            if (region1_output == 0 || region1_size_output == 0 ||
+                !cpu.memory().contains(region1_output, pointer_size) ||
+                !checked_dword_output(region1_size_output) ||
+                (region2_output != 0 && !cpu.memory().contains(region2_output, pointer_size)) ||
+                (region2_size_output != 0 && !checked_dword_output(region2_size_output))) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            write_guest_pointer(region1_output, 0);
+            cpu.memory().write32(region1_size_output, 0);
+            if (region2_output != 0) {
+                write_guest_pointer(region2_output, 0);
+            }
+            if (region2_size_output != 0) {
+                cpu.memory().write32(region2_size_output, 0);
+            }
+            void *host_region1 = nullptr;
+            void *host_region2 = nullptr;
+            DWORD region1_size = 0;
+            DWORD region2_size = 0;
+            result = host_buffer->Lock(
+                static_cast<DWORD>(argument(1)), static_cast<DWORD>(argument(2)), &host_region1,
+                &region1_size, &host_region2, &region2_size, static_cast<DWORD>(argument(7)));
+            if (FAILED(result)) {
+                break;
+            }
+            if (static_cast<std::uint64_t>(region1_size) + region2_size > object->second.length) {
+                host_buffer->Unlock(host_region1, region1_size, host_region2, region2_size);
+                result = DSERR_INVALIDPARAM;
+                break;
+            }
+            if (region1_size != 0) {
+                cpu.memory().write(object->second.staging,
+                                   {static_cast<const std::uint8_t *>(host_region1), region1_size});
+            }
+            if (region2_size != 0) {
+                cpu.memory().write(object->second.staging + region1_size,
+                                   {static_cast<const std::uint8_t *>(host_region2), region2_size});
+            }
+            object->second.host_region1 = host_region1;
+            object->second.host_region2 = host_region2;
+            object->second.region1_size = region1_size;
+            object->second.region2_size = region2_size;
+            write_guest_pointer(region1_output, object->second.staging);
+            cpu.memory().write32(region1_size_output, region1_size);
+            if (region2_output != 0 && region2_size != 0) {
+                write_guest_pointer(region2_output, object->second.staging + region1_size);
+            }
+            if (region2_size_output != 0) {
+                cpu.memory().write32(region2_size_output, region2_size);
+            }
+            break;
+        }
+        case 12:
+            result =
+                host_buffer->Play(static_cast<DWORD>(argument(1)), static_cast<DWORD>(argument(2)),
+                                  static_cast<DWORD>(argument(3)));
+            break;
+        case 13:
+            result = host_buffer->SetCurrentPosition(static_cast<DWORD>(argument(1)));
+            break;
+        case 14: {
+            const auto format_address = argument(1);
+            constexpr std::uint32_t wave_header_size = 18;
+            if (format_address == 0 || !cpu.memory().contains(format_address, wave_header_size)) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            const auto extra_size = cpu.memory().read16(format_address + 16);
+            if (extra_size > 4096 ||
+                !cpu.memory().contains(format_address, wave_header_size + extra_size)) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            auto format = cpu.memory().read(format_address, wave_header_size + extra_size);
+            result = host_buffer->SetFormat(reinterpret_cast<WAVEFORMATEX *>(format.data()));
+            break;
+        }
+        case 15:
+            result = host_buffer->SetVolume(static_cast<LONG>(argument(1)));
+            break;
+        case 16:
+            result = host_buffer->SetPan(static_cast<LONG>(argument(1)));
+            break;
+        case 17:
+            result = host_buffer->SetFrequency(static_cast<DWORD>(argument(1)));
+            break;
+        case 18:
+            result = host_buffer->Stop();
+            break;
+        case 19: {
+            const auto expected_region1 = object->second.staging;
+            const auto expected_region2 = expected_region1 + object->second.region1_size;
+            if (object->second.host_region1 == nullptr || argument(1) != expected_region1 ||
+                argument(2) != object->second.region1_size ||
+                (object->second.region2_size != 0 && argument(3) != expected_region2) ||
+                argument(4) != object->second.region2_size) {
+                result = DSERR_INVALIDPARAM;
+                break;
+            }
+            if (object->second.region1_size != 0) {
+                const auto bytes = cpu.memory().read(expected_region1, object->second.region1_size);
+                std::memcpy(object->second.host_region1, bytes.data(), bytes.size());
+            }
+            if (object->second.region2_size != 0) {
+                const auto bytes = cpu.memory().read(expected_region2, object->second.region2_size);
+                std::memcpy(object->second.host_region2, bytes.data(), bytes.size());
+            }
+            result = host_buffer->Unlock(object->second.host_region1, object->second.region1_size,
+                                         object->second.host_region2, object->second.region2_size);
+            if (SUCCEEDED(result)) {
+                object->second.host_region1 = nullptr;
+                object->second.host_region2 = nullptr;
+                object->second.region1_size = 0;
+                object->second.region2_size = 0;
+            }
+            break;
+        }
+        case 20:
+            result = host_buffer->Restore();
+            break;
         default:
             break;
         }

@@ -35,7 +35,7 @@ reproducible blocker.
 | Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; file open, Save, and Save As work for tested paths; UTF-8 Unicode text and a 52,138-character document save and reopen exactly | Edited-content Save As, UTF-16/legacy encodings, long interactive sessions, and broader editor behavior remain unverified |
 | Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
-| Undertale (Windows, PE32) | 🟠 Graphics bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates and shows the `YYGameMakerYY` native window, initializes safe DirectInput and Direct3D proxies, creates a real host-backed device, applies initial render/sampler state, completes startup math, decodes textures, creates/locks/binds guest-owned buffers, sustains arena-backed heap activity, and discovers its application-data folder | The 2026-11-18 probe reaches audio initialization and stops at unsupported `DirectSoundCreate` after 66,394,276 instructions; a verified first rendered game frame, surfaces/shaders/swap chains, draw/presentation, active input/audio, and full Steamworks interfaces remain |
+| Undertale (Windows, PE32) | 🟠 Graphics/audio bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates and shows the `YYGameMakerYY` native window, initializes safe DirectInput and Direct3D proxies, creates a real host-backed device, applies initial render/sampler state, completes startup math, decodes textures, creates/locks/binds guest-owned graphics buffers, discovers its application-data folder, and creates/starts primary and secondary DirectSound buffers | The 2026-11-18 probe sustains execution to the 100,000,000-instruction limit. OpenAL initialization reports error 40964 because its persistent worker thread cannot yet run; a verified rendered game frame, draw/presentation, active input/audio, persistence, and full Steamworks interfaces remain |
 | Discord / Chromium | 🔴 Blocked | Loads the installed x64 image and advances through more than 2.6 million V8 startup instructions | Blocked by guest threads/processes, DLL loading, exceptions, mapped sections, and broader SIMD support |
 
 ## Undertale subsystem board
@@ -50,7 +50,7 @@ reproducible blocker.
 | Visible window | 🚧 | GameMaker calls `ShowWindow` and `UpdateWindow` on its native HWND; a visible rendered game frame has not yet been verified |
 | Input discovery | ✅ | Guest-owned inert DirectInput proxy completes optional discovery |
 | Direct3D 9Ex | 🚧 | Adapter/device creation, PE32-safe structure marshaling, device texture and vertex/index-buffer creation/binding, checked buffer staging locks, and D3DX file/in-memory texture paths are adapted; surface/shader/swap-chain/draw/presentation paths remain |
-| Audio | 🚧 | Basic synchronous WinMM and guest-owned base `IDirectSound` discovery work; Undertale's OpenAL context/source initialization currently fails, and streaming is not yet adapted |
+| Audio | 🚧 | Guest-owned DirectSound device/buffer proxies create, format, lock, upload, and start buffers; Undertale's OpenAL context/source initialization still fails because persistent guest worker threads are not scheduled |
 | Playable | ○ | Requires rendering, input, audio, persistence, and sustained loop |
 
 ## Audio status
@@ -60,9 +60,10 @@ CPUEmu adapts synchronous `Beep`, `MessageBeep`, `PlaySoundA`, `PlaySoundW`, and
 the requested sound. Stopping playback with a null sound name is supported.
 
 Asynchronous, looping, memory-buffer, and resource-backed WinMM playback is refused for now because
-the host can retain guest pointers after the call returns. Base `IDirectSound` discovery uses a
-guest-owned proxy and supports capabilities and cooperative-level setup; DirectSound buffers,
-WaveOut, WASAPI, Media Foundation, and audio callbacks are not implemented yet.
+the host can retain guest pointers after the call returns. DirectSound devices and buffers use
+guest-owned proxies with staged lock copies and playback controls. Persistent DirectSound worker
+threads/notifications, WaveOut, WASAPI, Media Foundation, and audio callbacks are not implemented
+yet.
 
 The Undertale-specific probe and subsystem roadmap are in [`UNDERTALE.md`](UNDERTALE.md).
 

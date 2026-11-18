@@ -767,6 +767,24 @@ development.
   sustained loop. OpenAL reports context/source initialization errors, and no visible rendered
   frame or working audio is claimed yet.
 
+## 2026-11-18 — guest-owned DirectSound buffers
+
+- Added a 21-slot guest-owned `IDirectSoundBuffer` proxy with PE32/PE32+ `DSBUFFERDESC` and
+  bounded `WAVEFORMATEX` marshaling, capabilities/format/state queries, playback controls, parent
+  lifetime retention, and teardown of live locks.
+- Buffer `Lock` copies native regions into bounded guest staging storage; `Unlock` validates the
+  exact returned regions and copies guest audio back before releasing the native lock. Native COM
+  and audio pointers never enter guest state.
+- Corrected fail-closed PE32 stdcall cleanup for retained thread/work callbacks. `CreateThread`
+  now reports `ERROR_NOT_SUPPORTED` without corrupting the guest stack or invoking guest code as
+  native code. Foreground state also retains the latest visible top-level guest window when host
+  focus policy denies a foreground transfer, without exposing another process's HWND.
+- The synchronization fixture covers creation, capabilities, lock/upload, playback, invalid
+  output, COM lifetime, parent retention, and thread refusal. Undertale creates and starts primary
+  and secondary DirectSound buffers, then reaches the 100,000,000-instruction limit. Its OpenAL
+  layer still reports error 40964 because CPUEmu has no persistent cooperative guest-thread
+  scheduler; working audio is not claimed.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

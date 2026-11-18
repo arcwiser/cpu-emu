@@ -24,6 +24,17 @@ Runtime::Runtime(std::ostream &output) : output_(output) {
 }
 
 Runtime::~Runtime() {
+    for (const auto &[guest_object, object] : direct_sound_buffer_objects_) {
+        static_cast<void>(guest_object);
+        auto *host = static_cast<IDirectSoundBuffer *>(object.host);
+        if (object.host_region1 != nullptr) {
+            host->Unlock(object.host_region1, object.region1_size, object.host_region2,
+                         object.region2_size);
+        }
+        for (std::uint32_t reference = 0; reference < object.references; ++reference) {
+            host->Release();
+        }
+    }
     for (const auto &[guest_object, object] : direct_sound_objects_) {
         static_cast<void>(guest_object);
         auto *host = static_cast<IDirectSound *>(object.host);

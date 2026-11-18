@@ -629,6 +629,12 @@ int run_sync_selftest() {
 
     check(IsDebuggerPresent() == FALSE,
           "sync selftest: guest process has no attached guest debugger");
+    DWORD rejected_thread_id = 0;
+    SetLastError(ERROR_SUCCESS);
+    check(CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(1), nullptr, 0,
+                       &rejected_thread_id) == nullptr &&
+              GetLastError() == ERROR_NOT_SUPPORTED,
+          "sync selftest: fail closed for retained guest thread callback");
 
     IDirect3D9Ex *direct3d = nullptr;
     const HRESULT direct3d_result = Direct3DCreate9Ex(D3D_SDK_VERSION, &direct3d);
@@ -698,6 +704,61 @@ int run_sync_selftest() {
             check(device_window != nullptr &&
                       SUCCEEDED(direct_sound->SetCooperativeLevel(device_window, DSSCL_NORMAL)),
                   "sync selftest: set DirectSound cooperative level");
+            WAVEFORMATEX wave_format{};
+            wave_format.wFormatTag = WAVE_FORMAT_PCM;
+            wave_format.nChannels = 2;
+            wave_format.nSamplesPerSec = 44100;
+            wave_format.nAvgBytesPerSec = 176400;
+            wave_format.nBlockAlign = 4;
+            wave_format.wBitsPerSample = 16;
+            DSBUFFERDESC buffer_description{};
+            buffer_description.dwSize = sizeof(buffer_description);
+            buffer_description.dwFlags = DSBCAPS_CTRLVOLUME | DSBCAPS_CTRLFREQUENCY;
+            buffer_description.dwBufferBytes = 4096;
+            buffer_description.lpwfxFormat = &wave_format;
+            IDirectSoundBuffer *sound_buffer = nullptr;
+            check(SUCCEEDED(direct_sound->CreateSoundBuffer(&buffer_description, &sound_buffer,
+                                                            nullptr)) &&
+                      sound_buffer != nullptr,
+                  "sync selftest: create guest-owned DirectSound buffer");
+            if (sound_buffer != nullptr) {
+                DSBCAPS buffer_caps{};
+                buffer_caps.dwSize = sizeof(buffer_caps);
+                check(SUCCEEDED(sound_buffer->GetCaps(&buffer_caps)) &&
+                          buffer_caps.dwBufferBytes == 4096,
+                      "sync selftest: query DirectSound buffer capabilities");
+                void *region1 = nullptr;
+                void *region2 = nullptr;
+                DWORD region1_size = 0;
+                DWORD region2_size = 0;
+                check(SUCCEEDED(sound_buffer->Lock(0, 4096, &region1, &region1_size, &region2,
+                                                   &region2_size, 0)) &&
+                          region1 != nullptr && region1_size + region2_size == 4096,
+                      "sync selftest: lock DirectSound buffer staging");
+                if (region1 != nullptr) {
+                    std::memset(region1, 0, region1_size);
+                    if (region2 != nullptr) {
+                        std::memset(region2, 0, region2_size);
+                    }
+                    check(SUCCEEDED(
+                              sound_buffer->Unlock(region1, region1_size, region2, region2_size)),
+                          "sync selftest: upload DirectSound buffer staging");
+                }
+                check(SUCCEEDED(sound_buffer->SetVolume(DSBVOLUME_MIN)) &&
+                          SUCCEEDED(sound_buffer->Play(0, 0, 0)) && SUCCEEDED(sound_buffer->Stop()),
+                      "sync selftest: control DirectSound buffer playback");
+                IDirectSoundBuffer *queried_buffer = nullptr;
+                check(SUCCEEDED(sound_buffer->QueryInterface(
+                          IID_IDirectSoundBuffer, reinterpret_cast<void **>(&queried_buffer))) &&
+                          queried_buffer == sound_buffer,
+                      "sync selftest: DirectSound buffer QueryInterface lifetime");
+                if (queried_buffer != nullptr) {
+                    queried_buffer->Release();
+                }
+                sound_buffer->Release();
+            }
+            check(FAILED(direct_sound->CreateSoundBuffer(&buffer_description, nullptr, nullptr)),
+                  "sync selftest: reject null DirectSound buffer output");
             IDirectSound *queried_sound = nullptr;
             check(SUCCEEDED(direct_sound->QueryInterface(
                       IID_IDirectSound, reinterpret_cast<void **>(&queried_sound))) &&
@@ -967,9 +1028,8 @@ int run_sync_selftest() {
     if (legacy_window != nullptr) {
         ShowWindow(legacy_window, SW_SHOW);
         SetForegroundWindow(legacy_window);
-        const auto foreground_window = GetForegroundWindow();
-        check(foreground_window == nullptr || foreground_window == legacy_window,
-              "sync selftest: isolate foreground query to process-owned window");
+        check(GetForegroundWindow() == legacy_window,
+              "sync selftest: virtualize foreground query to process-owned window");
         check(SendMessageW(legacy_window, WM_APP + 2, 0, 0) == 0x1234 &&
                   legacy_window_callback_seen,
               "sync selftest: dispatch legacy registered window callback");

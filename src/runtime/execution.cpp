@@ -136,6 +136,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     class_window_procedures_.clear();
     atom_window_procedures_.clear();
     window_procedures_.clear();
+    guest_foreground_window_ = 0;
     for (const auto &[window, callback] : dialog_callbacks_) {
         if (!callback.modal) {
             ::DestroyWindow(reinterpret_cast<HWND>(static_cast<std::uintptr_t>(window)));
@@ -146,6 +147,20 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     pending_window_enumerations_.clear();
     pending_font_enumerations_.clear();
     pending_line_dda_.clear();
+    for (const auto &[guest_object, object] : direct_sound_buffer_objects_) {
+        static_cast<void>(guest_object);
+        auto *host = static_cast<IDirectSoundBuffer *>(object.host);
+        if (object.host_region1 != nullptr) {
+            host->Unlock(object.host_region1, object.region1_size, object.host_region2,
+                         object.region2_size);
+        }
+        for (std::uint32_t reference = 0; reference < object.references; ++reference) {
+            host->Release();
+        }
+    }
+    direct_sound_buffer_objects_.clear();
+    direct_sound_buffer_vtable_ = 0;
+    direct_sound_buffer_methods_.clear();
     for (const auto &[guest_object, object] : direct_sound_objects_) {
         static_cast<void>(guest_object);
         auto *host = static_cast<IDirectSound *>(object.host);

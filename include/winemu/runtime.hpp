@@ -117,6 +117,7 @@ class Runtime {
     std::unordered_map<std::wstring, std::uint64_t> class_window_procedures_;
     std::unordered_map<std::uint16_t, std::uint64_t> atom_window_procedures_;
     std::unordered_map<std::uint64_t, std::uint64_t> window_procedures_;
+    std::uint64_t guest_foreground_window_ = 0;
     std::uint64_t creating_window_procedure_ = 0;
     struct DialogCallback {
         std::uint64_t procedure;
@@ -201,6 +202,20 @@ class Runtime {
     std::uint64_t direct_sound_vtable_ = 0;
     std::unordered_map<std::uint64_t, DirectSoundObject> direct_sound_objects_;
     std::unordered_map<std::uint64_t, std::uint32_t> direct_sound_methods_;
+    struct DirectSoundBufferObject {
+        void *host;
+        std::uint32_t references;
+        std::uint64_t parent;
+        std::uint64_t staging;
+        std::uint32_t length;
+        void *host_region1;
+        void *host_region2;
+        std::uint32_t region1_size;
+        std::uint32_t region2_size;
+    };
+    std::uint64_t direct_sound_buffer_vtable_ = 0;
+    std::unordered_map<std::uint64_t, DirectSoundBufferObject> direct_sound_buffer_objects_;
+    std::unordered_map<std::uint64_t, std::uint32_t> direct_sound_buffer_methods_;
 
     // COM and WinRT objects below are guest-owned proxy objects. Method maps translate each
     // guest vtable thunk back to its slot number; no host vtable pointer crosses the ABI boundary.
