@@ -161,6 +161,7 @@ enum class RuntimeApi {
     GuestFontEnumeration,
     GuestLineDda,
     Direct3DCreate9Ex,
+    D3DXCreateTextureFromFileW,
     D3DXCreateTextureFromFileInMemoryEx,
     Direct3D9ExMethod,
     Direct3DDevice9Method,

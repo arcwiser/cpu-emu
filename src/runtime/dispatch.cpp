@@ -3899,6 +3899,52 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(6);
         break;
     }
+    case Api::D3DXCreateTextureFromFileW: {
+        constexpr std::uint32_t invalid_argument = 0x80070057U;
+        constexpr std::uint32_t not_available = 0x8876086aU;
+        using CreateTexture =
+            HRESULT(WINAPI *)(IDirect3DDevice9 *, const wchar_t *, IDirect3DTexture9 **);
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        const auto output = argument(2);
+        auto device = direct3d_device9_objects_.find(argument(0));
+        if (device == direct3d_device9_objects_.end() || argument(1) == 0 || output == 0 ||
+            !cpu.memory().contains(output, pointer_size)) {
+            if (output != 0 && cpu.memory().contains(output, pointer_size)) {
+                write_guest_pointer(output, 0);
+            }
+            cpu.set_reg(Rax, invalid_argument);
+            finish_call(3);
+            break;
+        }
+        write_guest_pointer(output, 0);
+        const auto path = cpu.memory().read_wide_string(argument(1));
+        const auto library =
+            ::LoadLibraryExW(L"d3dx9_43.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        const auto create_texture =
+            library == nullptr ? nullptr
+                               : reinterpret_cast<CreateTexture>(
+                                     ::GetProcAddress(library, "D3DXCreateTextureFromFileW"));
+        if (create_texture == nullptr) {
+            if (library != nullptr) {
+                ::FreeLibrary(library);
+            }
+            cpu.set_reg(Rax, not_available);
+            finish_call(3);
+            break;
+        }
+        IDirect3DTexture9 *host_texture = nullptr;
+        const auto result = static_cast<std::uint32_t>(create_texture(
+            static_cast<IDirect3DDevice9 *>(device->second.host), path.c_str(), &host_texture));
+        ::FreeLibrary(library);
+        if (SUCCEEDED(static_cast<HRESULT>(result)) && host_texture != nullptr) {
+            write_guest_pointer(output, wrap_direct3d_texture(host_texture, device->first));
+        } else if (host_texture != nullptr) {
+            host_texture->Release();
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(3);
+        break;
+    }
     case Api::D3DXCreateTextureFromFileInMemoryEx: {
         constexpr std::uint32_t invalid_argument = 0x80070057U;
         constexpr std::uint32_t not_available = 0x8876086aU;

@@ -682,6 +682,15 @@ development.
   `QueryInterface`, binding, invalid output, and teardown. Undertale successfully decodes its first
   embedded texture and advances to `D3DXCreateTextureFromFileW` after 15,224,537 instructions.
 
+## 2026-11-18 — D3DX file textures
+
+- Added `D3DXCreateTextureFromFileW` with checked guest path/output handling, native system-D3DX
+  forwarding, and the same guest-owned texture lifetime path as in-memory decoding.
+- The observed splash-file call returns the native D3DX invalid-data failure (`0x88760b59`), which
+  Undertale handles before successfully decoding the file contents through the in-memory adapter.
+- Undertale advances 37,251 instructions to two `CreateVertexBuffer` calls; those still fail closed,
+  and later renderer state is null at 15,261,788 instructions.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

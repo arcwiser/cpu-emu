@@ -454,6 +454,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GuestLineDda;
     } else if (name == "Direct3DCreate9Ex") {
         api = Api::Direct3DCreate9Ex;
+    } else if (normalized_module == "d3dx9_43.dll" && name == "D3DXCreateTextureFromFileW") {
+        api = Api::D3DXCreateTextureFromFileW;
     } else if (normalized_module == "d3dx9_43.dll" &&
                name == "D3DXCreateTextureFromFileInMemoryEx") {
         api = Api::D3DXCreateTextureFromFileInMemoryEx;
