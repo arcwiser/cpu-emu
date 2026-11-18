@@ -261,6 +261,44 @@ void test_x87_pop_arithmetic() {
     require(run(0xf9, 0x48) == 2.0 / 3.0, "x87 FDIVP result and pop");
 }
 
+void test_x87_sign_operations() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    const std::uint8_t code[] = {
+        0xd9, 0x07,       // fld dword ptr [rdi]
+        0xd9, 0xe0,       // fchs
+        0xdd, 0x5f, 0x08, // fstp qword ptr [rdi+8]
+        0xd9, 0x47, 0x04, // fld dword ptr [rdi+4]
+        0xd9, 0xe1,       // fabs
+        0xdd, 0x5f, 0x10, // fstp qword ptr [rdi+10h]
+    };
+    memory.write(code_address, code);
+    memory.write32(data_address, std::bit_cast<std::uint32_t>(2.5f));
+    memory.write32(data_address + 4, std::bit_cast<std::uint32_t>(-3.75f));
+    winemu::Cpu cpu(memory);
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    for (unsigned instruction = 0; instruction < 6; ++instruction) {
+        cpu.step();
+    }
+    require(memory.read64(data_address + 8) == std::bit_cast<std::uint64_t>(-2.5), "x87 FCHS");
+    require(memory.read64(data_address + 0x10) == std::bit_cast<std::uint64_t>(3.75), "x87 FABS");
+
+    const std::uint8_t underflow[] = {0xd9, 0xe0};
+    memory.write(code_address, underflow);
+    cpu.reset(code_address, data_address + 0xff8);
+    bool rejected = false;
+    try {
+        cpu.step();
+    } catch (const winemu::Error &) {
+        rejected = true;
+    }
+    require(rejected, "x87 unary sign operations reject stack underflow");
+}
+
 void test_packed_float_conversions() {
     constexpr std::uint64_t code_address = 0x200000000ULL;
     constexpr std::uint64_t data_address = 0x300000000ULL;

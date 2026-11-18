@@ -11,6 +11,7 @@ int main() {
         test_cpu_32bit_mode();
         test_double_shifts();
         test_x87_pop_arithmetic();
+        test_x87_sign_operations();
         test_packed_float_conversions();
         test_packed_logical_operations();
         test_pshufd();

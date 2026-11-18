@@ -602,6 +602,17 @@ void Cpu::step() {
     case 0xd9: {
         const auto decoded = decode_rm(rex);
         if (decoded.rm.is_register) {
+            if ((decoded.reg & 7) == 4 && decoded.rm.register_index <= Rcx) {
+                if (x87_depth_ == 0) {
+                    throw Error("x87 stack underflow");
+                }
+                if (decoded.rm.register_index == Rax) { // FCHS
+                    x87_[0] = -x87_[0];
+                } else { // FABS
+                    x87_[0] = std::abs(x87_[0]);
+                }
+                return;
+            }
             if ((decoded.reg & 7) == 0 && decoded.rm.register_index < x87_depth_) { // FLD ST(i)
                 x87_push(x87_[decoded.rm.register_index]);
                 return;

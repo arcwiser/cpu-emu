@@ -623,6 +623,13 @@ development.
 - Undertale now passes the packed transform block and advances 39 instructions, stopping at x87
   `FCHS` after 15,222,500 instructions.
 
+## 2026-11-18 — x87 unary sign operations
+
+- Added `FCHS` and `FABS` with explicit non-empty-stack validation and focused value/underflow
+  regressions.
+- Undertale advances another 171 instructions through mixed x87/SSE transform work and now stops
+  at `FXCH ST(1)` after 15,222,671 instructions.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,
