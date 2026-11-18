@@ -465,6 +465,9 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::D3DXCreateTextureFromFileInMemoryEx;
     } else if (name == "DirectInput8Create") {
         api = Api::DirectInputCreate;
+    } else if (normalized_module == "dsound.dll" && (name == "DirectSoundCreate" || name == "#1")) {
+        // The SDK import library binds DirectSoundCreate by its stable export ordinal.
+        api = Api::DirectSoundCreate;
     } else if (name == "ResolveDelayLoadedAPI") {
         api = Api::ResolveDelayLoadedAPI;
     } else if (name == "SHGetKnownFolderPath") {

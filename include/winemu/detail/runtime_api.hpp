@@ -170,6 +170,8 @@ enum class RuntimeApi {
     Direct3DBuffer9Method,
     DirectInputCreate,
     DirectInputMethod,
+    DirectSoundCreate,
+    DirectSoundMethod,
     ResolveDelayLoadedAPI,
     SHGetKnownFolderPath,
     GuestSpecialFolderPath,

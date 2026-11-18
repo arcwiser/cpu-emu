@@ -8,7 +8,10 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <d3d9.h>
+#include <mmsystem.h>
 #include <windows.h>
+// DirectSound declarations use the multimedia wave-format types above.
+#include <dsound.h>
 
 namespace winemu {
 
@@ -21,6 +24,13 @@ Runtime::Runtime(std::ostream &output) : output_(output) {
 }
 
 Runtime::~Runtime() {
+    for (const auto &[guest_object, object] : direct_sound_objects_) {
+        static_cast<void>(guest_object);
+        auto *host = static_cast<IDirectSound *>(object.host);
+        for (std::uint32_t reference = 0; reference < object.references; ++reference) {
+            host->Release();
+        }
+    }
     for (const auto &[guest_object, object] : direct3d_buffer9_objects_) {
         static_cast<void>(guest_object);
         auto *host = static_cast<IDirect3DResource9 *>(object.host);

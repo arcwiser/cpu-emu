@@ -30,6 +30,9 @@
 #include <cderr.h>
 #include <commdlg.h>
 #include <d3d9.h>
+#include <mmsystem.h>
+// DirectSound declarations use the multimedia wave-format types above.
+#include <dsound.h>
 #include <urlmon.h>
 
 extern "C" __declspec(dllimport) wchar_t **__stdcall CommandLineToArgvW(const wchar_t *, int *);
@@ -5340,6 +5343,161 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             break;
         }
         cpu.set_reg(Rax, result);
+        finish_call(argument_counts[method]);
+        break;
+    }
+    case Api::DirectSoundCreate: {
+        constexpr std::uint32_t invalid_argument = 0x80070057U;
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        const auto output = argument(1);
+        if (output == 0 || !cpu.memory().contains(output, pointer_size) || argument(2) != 0 ||
+            (argument(0) != 0 && !cpu.memory().contains(argument(0), sizeof(GUID)))) {
+            cpu.set_reg(Rax, invalid_argument);
+            finish_call(3);
+            break;
+        }
+        write_guest_pointer(output, 0);
+        GUID device_guid{};
+        const GUID *device_guid_pointer = nullptr;
+        if (argument(0) != 0) {
+            const auto bytes = cpu.memory().read(argument(0), sizeof(device_guid));
+            std::memcpy(&device_guid, bytes.data(), bytes.size());
+            device_guid_pointer = &device_guid;
+        }
+        IDirectSound *host_sound = nullptr;
+        const auto result = ::DirectSoundCreate(device_guid_pointer, &host_sound, nullptr);
+        if (SUCCEEDED(result) && host_sound != nullptr) {
+            if (direct_sound_vtable_ == 0) {
+                constexpr std::uint32_t method_count = 11;
+                direct_sound_vtable_ = allocate(method_count * pointer_size);
+                for (std::uint32_t method = 0; method < method_count; ++method) {
+                    const auto thunk = next_thunk_;
+                    next_thunk_ += 0x100;
+                    thunks_.emplace(thunk, Api::DirectSoundMethod);
+                    thunk_names_.emplace(thunk, "IDirectSound#" + std::to_string(method));
+                    direct_sound_methods_.emplace(thunk, method);
+                    write_guest_pointer(direct_sound_vtable_ + method * pointer_size, thunk);
+                }
+            }
+            const auto guest_sound = allocate(pointer_size);
+            write_guest_pointer(guest_sound, direct_sound_vtable_);
+            direct_sound_objects_.emplace(guest_sound, DirectSoundObject{host_sound, 1});
+            write_guest_pointer(output, guest_sound);
+        } else if (host_sound != nullptr) {
+            host_sound->Release();
+        }
+        cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+        finish_call(3);
+        break;
+    }
+    case Api::DirectSoundMethod: {
+        constexpr std::uint32_t invalid_argument = 0x80070057U;
+        constexpr std::uint32_t no_interface = 0x80004002U;
+        static constexpr unsigned argument_counts[] = {3, 1, 1, 4, 2, 3, 3, 1, 2, 2, 2};
+        static_assert(std::size(argument_counts) == 11);
+        const auto method = direct_sound_methods_.at(cpu.rip());
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        const auto guest_sound = argument(0);
+        auto object = direct_sound_objects_.find(guest_sound);
+        if (object == direct_sound_objects_.end()) {
+            cpu.set_reg(Rax, invalid_argument);
+            finish_call(argument_counts[method]);
+            break;
+        }
+        auto *host_sound = static_cast<IDirectSound *>(object->second.host);
+        HRESULT result = DSERR_UNSUPPORTED;
+        switch (method) {
+        case 0: {
+            const auto iid_address = argument(1);
+            const auto output = argument(2);
+            if (iid_address == 0 || output == 0 ||
+                !cpu.memory().contains(iid_address, sizeof(GUID)) ||
+                !cpu.memory().contains(output, pointer_size)) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            write_guest_pointer(output, 0);
+            GUID iid{};
+            const auto bytes = cpu.memory().read(iid_address, sizeof(iid));
+            std::memcpy(&iid, bytes.data(), bytes.size());
+            if (!IsEqualGUID(iid, IID_IUnknown) && !IsEqualGUID(iid, IID_IDirectSound)) {
+                result = static_cast<HRESULT>(no_interface);
+                break;
+            }
+            host_sound->AddRef();
+            ++object->second.references;
+            write_guest_pointer(output, guest_sound);
+            result = DS_OK;
+            break;
+        }
+        case 1:
+            host_sound->AddRef();
+            result = static_cast<HRESULT>(++object->second.references);
+            break;
+        case 2:
+            result = static_cast<HRESULT>(host_sound->Release());
+            if (--object->second.references == 0) {
+                direct_sound_objects_.erase(object);
+            }
+            break;
+        case 4: {
+            const auto output = argument(1);
+            if (output == 0 || !cpu.memory().contains(output, sizeof(DSCAPS))) {
+                result = static_cast<HRESULT>(invalid_argument);
+                break;
+            }
+            DSCAPS capabilities{};
+            capabilities.dwSize = sizeof(capabilities);
+            result = host_sound->GetCaps(&capabilities);
+            if (SUCCEEDED(result)) {
+                const auto *bytes = reinterpret_cast<const std::uint8_t *>(&capabilities);
+                cpu.memory().write(output, {bytes, sizeof(capabilities)});
+            }
+            break;
+        }
+        case 6:
+            result = host_sound->SetCooperativeLevel(
+                reinterpret_cast<HWND>(static_cast<std::uintptr_t>(argument(1))),
+                static_cast<DWORD>(argument(2)));
+            break;
+        case 7:
+            result = host_sound->Compact();
+            break;
+        case 8: {
+            const auto output = argument(1);
+            if (output == 0 || !cpu.memory().contains(output, sizeof(DWORD))) {
+                result = static_cast<HRESULT>(invalid_argument);
+            } else {
+                DWORD configuration = 0;
+                result = host_sound->GetSpeakerConfig(&configuration);
+                if (SUCCEEDED(result)) {
+                    cpu.memory().write32(output, configuration);
+                }
+            }
+            break;
+        }
+        case 9:
+            result = host_sound->SetSpeakerConfig(static_cast<DWORD>(argument(1)));
+            break;
+        case 10: {
+            GUID device_guid{};
+            const GUID *device_guid_pointer = nullptr;
+            if (argument(1) != 0) {
+                if (!cpu.memory().contains(argument(1), sizeof(device_guid))) {
+                    result = static_cast<HRESULT>(invalid_argument);
+                    break;
+                }
+                const auto bytes = cpu.memory().read(argument(1), sizeof(device_guid));
+                std::memcpy(&device_guid, bytes.data(), bytes.size());
+                device_guid_pointer = &device_guid;
+            }
+            result = host_sound->Initialize(device_guid_pointer);
+            break;
+        }
+        default:
+            break;
+        }
+        cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
         finish_call(argument_counts[method]);
         break;
     }

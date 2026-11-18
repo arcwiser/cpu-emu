@@ -16,6 +16,8 @@
 // Common Dialogs also depends on the base Windows declarations.
 #include <commdlg.h>
 #include <d3d9.h>
+#include <dsound.h>
+#include <mmsystem.h>
 #include <shlobj.h>
 
 #include <cstdint>
@@ -681,6 +683,33 @@ int run_sync_selftest() {
                       ShowWindow(device_window, SW_HIDE) != FALSE,
                   "sync selftest: show, update, and hide native guest window");
         }
+        IDirectSound *direct_sound = nullptr;
+        const auto sound_result = DirectSoundCreate(nullptr, &direct_sound, nullptr);
+        check(SUCCEEDED(sound_result) && direct_sound != nullptr,
+              "sync selftest: create DirectSound proxy");
+        if (direct_sound != nullptr) {
+            DSCAPS sound_caps{};
+            sound_caps.dwSize = sizeof(sound_caps);
+            check(SUCCEEDED(direct_sound->GetCaps(&sound_caps)) &&
+                      sound_caps.dwSize == sizeof(sound_caps),
+                  "sync selftest: query DirectSound capabilities");
+            check(FAILED(direct_sound->GetCaps(nullptr)),
+                  "sync selftest: reject null DirectSound capabilities output");
+            check(device_window != nullptr &&
+                      SUCCEEDED(direct_sound->SetCooperativeLevel(device_window, DSSCL_NORMAL)),
+                  "sync selftest: set DirectSound cooperative level");
+            IDirectSound *queried_sound = nullptr;
+            check(SUCCEEDED(direct_sound->QueryInterface(
+                      IID_IDirectSound, reinterpret_cast<void **>(&queried_sound))) &&
+                      queried_sound == direct_sound,
+                  "sync selftest: DirectSound QueryInterface lifetime");
+            if (queried_sound != nullptr) {
+                queried_sound->Release();
+            }
+            direct_sound->Release();
+        }
+        check(FAILED(DirectSoundCreate(nullptr, nullptr, nullptr)),
+              "sync selftest: reject null DirectSound output");
         D3DPRESENT_PARAMETERS presentation{};
         presentation.BackBufferWidth = 64;
         presentation.BackBufferHeight = 64;

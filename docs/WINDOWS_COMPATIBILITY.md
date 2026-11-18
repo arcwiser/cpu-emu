@@ -44,6 +44,7 @@ explicit adapter.
 | Startup and environment | command line, environment blocks, CRT on-exit tables, static TLS initialization | Main thread only |
 | Module queries | module handles, module filename, selected `GetProcAddress`, delay imports | Loaded main image and emulated thunks; no general guest DLL loader |
 | Basic audio | `Beep`, `MessageBeep`, synchronous `PlaySoundA/W`, `sndPlaySoundA/W` | No retained guest buffers, asynchronous playback, loops, resource audio, or streaming APIs |
+| DirectSound discovery | `DirectSoundCreate`, base `IDirectSound` lifetime, capabilities, cooperative level, speaker configuration, compaction, and initialization | The interface is a guest-owned proxy and native COM pointers never cross the boundary; sound-buffer creation, locking, playback, and streaming are not implemented yet |
 | Game-loop timing | `GetTickCount`, `GetTickCount64`, performance counter/frequency, `Sleep`, waitable-timer create/set/cancel/wait, `timeGetTime`, timer period begin/end | Host-clock backed; no virtual or deterministic clock; guest waitable-timer APC callbacks fail closed rather than running on a native timer thread |
 | Direct3D 9/9Ex | `Direct3DCreate9Ex`, adapter enumeration, display modes, format checks, capabilities, monitor/LUID queries, base `CreateDevice`, device texture and vertex/index-buffer creation/binding, resource metadata/lifetime methods, buffer lock/unlock, scene begin/end, clear, and scalar render-state setters; `D3DXCreateTextureFromFileW` and `D3DXCreateTextureFromFileInMemoryEx` | Guest-owned parent/device/resource COM objects marshal PE32/PE32+ structures and retain their parent mappings; buffer locks use checked guest staging allocations and copy on lock/unlock, so native object and lock pointers never cross into guest memory; file paths and image bytes are bounded/copied before native D3DX decoding; `D3DADAPTER_IDENTIFIER9` copies its 1,100-byte defined field extent without leaking host padding; surfaces, shaders, swap chains, texture locks, and draw/presentation paths still require guest proxies |
 | PE32 startup | stack-based stdcall arguments, low thunk/module handles, startup info, process/thread IDs, security cookie helpers, heap, TLS, and critical-section adapters | Adapter-by-adapter ABI audit remains in progress |
@@ -69,7 +70,7 @@ escape emulation or retain unsafe guest state:
   memory.
 - Indirect dialogs, ANSI font enumeration, printing, and other APIs that retain or synchronously
   invoke callbacks without a dedicated adapter.
-- WaveOut, DirectSound, WASAPI, Media Foundation, and other streaming or callback-driven audio
+- WaveOut, DirectSound buffers, WASAPI, Media Foundation, and other streaming or callback-driven audio
   interfaces.
 
 ## Adding an API

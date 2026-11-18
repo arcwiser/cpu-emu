@@ -743,6 +743,18 @@ development.
   Undertale discovers its save/config folder and reaches `DirectSoundCreate` after 66,394,276
   instructions, making DirectSound the first observed audio blocker.
 
+## 2026-11-18 — guest-owned DirectSound discovery
+
+- Added name and ordinal-1 import routing for `DirectSoundCreate` plus an 11-slot guest-owned
+  `IDirectSound` proxy. Capability, cooperative-level, speaker-configuration, initialization,
+  compaction, `QueryInterface`, and reference-lifetime calls marshal through retained host state;
+  no native interface pointer enters guest memory.
+- Expanded the synchronization fixture with creation, capability, invalid-output, cooperative
+  level, interface-lifetime, and teardown checks. Sound-buffer creation still fails closed until
+  it has guest-owned buffer and lock staging adapters.
+- Undertale passes DirectSound discovery and advances to `GetForegroundWindow` after 66,392,948
+  instructions. The offline Steam failure remains a handled startup path, not this blocker.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

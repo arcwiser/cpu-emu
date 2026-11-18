@@ -194,6 +194,13 @@ class Runtime {
     std::uint64_t direct_input_proxy_ = 0;
     std::uint64_t direct_input_device_proxy_ = 0;
     std::unordered_map<std::uint64_t, std::uint32_t> direct_input_methods_;
+    struct DirectSoundObject {
+        void *host;
+        std::uint32_t references;
+    };
+    std::uint64_t direct_sound_vtable_ = 0;
+    std::unordered_map<std::uint64_t, DirectSoundObject> direct_sound_objects_;
+    std::unordered_map<std::uint64_t, std::uint32_t> direct_sound_methods_;
 
     // COM and WinRT objects below are guest-owned proxy objects. Method maps translate each
     // guest vtable thunk back to its slot number; no host vtable pointer crosses the ABI boundary.

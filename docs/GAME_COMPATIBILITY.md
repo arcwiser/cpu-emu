@@ -50,7 +50,7 @@ reproducible blocker.
 | Visible window | 🚧 | GameMaker calls `ShowWindow` and `UpdateWindow` on its native HWND; a visible rendered game frame has not yet been verified |
 | Input discovery | ✅ | Guest-owned inert DirectInput proxy completes optional discovery |
 | Direct3D 9Ex | 🚧 | Adapter/device creation, PE32-safe structure marshaling, device texture and vertex/index-buffer creation/binding, checked buffer staging locks, and D3DX file/in-memory texture paths are adapted; surface/shader/swap-chain/draw/presentation paths remain |
-| Audio | 🚧 | Basic synchronous WinMM works; GameMaker now reaches `DirectSoundCreate`, but DirectSound objects and streaming buffers are not yet adapted |
+| Audio | 🚧 | Basic synchronous WinMM and guest-owned base `IDirectSound` discovery work; sound buffers, playback, and streaming are not yet adapted |
 | Playable | ○ | Requires rendering, input, audio, persistence, and sustained loop |
 
 ## Audio status
@@ -59,9 +59,10 @@ CPUEmu adapts synchronous `Beep`, `MessageBeep`, `PlaySoundA`, `PlaySoundW`, and
 `sndPlaySoundA/W` aliases. Filename and system-alias playback are supported when Windows accepts
 the requested sound. Stopping playback with a null sound name is supported.
 
-Asynchronous, looping, memory-buffer, and resource-backed playback is refused for now because the
-host can retain guest pointers after the call returns. WaveOut, DirectSound, WASAPI, Media
-Foundation, and audio callbacks are not implemented yet.
+Asynchronous, looping, memory-buffer, and resource-backed WinMM playback is refused for now because
+the host can retain guest pointers after the call returns. Base `IDirectSound` discovery uses a
+guest-owned proxy and supports capabilities and cooperative-level setup; DirectSound buffers,
+WaveOut, WASAPI, Media Foundation, and audio callbacks are not implemented yet.
 
 The Undertale-specific probe and subsystem roadmap are in [`UNDERTALE.md`](UNDERTALE.md).
 
