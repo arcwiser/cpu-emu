@@ -657,6 +657,13 @@ void Cpu::step() {
                 x87_[0] = std::sin(x87_[0]); // FSIN
                 return;
             }
+            if ((decoded.reg & 7) == 7 && decoded.rm.register_index == Rdx) { // FSQRT
+                if (x87_depth_ == 0) {
+                    throw Error("x87 stack underflow");
+                }
+                x87_[0] = std::sqrt(x87_[0]);
+                return;
+            }
             throw Error("unsupported x87 D9 register instruction");
         }
         switch (decoded.reg & 7) {

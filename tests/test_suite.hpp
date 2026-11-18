@@ -13,6 +13,7 @@ void test_x87_pop_arithmetic();
 void test_x87_sign_operations();
 void test_x87_stack_exchange();
 void test_x87_double_arithmetic();
+void test_x87_square_root();
 void test_packed_float_conversions();
 void test_packed_logical_operations();
 void test_pshufd();

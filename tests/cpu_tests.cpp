@@ -395,6 +395,44 @@ void test_x87_double_arithmetic() {
     require(run_memory(0x7f, 0x78) == 1.0 / 3.0, "x87 double-memory FDIVR");
 }
 
+void test_x87_square_root() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    const std::uint8_t code[] = {
+        0xdd, 0x07,       // fld qword ptr [rdi]
+        0xd9, 0xfa,       // fsqrt
+        0xdd, 0x5f, 0x08, // fstp qword ptr [rdi+8]
+    };
+    memory.write(code_address, code);
+    winemu::Cpu cpu(memory);
+    const auto run = [&](double input) {
+        memory.write64(data_address, std::bit_cast<std::uint64_t>(input));
+        cpu.reset(code_address, data_address + 0xff8);
+        cpu.set_reg(winemu::Rdi, data_address);
+        cpu.step();
+        cpu.step();
+        cpu.step();
+        return std::bit_cast<double>(memory.read64(data_address + 8));
+    };
+    require(run(81.0) == 9.0, "x87 FSQRT positive result");
+    require(std::signbit(run(-0.0)), "x87 FSQRT preserves negative zero");
+    require(std::isnan(run(-1.0)), "x87 FSQRT masked-invalid result");
+
+    const std::uint8_t underflow[] = {0xd9, 0xfa};
+    memory.write(code_address, underflow);
+    cpu.reset(code_address, data_address + 0xff8);
+    bool rejected = false;
+    try {
+        cpu.step();
+    } catch (const winemu::Error &) {
+        rejected = true;
+    }
+    require(rejected, "x87 FSQRT rejects stack underflow");
+}
+
 void test_packed_float_conversions() {
     constexpr std::uint64_t code_address = 0x200000000ULL;
     constexpr std::uint64_t data_address = 0x300000000ULL;

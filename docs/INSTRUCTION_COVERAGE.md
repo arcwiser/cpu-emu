@@ -106,7 +106,7 @@ The x87 stack and control word are independent state; they are not aliases of XM
 | 🟧 | `FLD` for `m32real`, `m64real`, and `ST(i)`; `FXCH ST(i)`; constants `FLD1`, `FLDL2T`, `FLDL2E`, `FLDPI`, `FLDLG2`, `FLDLN2`, `FLDZ` |
 | 🟧 | `FST`/`FSTP` for `m32real` and `m64real` |
 | 🟧 | Memory `FADD`, `FMUL`, `FSUB`, reverse subtract, `FDIV`, reverse divide in D8 single-precision and DC double-precision forms; DC register-destination forms |
-| 🟧 | `FADDP`, `FMULP`, `FSUBP`, `FSUBRP`, `FDIVP`, `FDIVRP`, `FCHS`, `FABS`, `FSIN`, `FCOS` |
+| 🟧 | `FADDP`, `FMULP`, `FSUBP`, `FSUBRP`, `FDIVP`, `FDIVRP`, `FCHS`, `FABS`, `FSQRT`, `FSIN`, `FCOS` |
 | 🟧 | `FILD m32int`, `FILD m64int`, `FISTP m64int` with control-word rounding |
 | 🟧 | `FLDCW`, `FNSTCW`, `FNSTSW AX`, `FNCLEX`, `FNINIT`, `WAIT` |
 | ⬜ | Complete comparisons/status flags, 80-bit memory values, BCD, remainder, transcendental and exception semantics |

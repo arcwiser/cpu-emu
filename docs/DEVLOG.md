@@ -645,6 +645,13 @@ development.
 - Undertale advances through the x87 vector expression and reaches `FSQRT` after 15,222,702
   instructions.
 
+## 2026-11-18 — x87 square root
+
+- Added `FSQRT` with positive, signed-zero, masked-invalid-result, and stack-underflow regressions.
+  CPUEmu still does not model complete x87 exception/status delivery.
+- Undertale advances 909 instructions through additional transform and runtime math, reaching
+  `FUCOM ST(1)` after 15,223,611 instructions.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,
