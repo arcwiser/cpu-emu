@@ -6,6 +6,7 @@
 
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 
@@ -431,6 +432,71 @@ void test_x87_square_root() {
         rejected = true;
     }
     require(rejected, "x87 FSQRT rejects stack underflow");
+}
+
+void test_x87_comparison_status() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    winemu::Cpu cpu(memory);
+
+    const auto compare = [&](double left, double right) {
+        const std::uint8_t code[] = {
+            0xdd, 0x07,       // fld qword ptr [rdi]
+            0xdd, 0x47, 0x08, // fld qword ptr [rdi+8]
+            0xdd, 0xe1,       // fucom st(1)
+            0xdf, 0xe0,       // fnstsw ax
+        };
+        memory.write(code_address, code);
+        memory.write64(data_address, std::bit_cast<std::uint64_t>(right));
+        memory.write64(data_address + 8, std::bit_cast<std::uint64_t>(left));
+        cpu.reset(code_address, data_address + 0xff8);
+        cpu.set_reg(winemu::Rdi, data_address);
+        for (unsigned instruction = 0; instruction < 4; ++instruction) {
+            cpu.step();
+        }
+        return static_cast<std::uint16_t>(cpu.reg(winemu::Rax));
+    };
+    constexpr std::uint16_t conditions = 0x4500;
+    require((compare(3.0, 2.0) & conditions) == 0, "x87 FUCOM greater status");
+    require((compare(2.0, 3.0) & conditions) == 0x0100, "x87 FUCOM less status");
+    require((compare(3.0, 3.0) & conditions) == 0x4000, "x87 FUCOM equal status");
+    require((compare(std::numeric_limits<double>::quiet_NaN(), 3.0) & conditions) == 0x4500,
+            "x87 FUCOM unordered status");
+    require((compare(3.0, 2.0) & 0x3800) == 0x3000, "x87 status reports physical TOP");
+
+    const std::uint8_t pop_compare[] = {
+        0xdd, 0x07,       // fld qword ptr [rdi]
+        0xdd, 0x47, 0x08, // fld qword ptr [rdi+8]
+        0xdd, 0xe9,       // fucomp st(1)
+        0xdf, 0xe0,       // fnstsw ax
+    };
+    memory.write(code_address, pop_compare);
+    memory.write64(data_address, std::bit_cast<std::uint64_t>(2.0));
+    memory.write64(data_address + 8, std::bit_cast<std::uint64_t>(7.0));
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    for (unsigned instruction = 0; instruction < 4; ++instruction) {
+        cpu.step();
+    }
+    require((cpu.reg(winemu::Rax) & 0x3800) == 0x3800, "x87 FUCOMP pops one stack entry");
+
+    const std::uint8_t register_store[] = {
+        0xdd, 0x07,       // fld qword ptr [rdi]
+        0xdd, 0x47, 0x08, // fld qword ptr [rdi+8]
+        0xdd, 0xd9,       // fstp st(1)
+        0xdd, 0x5f, 0x10, // fstp qword ptr [rdi+10h]
+    };
+    memory.write(code_address, register_store);
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    for (unsigned instruction = 0; instruction < 4; ++instruction) {
+        cpu.step();
+    }
+    require(memory.read64(data_address + 0x10) == std::bit_cast<std::uint64_t>(7.0),
+            "x87 register FSTP copies ST(0) before popping");
 }
 
 void test_packed_float_conversions() {

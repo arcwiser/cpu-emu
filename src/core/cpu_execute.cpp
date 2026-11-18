@@ -109,6 +109,7 @@ void Cpu::step() {
         }
         x87_[0] = value;
         ++x87_depth_;
+        x87_top_ = static_cast<std::uint8_t>((x87_top_ - 1) & 7);
     };
     const auto x87_pop = [&] {
         if (x87_depth_ == 0) {
@@ -118,6 +119,7 @@ void Cpu::step() {
             x87_[index - 1] = x87_[index];
         }
         --x87_depth_;
+        x87_top_ = static_cast<std::uint8_t>((x87_top_ + 1) & 7);
     };
 
     if (opcode >= 0xb0 && opcode <= 0xb7) {
@@ -700,11 +702,16 @@ void Cpu::step() {
         }
         if (decoded.rm.is_register && (decoded.reg & 7) == 4 && decoded.rm.register_index == Rdx) {
             // FNCLEX clears pending x87 exception state. CPUEmu does not defer x87 exceptions.
+            x87_status_ &= 0x4700;
             return;
         }
         if (decoded.rm.is_register && (decoded.reg & 7) == 4 && decoded.rm.register_index == Rbx) {
             // FNINIT restores the architectural x87 control-word default.
             x87_control_ = 0x037f;
+            x87_status_ = 0;
+            x87_top_ = 0;
+            x87_depth_ = 0;
+            x87_.fill(0);
             return;
         }
         throw Error("unsupported x87 DB instruction");
@@ -760,6 +767,39 @@ void Cpu::step() {
     case 0xdd: {
         const auto decoded = decode_rm(rex);
         if (decoded.rm.is_register) {
+            const auto operation = decoded.reg & 7;
+            const auto target = static_cast<std::size_t>(decoded.rm.register_index & 7);
+            if (operation == 2 || operation == 3) { // FST/FSTP ST(i)
+                if (x87_depth_ == 0 || target >= x87_depth_) {
+                    throw Error("x87 stack underflow");
+                }
+                x87_[target] = x87_[0];
+                if (operation == 3) {
+                    x87_pop();
+                }
+                return;
+            }
+            if (operation == 4 || operation == 5) { // FUCOM/FUCOMP ST(i)
+                if (x87_depth_ == 0 || target >= x87_depth_) {
+                    throw Error("x87 stack underflow");
+                }
+                constexpr std::uint16_t condition_mask = 0x4700;
+                constexpr std::uint16_t c0 = 0x0100;
+                constexpr std::uint16_t c2 = 0x0400;
+                constexpr std::uint16_t c3 = 0x4000;
+                x87_status_ &= ~condition_mask;
+                if (std::isnan(x87_[0]) || std::isnan(x87_[target])) {
+                    x87_status_ |= c0 | c2 | c3;
+                } else if (x87_[0] < x87_[target]) {
+                    x87_status_ |= c0;
+                } else if (x87_[0] == x87_[target]) {
+                    x87_status_ |= c3;
+                }
+                if (operation == 5) {
+                    x87_pop();
+                }
+                return;
+            }
             throw Error("unsupported x87 DD register instruction");
         }
         switch (decoded.reg & 7) {
@@ -813,7 +853,9 @@ void Cpu::step() {
         const auto decoded = decode_rm(rex);
         if (decoded.rm.is_register && (decoded.reg & 7) == 4 &&
             decoded.rm.register_index == Rax) { // FNSTSW AX
-            write_register(Rax, 16, 0);
+            const auto status =
+                static_cast<std::uint16_t>((x87_status_ & ~0x3800U) | (x87_top_ << 11));
+            write_register(Rax, 16, status);
             return;
         }
         if (!decoded.rm.is_register && (decoded.reg & 7) == 5) { // FILD m64int

@@ -9,12 +9,14 @@ void Cpu::reset(std::uint64_t entry, std::uint64_t stack_pointer, bool long_mode
     xmm_.fill({0, 0});
     x87_.fill(0);
     x87_depth_ = 0;
+    x87_top_ = 0;
     history_.fill(0);
     history_cursor_ = 0;
     registers_[Rsp] = stack_pointer;
     rip_ = entry;
     flags_ = 2;
     x87_control_ = 0x037f;
+    x87_status_ = 0;
     mxcsr_ = 0x1f80;
     // Match the user-mode selectors used by 32-bit and 64-bit Windows processes. CPUEmu does not
     // expose descriptor-table mutation, so these remain fixed for the lifetime of a run.

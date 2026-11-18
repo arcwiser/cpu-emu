@@ -652,6 +652,15 @@ development.
 - Undertale advances 909 instructions through additional transform and runtime math, reaching
   `FUCOM ST(1)` after 15,223,611 instructions.
 
+## 2026-11-18 — x87 comparison and status state
+
+- Added tracked x87 TOP and status state, `FUCOM`/`FUCOMP` ordered and unordered condition results,
+  register `FST`/`FSTP`, status-aware `FNSTSW AX`, and state-correct `FNCLEX`/`FNINIT` behavior.
+- Added regressions for greater/less/equal/unordered C0/C2/C3 results, TOP transitions, comparison
+  popping, and register-store lifetime.
+- Undertale follows the real comparison branch and advances to register-form `FSUB ST(0), ST(2)`
+  after 15,223,654 instructions.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,
