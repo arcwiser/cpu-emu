@@ -62,7 +62,7 @@ persistence are independent compatibility axes.
 | 🟩 | `ADD`, `ADC`, `SUB`, `SBB`, `CMP`, `INC`, `DEC`, `NEG` | Arithmetic flags and immediate groups |
 | 🟩 | `AND`, `OR`, `XOR`, `TEST`, `NOT` | Register, memory, and immediate groups |
 | 🟩 | `MUL`, `IMUL`, `DIV`, `IDIV` | One-operand and common immediate/two-operand forms |
-| 🟩 | `SHL`/`SAL`, `SHR`, `SAR`, `ROL`, `ROR` | Immediate, one-bit, and `CL` counts where decoded |
+| 🟩 | `SHL`/`SAL`, `SHR`, `SAR`, `ROL`, `ROR`, `SHLD`, `SHRD` | Immediate, one-bit, and `CL` counts where decoded; double-precision shifts cover 16/32/64-bit register and memory destinations with defined flag/count behavior |
 | 🟩 | `CBW`/`CWDE`/`CDQE`, `CWD`/`CDQ`/`CQO` | Mode- and operand-size-aware sign extension |
 | 🟩 | `LAHF`, `SAHF`, `CLC`, `STC`, `CMC`, `CLD`, `STD` | User-mode flag transfer/control used by current guests |
 | 🟩 | `NOP`, multi-byte NOP/prefetch hints, `WAIT`/`FWAIT` | Hints are architecturally inert; deferred x87 faults are not modeled |

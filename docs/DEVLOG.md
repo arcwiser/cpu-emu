@@ -357,6 +357,9 @@ this file is the companion log of development decisions.
   common pointer-free render-state setters. Pointer-retaining resource methods remain refused.
 - Undertale creates the host-backed device on its first attempt, queries its caps, and advances to
   `SHLD r/m32, r32, CL` after 15,206,998 instructions.
+- Added `SHLD` and `SHRD` immediate/`CL` forms across 16/32/64-bit register and memory operands,
+  including zero-count state preservation and defined carry/overflow behavior. Undertale advances
+  through device render/sampler-state initialization to x87 `FADDP` after 15,211,857 instructions.
 
 ## 2026-11-08 — Undertale PE32 window creation
 

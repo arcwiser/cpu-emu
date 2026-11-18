@@ -9,6 +9,7 @@ int main() {
         test_memory();
         test_cpu_loop();
         test_cpu_32bit_mode();
+        test_double_shifts();
         test_pshufd();
         test_pshufb();
         test_packed_absolute_values();

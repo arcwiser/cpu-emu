@@ -2315,6 +2315,54 @@ void Cpu::step() {
             }
             return;
         }
+        if (second == 0xa4 || second == 0xa5 || second == 0xac || second == 0xad) {
+            const bool immediate_count = second == 0xa4 || second == 0xac;
+            const bool shift_right = second == 0xac || second == 0xad;
+            const auto decoded = decode_rm(rex, immediate_count ? 1U : 0U);
+            const auto count_mask = width == 64 ? 0x3fU : 0x1fU;
+            const auto count =
+                static_cast<unsigned>(immediate_count ? fetch8() : registers_[Rcx]) & count_mask;
+            if (count == 0) {
+                return;
+            }
+            const auto destination = read_operand(decoded.rm, width);
+            const auto source = read_register(decoded.reg, width);
+            const auto old_flags = flags_;
+            // Counts larger than the operand width have architecturally undefined results. Keep a
+            // deterministic concatenated-shift result without documenting those values as stable.
+            const auto effective_count = count > width ? count % width : count;
+            std::uint64_t result = source;
+            if (effective_count != 0 && effective_count < width) {
+                result =
+                    shift_right
+                        ? (destination >> effective_count) | (source << (width - effective_count))
+                        : (destination << effective_count) | (source >> (width - effective_count));
+            }
+            result &= mask_for(width);
+            write_operand(decoded.rm, width, result);
+            set_logic_flags(result, width);
+            flags_ = (flags_ & ~flag_af) | (old_flags & flag_af);
+            if (count <= width) {
+                const auto carry_bit = shift_right ? count - 1 : width - count;
+                if ((destination & (1ULL << carry_bit)) != 0) {
+                    flags_ |= flag_cf;
+                }
+            } else {
+                flags_ = (flags_ & ~flag_cf) | (old_flags & flag_cf);
+            }
+            if (count == 1) {
+                const bool result_sign = (result & (1ULL << (width - 1))) != 0;
+                const bool overflow =
+                    shift_right ? ((destination & (1ULL << (width - 1))) != 0) != result_sign
+                                : result_sign != ((flags_ & flag_cf) != 0);
+                if (overflow) {
+                    flags_ |= flag_of;
+                }
+            } else {
+                flags_ = (flags_ & ~flag_of) | (old_flags & flag_of);
+            }
+            return;
+        }
         if (second == 0xba) {
             const auto decoded = decode_rm(rex, 1U);
             const auto group = static_cast<std::uint8_t>(decoded.reg & 7);

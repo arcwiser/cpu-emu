@@ -181,6 +181,52 @@ void test_cpu_32bit_mode() {
     require(rejected_pop, "POP rejects reserved ModRM groups");
 }
 
+void test_double_shifts() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    winemu::Cpu cpu(memory);
+
+    const std::uint8_t shld_cl[] = {0x0f, 0xa5, 0xc2}; // shld edx, eax, cl
+    memory.write(code_address, shld_cl);
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rax, 0xaabbccdd);
+    cpu.set_reg(winemu::Rdx, 0x11223344);
+    cpu.set_reg(winemu::Rcx, 8);
+    cpu.step();
+    require(cpu.reg(winemu::Rdx) == 0x223344aa, "SHLD CL dword result");
+    require((cpu.flags() & 1) != 0, "SHLD carry flag");
+
+    const std::uint8_t shrd_immediate[] = {0x48, 0x0f, 0xac, 0xd0, 0x08};
+    memory.write(code_address + 0x10, shrd_immediate); // shrd rax, rdx, 8
+    cpu.reset(code_address + 0x10, data_address + 0xff8);
+    cpu.set_reg(winemu::Rax, 0x1122334455667788ULL);
+    cpu.set_reg(winemu::Rdx, 0xaabbccddeeff0011ULL);
+    cpu.step();
+    require(cpu.reg(winemu::Rax) == 0x1111223344556677ULL, "SHRD immediate qword result");
+
+    const std::uint8_t shld_memory[] = {0x66, 0x0f, 0xa4, 0x07, 0x04};
+    memory.write(code_address + 0x20, shld_memory); // shld word ptr [rdi], ax, 4
+    memory.write16(data_address, 0x1234);
+    cpu.reset(code_address + 0x20, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    cpu.set_reg(winemu::Rax, 0xabcd);
+    cpu.step();
+    require(memory.read16(data_address) == 0x234a, "SHLD word memory result");
+
+    memory.write(code_address + 0x30, shld_cl);
+    cpu.reset(code_address + 0x30, data_address + 0xff8);
+    cpu.set_reg(winemu::Rax, 0xaabbccdd);
+    cpu.set_reg(winemu::Rdx, 0x11223344);
+    cpu.set_reg(winemu::Rcx, 0);
+    cpu.set_reg(winemu::Rbx, 0);
+    cpu.step();
+    require(cpu.reg(winemu::Rdx) == 0x11223344 && cpu.flags() == 2,
+            "zero-count SHLD preserves destination and flags");
+}
+
 void test_pshufd() {
     winemu::Memory memory;
     memory.map(0x200000000ULL, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
