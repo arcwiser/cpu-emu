@@ -289,6 +289,161 @@ void test_packed_float_conversions() {
     require(memory.read64(data_address + 0x18) == 0, "CVTPD2PS clears the upper destination lanes");
 }
 
+void test_packed_logical_operations() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    constexpr std::uint64_t left[] = {0xff00ff00aa55aa55ULL, 0x0123456789abcdefULL};
+    constexpr std::uint64_t right[] = {0x0f0f0f0f33333333ULL, 0xfedcba9876543210ULL};
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    const std::uint8_t code[] = {
+        // Memory-source PS forms.
+        0xf3,
+        0x0f,
+        0x6f,
+        0x07,
+        0x0f,
+        0x54,
+        0x47,
+        0x10,
+        0xf3,
+        0x0f,
+        0x7f,
+        0x47,
+        0x20,
+        0xf3,
+        0x0f,
+        0x6f,
+        0x07,
+        0x0f,
+        0x55,
+        0x47,
+        0x10,
+        0xf3,
+        0x0f,
+        0x7f,
+        0x47,
+        0x30,
+        0xf3,
+        0x0f,
+        0x6f,
+        0x07,
+        0x0f,
+        0x56,
+        0x47,
+        0x10,
+        0xf3,
+        0x0f,
+        0x7f,
+        0x47,
+        0x40,
+        0xf3,
+        0x0f,
+        0x6f,
+        0x07,
+        0x0f,
+        0x57,
+        0x47,
+        0x10,
+        0xf3,
+        0x0f,
+        0x7f,
+        0x47,
+        0x50,
+        // Register-source PD forms.
+        0xf3,
+        0x0f,
+        0x6f,
+        0x07,
+        0xf3,
+        0x0f,
+        0x6f,
+        0x4f,
+        0x10,
+        0x66,
+        0x0f,
+        0x54,
+        0xc1,
+        0xf3,
+        0x0f,
+        0x7f,
+        0x47,
+        0x60,
+        0xf3,
+        0x0f,
+        0x6f,
+        0x07,
+        0x66,
+        0x0f,
+        0x55,
+        0xc1,
+        0xf3,
+        0x0f,
+        0x7f,
+        0x47,
+        0x70,
+        0xf3,
+        0x0f,
+        0x6f,
+        0x07,
+        0x66,
+        0x0f,
+        0x56,
+        0xc1,
+        0xf3,
+        0x0f,
+        0x7f,
+        0x87,
+        0x80,
+        0x00,
+        0x00,
+        0x00,
+        0xf3,
+        0x0f,
+        0x6f,
+        0x07,
+        0x66,
+        0x0f,
+        0x57,
+        0xc1,
+        0xf3,
+        0x0f,
+        0x7f,
+        0x87,
+        0x90,
+        0x00,
+        0x00,
+        0x00,
+    };
+    memory.write(code_address, code);
+    memory.write64(data_address, left[0]);
+    memory.write64(data_address + 8, left[1]);
+    memory.write64(data_address + 0x10, right[0]);
+    memory.write64(data_address + 0x18, right[1]);
+    winemu::Cpu cpu(memory);
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    for (unsigned instruction = 0; instruction < 25; ++instruction) {
+        cpu.step();
+    }
+
+    const auto check = [&](std::uint64_t offset, std::uint64_t low, std::uint64_t high,
+                           const char *message) {
+        require(memory.read64(data_address + offset) == low &&
+                    memory.read64(data_address + offset + 8) == high,
+                message);
+    };
+    check(0x20, left[0] & right[0], left[1] & right[1], "ANDPS memory source");
+    check(0x30, ~left[0] & right[0], ~left[1] & right[1], "ANDNPS memory source");
+    check(0x40, left[0] | right[0], left[1] | right[1], "ORPS memory source");
+    check(0x50, left[0] ^ right[0], left[1] ^ right[1], "XORPS memory source");
+    check(0x60, left[0] & right[0], left[1] & right[1], "ANDPD register source");
+    check(0x70, ~left[0] & right[0], ~left[1] & right[1], "ANDNPD register source");
+    check(0x80, left[0] | right[0], left[1] | right[1], "ORPD register source");
+    check(0x90, left[0] ^ right[0], left[1] ^ right[1], "XORPD register source");
+}
+
 void test_pshufd() {
     winemu::Memory memory;
     memory.map(0x200000000ULL, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");

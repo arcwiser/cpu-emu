@@ -614,6 +614,15 @@ development.
   15,222,461 instructions. This is CPU progress only; the existing window is still not visibly
   rendering.
 
+## 2026-11-18 — Packed SIMD logical family
+
+- Completed the legacy SSE/SSE2 `ANDPS`/`ANDPD`, `ANDNPS`/`ANDNPD`, `ORPS`/`ORPD`, and
+  `XORPS`/`XORPD` family for register and checked-memory sources.
+- Added bit-pattern regressions covering every PS/PD spelling and both source forms, including
+  the destination-complement ordering required by `ANDN`.
+- Undertale now passes the packed transform block and advances 39 instructions, stopping at x87
+  `FCHS` after 15,222,500 instructions.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

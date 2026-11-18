@@ -2049,7 +2049,7 @@ void Cpu::step() {
             }
             return;
         }
-        if (second == 0x57 || second == 0xef) {
+        if (second == 0xef) {
             const auto decoded = decode_rm(rex);
             std::array<std::uint64_t, 2> source{};
             if (decoded.rm.is_register) {
@@ -2213,15 +2213,32 @@ void Cpu::step() {
             }
             return;
         }
-        if (second == 0x56) { // ORPS/ORPD
+        if (repeat_prefix == 0 && second >= 0x54 && second <= 0x57) {
+            // ANDPS/ANDPD, ANDNPS/ANDNPD, ORPS/ORPD, and XORPS/XORPD share the
+            // same lane-independent bitwise operation; 66 selects the PD spelling.
             const auto decoded = decode_rm(rex);
             const auto source =
                 decoded.rm.is_register
                     ? xmm_[decoded.rm.register_index]
                     : std::array<std::uint64_t, 2>{memory_.read64(decoded.rm.address),
                                                    memory_.read64(decoded.rm.address + 8)};
-            xmm_[decoded.reg][0] |= source[0];
-            xmm_[decoded.reg][1] |= source[1];
+            auto &destination = xmm_[decoded.reg];
+            for (unsigned half = 0; half < 2; ++half) {
+                switch (second) {
+                case 0x54:
+                    destination[half] &= source[half];
+                    break;
+                case 0x55:
+                    destination[half] = ~destination[half] & source[half];
+                    break;
+                case 0x56:
+                    destination[half] |= source[half];
+                    break;
+                case 0x57:
+                    destination[half] ^= source[half];
+                    break;
+                }
+            }
             return;
         }
         if (second == 0xd7 && operand16) { // PMOVMSKB

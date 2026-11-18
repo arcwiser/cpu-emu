@@ -11,6 +11,7 @@ void test_cpu_32bit_mode();
 void test_double_shifts();
 void test_x87_pop_arithmetic();
 void test_packed_float_conversions();
+void test_packed_logical_operations();
 void test_pshufd();
 void test_pshufb();
 void test_packed_absolute_values();

@@ -133,7 +133,8 @@ This checklist is intentionally mnemonic-level, not a guarantee for every encodi
 ```text
 MOVSS      MOVSD      MOVQ(XMM)  MOVDDUP    LDDQU      MOVAPS/MOVUPS-family moves
 ADDSS      SUBSS      MULSS      DIVSS      ADDPS      SUBPS      MULPS      DIVPS
-ADDPD      SUBPD      MULPD      DIVPD      MIN*/MAX*  ORPS/ORPD  UNPCKLPS
+ADDPD      SUBPD      MULPD      DIVPD      MIN*/MAX*  ANDPS/ANDPD ANDNPS/ANDNPD
+ORPS/ORPD  XORPS/XORPD           UNPCKLPS
 CVTSI2SS   CVTTSS2SI  CVTSS2SD   CVTSD2SS   CVTPS2PD   CVTPD2PS   PSHUFD
 PSHUFLW    PSHUFHW
 PADDB/W/D/Q            PSUBB/W/D/Q           PUNPCKL/HBW/WD/DQ
