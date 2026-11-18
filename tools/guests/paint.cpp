@@ -747,6 +747,85 @@ int run_sync_selftest() {
             check(FAILED(base_device->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
                                                     nullptr, nullptr)),
                   "sync selftest: reject null Direct3D texture output");
+            IDirect3DVertexBuffer9 *vertex_buffer = nullptr;
+            check(SUCCEEDED(base_device->CreateVertexBuffer(64, 0, D3DFVF_XYZ, D3DPOOL_DEFAULT,
+                                                            &vertex_buffer, nullptr)) &&
+                      vertex_buffer != nullptr,
+                  "sync selftest: create Direct3D vertex buffer proxy");
+            if (vertex_buffer != nullptr) {
+                void *vertices = nullptr;
+                check(SUCCEEDED(vertex_buffer->Lock(0, 0, &vertices, 0)) && vertices != nullptr,
+                      "sync selftest: lock Direct3D vertex buffer staging");
+                if (vertices != nullptr) {
+                    std::memset(vertices, 0x5a, 64);
+                }
+                check(SUCCEEDED(vertex_buffer->Unlock()),
+                      "sync selftest: upload Direct3D vertex buffer staging");
+                D3DVERTEXBUFFER_DESC description{};
+                check(SUCCEEDED(vertex_buffer->GetDesc(&description)) && description.Size == 64 &&
+                          description.FVF == D3DFVF_XYZ,
+                      "sync selftest: query Direct3D vertex buffer description");
+                IDirect3DDevice9 *buffer_device = nullptr;
+                check(SUCCEEDED(vertex_buffer->GetDevice(&buffer_device)) &&
+                          buffer_device == base_device,
+                      "sync selftest: retain Direct3D vertex buffer device owner");
+                if (buffer_device != nullptr) {
+                    buffer_device->Release();
+                }
+                IDirect3DVertexBuffer9 *queried_buffer = nullptr;
+                check(SUCCEEDED(vertex_buffer->QueryInterface(
+                          __uuidof(IDirect3DVertexBuffer9),
+                          reinterpret_cast<void **>(&queried_buffer))) &&
+                          queried_buffer == vertex_buffer,
+                      "sync selftest: Direct3D vertex buffer QueryInterface lifetime");
+                if (queried_buffer != nullptr) {
+                    queried_buffer->Release();
+                }
+                check(SUCCEEDED(base_device->SetStreamSource(0, vertex_buffer, 0, 12)) &&
+                          SUCCEEDED(base_device->SetStreamSource(0, nullptr, 0, 0)),
+                      "sync selftest: bind and unbind Direct3D vertex buffer proxy");
+                check(FAILED(vertex_buffer->Lock(0, 0, nullptr, 0)),
+                      "sync selftest: reject null Direct3D vertex buffer lock output");
+                vertex_buffer->Release();
+            }
+            check(FAILED(base_device->CreateVertexBuffer(64, 0, D3DFVF_XYZ, D3DPOOL_DEFAULT,
+                                                         nullptr, nullptr)),
+                  "sync selftest: reject null Direct3D vertex buffer output");
+            IDirect3DIndexBuffer9 *index_buffer = nullptr;
+            check(SUCCEEDED(base_device->CreateIndexBuffer(12, 0, D3DFMT_INDEX16, D3DPOOL_DEFAULT,
+                                                           &index_buffer, nullptr)) &&
+                      index_buffer != nullptr,
+                  "sync selftest: create Direct3D index buffer proxy");
+            if (index_buffer != nullptr) {
+                void *indices = nullptr;
+                check(SUCCEEDED(index_buffer->Lock(0, 0, &indices, 0)) && indices != nullptr,
+                      "sync selftest: lock Direct3D index buffer staging");
+                if (indices != nullptr) {
+                    std::memset(indices, 0, 12);
+                }
+                check(SUCCEEDED(index_buffer->Unlock()),
+                      "sync selftest: upload Direct3D index buffer staging");
+                D3DINDEXBUFFER_DESC description{};
+                check(SUCCEEDED(index_buffer->GetDesc(&description)) && description.Size == 12 &&
+                          description.Format == D3DFMT_INDEX16,
+                      "sync selftest: query Direct3D index buffer description");
+                IDirect3DIndexBuffer9 *queried_buffer = nullptr;
+                check(SUCCEEDED(index_buffer->QueryInterface(
+                          __uuidof(IDirect3DIndexBuffer9),
+                          reinterpret_cast<void **>(&queried_buffer))) &&
+                          queried_buffer == index_buffer,
+                      "sync selftest: Direct3D index buffer QueryInterface lifetime");
+                if (queried_buffer != nullptr) {
+                    queried_buffer->Release();
+                }
+                check(SUCCEEDED(base_device->SetIndices(index_buffer)) &&
+                          SUCCEEDED(base_device->SetIndices(nullptr)),
+                      "sync selftest: bind and unbind Direct3D index buffer proxy");
+                index_buffer->Release();
+            }
+            check(FAILED(base_device->CreateIndexBuffer(12, 0, D3DFMT_INDEX16, D3DPOOL_DEFAULT,
+                                                        nullptr, nullptr)),
+                  "sync selftest: reject null Direct3D index buffer output");
             void *unsupported_device_interface = reinterpret_cast<void *>(1);
             check(base_device->QueryInterface(__uuidof(IDirect3DTexture9),
                                               &unsupported_device_interface) == E_NOINTERFACE &&

@@ -169,6 +169,21 @@ class Runtime {
     std::uint64_t direct3d_texture9_vtable_ = 0;
     std::unordered_map<std::uint64_t, Direct3DTexture9Object> direct3d_texture9_objects_;
     std::unordered_map<std::uint64_t, std::uint32_t> direct3d_texture9_methods_;
+    struct Direct3DBuffer9Object {
+        void *host;
+        std::uint32_t references;
+        std::uint64_t device;
+        std::uint64_t staging;
+        std::uint32_t length;
+        std::uint32_t locked_offset;
+        std::uint32_t locked_size;
+        void *host_locked;
+        bool index;
+    };
+    std::uint64_t direct3d_vertex_buffer9_vtable_ = 0;
+    std::uint64_t direct3d_index_buffer9_vtable_ = 0;
+    std::unordered_map<std::uint64_t, Direct3DBuffer9Object> direct3d_buffer9_objects_;
+    std::unordered_map<std::uint64_t, std::uint32_t> direct3d_buffer9_methods_;
     bool quit_message_pending_ = false;
     std::uint32_t quit_message_code_ = 0;
     std::unordered_map<std::uint64_t, std::int64_t> callback_long_parameters_;

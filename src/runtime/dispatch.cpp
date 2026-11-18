@@ -167,6 +167,38 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                                            Direct3DTexture9Object{host_texture, 1, guest_device});
         return guest_texture;
     };
+    const auto wrap_direct3d_buffer = [&](void *host_buffer, std::uint64_t guest_device,
+                                          std::uint32_t length, bool index) {
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        auto &vtable = index ? direct3d_index_buffer9_vtable_ : direct3d_vertex_buffer9_vtable_;
+        if (vtable == 0) {
+            constexpr std::uint32_t method_count = 14;
+            vtable = allocate(method_count * pointer_size);
+            for (std::uint32_t method = 0; method < method_count; ++method) {
+                const auto thunk = next_thunk_;
+                next_thunk_ += 0x100;
+                thunks_.emplace(thunk, Api::Direct3DBuffer9Method);
+                thunk_names_.emplace(thunk,
+                                     index ? "IDirect3DIndexBuffer9#" + std::to_string(method)
+                                           : "IDirect3DVertexBuffer9#" + std::to_string(method));
+                direct3d_buffer9_methods_.emplace(thunk, method);
+                write_guest_pointer(vtable + method * pointer_size, thunk);
+            }
+        }
+        auto device = direct3d_device9_objects_.find(guest_device);
+        if (device == direct3d_device9_objects_.end()) {
+            throw Error("Direct3D buffer has no guest device owner");
+        }
+        const auto staging = allocate(length);
+        const auto guest_buffer = allocate(pointer_size);
+        write_guest_pointer(guest_buffer, vtable);
+        static_cast<IDirect3DDevice9 *>(device->second.host)->AddRef();
+        ++device->second.references;
+        direct3d_buffer9_objects_.emplace(
+            guest_buffer, Direct3DBuffer9Object{host_buffer, 1, guest_device, staging, length, 0, 0,
+                                                nullptr, index});
+        return guest_buffer;
+    };
     const auto ensure_locale = [&] {
         if (locale_proxy_ != 0) {
             return;
@@ -4620,6 +4652,42 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             }
             break;
         }
+        case 26:
+        case 27: {
+            constexpr std::uint32_t maximum_buffer_size = 256U * 1024U * 1024U;
+            const auto length = static_cast<std::uint32_t>(argument(1));
+            const auto output = argument(5);
+            if (length == 0 || length > maximum_buffer_size || output == 0 ||
+                !cpu.memory().contains(output, pointer_size) || argument(6) != 0) {
+                result = invalid_argument;
+                break;
+            }
+            write_pointer(output, 0);
+            if (method == 26) {
+                IDirect3DVertexBuffer9 *host_buffer = nullptr;
+                result = static_cast<std::uint32_t>(host_device->CreateVertexBuffer(
+                    length, static_cast<DWORD>(argument(2)), static_cast<DWORD>(argument(3)),
+                    static_cast<D3DPOOL>(argument(4)), &host_buffer, nullptr));
+                if (SUCCEEDED(static_cast<HRESULT>(result)) && host_buffer != nullptr) {
+                    write_pointer(output,
+                                  wrap_direct3d_buffer(host_buffer, guest_device, length, false));
+                } else if (host_buffer != nullptr) {
+                    host_buffer->Release();
+                }
+            } else {
+                IDirect3DIndexBuffer9 *host_buffer = nullptr;
+                result = static_cast<std::uint32_t>(host_device->CreateIndexBuffer(
+                    length, static_cast<DWORD>(argument(2)), static_cast<D3DFORMAT>(argument(3)),
+                    static_cast<D3DPOOL>(argument(4)), &host_buffer, nullptr));
+                if (SUCCEEDED(static_cast<HRESULT>(result)) && host_buffer != nullptr) {
+                    write_pointer(output,
+                                  wrap_direct3d_buffer(host_buffer, guest_device, length, true));
+                } else if (host_buffer != nullptr) {
+                    host_buffer->Release();
+                }
+            }
+            break;
+        }
         case 41:
             result = static_cast<std::uint32_t>(host_device->BeginScene());
             break;
@@ -4741,6 +4809,21 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             result =
                 static_cast<std::uint32_t>(host_device->SetFVF(static_cast<DWORD>(argument(1))));
             break;
+        case 100:
+            if (argument(2) == 0) {
+                result = static_cast<std::uint32_t>(host_device->SetStreamSource(
+                    static_cast<UINT>(argument(1)), nullptr, static_cast<UINT>(argument(3)),
+                    static_cast<UINT>(argument(4))));
+            } else if (const auto buffer = direct3d_buffer9_objects_.find(argument(2));
+                       buffer != direct3d_buffer9_objects_.end() && !buffer->second.index) {
+                result = static_cast<std::uint32_t>(host_device->SetStreamSource(
+                    static_cast<UINT>(argument(1)),
+                    static_cast<IDirect3DVertexBuffer9 *>(buffer->second.host),
+                    static_cast<UINT>(argument(3)), static_cast<UINT>(argument(4))));
+            } else {
+                result = invalid_argument;
+            }
+            break;
         case 102:
             result = static_cast<std::uint32_t>(host_device->SetStreamSourceFreq(
                 static_cast<UINT>(argument(1)), static_cast<UINT>(argument(2))));
@@ -4748,6 +4831,12 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         case 104:
             if (argument(1) == 0) {
                 result = static_cast<std::uint32_t>(host_device->SetIndices(nullptr));
+            } else if (const auto buffer = direct3d_buffer9_objects_.find(argument(1));
+                       buffer != direct3d_buffer9_objects_.end() && buffer->second.index) {
+                result = static_cast<std::uint32_t>(host_device->SetIndices(
+                    static_cast<IDirect3DIndexBuffer9 *>(buffer->second.host)));
+            } else {
+                result = invalid_argument;
             }
             break;
         default:
@@ -4917,6 +5006,193 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 rectangle_pointer = &rectangle;
             }
             result = static_cast<std::uint32_t>(host_texture->AddDirtyRect(rectangle_pointer));
+            break;
+        }
+        default:
+            break;
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(argument_counts[method]);
+        break;
+    }
+    case Api::Direct3DBuffer9Method: {
+        constexpr std::uint32_t invalid_argument = 0x80070057U;
+        constexpr std::uint32_t no_interface = 0x80004002U;
+        constexpr std::uint32_t not_available = 0x8876086aU;
+        static constexpr unsigned argument_counts[] = {3, 1, 1, 2, 5, 4, 2, 2, 1, 1, 1, 5, 1, 2};
+        static_assert(std::size(argument_counts) == 14);
+        const auto method = direct3d_buffer9_methods_.at(cpu.rip());
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        const auto guest_buffer = argument(0);
+        auto object = direct3d_buffer9_objects_.find(guest_buffer);
+        if (object == direct3d_buffer9_objects_.end()) {
+            cpu.set_reg(Rax, invalid_argument);
+            finish_call(argument_counts[method]);
+            break;
+        }
+        auto *host_resource = static_cast<IDirect3DResource9 *>(object->second.host);
+        auto *host_vertex = object->second.index
+                                ? nullptr
+                                : static_cast<IDirect3DVertexBuffer9 *>(object->second.host);
+        auto *host_index = object->second.index
+                               ? static_cast<IDirect3DIndexBuffer9 *>(object->second.host)
+                               : nullptr;
+        std::uint64_t result = not_available;
+        switch (method) {
+        case 0: {
+            const auto iid_address = argument(1);
+            const auto output = argument(2);
+            if (iid_address == 0 || output == 0 ||
+                !cpu.memory().contains(iid_address, sizeof(GUID)) ||
+                !cpu.memory().contains(output, pointer_size)) {
+                result = invalid_argument;
+                break;
+            }
+            write_guest_pointer(output, 0);
+            GUID iid{};
+            const auto bytes = cpu.memory().read(iid_address, sizeof(iid));
+            std::memcpy(&iid, bytes.data(), bytes.size());
+            const auto supported =
+                IsEqualGUID(iid, IID_IUnknown) || IsEqualGUID(iid, IID_IDirect3DResource9) ||
+                (object->second.index && IsEqualGUID(iid, IID_IDirect3DIndexBuffer9)) ||
+                (!object->second.index && IsEqualGUID(iid, IID_IDirect3DVertexBuffer9));
+            if (!supported) {
+                result = no_interface;
+                break;
+            }
+            host_resource->AddRef();
+            ++object->second.references;
+            write_guest_pointer(output, guest_buffer);
+            result = 0;
+            break;
+        }
+        case 1:
+            host_resource->AddRef();
+            result = ++object->second.references;
+            break;
+        case 2: {
+            const auto final_reference = object->second.references == 1;
+            if (final_reference) {
+                if (object->second.host_locked != nullptr) {
+                    if (object->second.index) {
+                        host_index->Unlock();
+                    } else {
+                        host_vertex->Unlock();
+                    }
+                }
+            }
+            result = host_resource->Release();
+            if (--object->second.references == 0) {
+                auto device = direct3d_device9_objects_.find(object->second.device);
+                if (device != direct3d_device9_objects_.end()) {
+                    static_cast<IDirect3DDevice9 *>(device->second.host)->Release();
+                    if (--device->second.references == 0) {
+                        direct3d_device9_objects_.erase(device);
+                    }
+                }
+                direct3d_buffer9_objects_.erase(object);
+            }
+            break;
+        }
+        case 3: {
+            const auto output = argument(1);
+            auto device = direct3d_device9_objects_.find(object->second.device);
+            if (output == 0 || !cpu.memory().contains(output, pointer_size) ||
+                device == direct3d_device9_objects_.end()) {
+                result = invalid_argument;
+                break;
+            }
+            static_cast<IDirect3DDevice9 *>(device->second.host)->AddRef();
+            ++device->second.references;
+            write_guest_pointer(output, device->first);
+            result = 0;
+            break;
+        }
+        case 7:
+            result = host_resource->SetPriority(static_cast<DWORD>(argument(1)));
+            break;
+        case 8:
+            result = host_resource->GetPriority();
+            break;
+        case 9:
+            host_resource->PreLoad();
+            result = 0;
+            break;
+        case 10:
+            result = host_resource->GetType();
+            break;
+        case 11: {
+            const auto offset = static_cast<std::uint32_t>(argument(1));
+            auto size = static_cast<std::uint32_t>(argument(2));
+            const auto output = argument(3);
+            if (output == 0 || !cpu.memory().contains(output, pointer_size) ||
+                object->second.host_locked != nullptr || offset > object->second.length) {
+                result = invalid_argument;
+                break;
+            }
+            write_guest_pointer(output, 0);
+            if (size == 0) {
+                size = object->second.length - offset;
+            }
+            if (size > object->second.length - offset) {
+                result = invalid_argument;
+                break;
+            }
+            void *host_locked = nullptr;
+            const auto flags = static_cast<DWORD>(argument(4));
+            const auto lock_result = object->second.index
+                                         ? host_index->Lock(offset, size, &host_locked, flags)
+                                         : host_vertex->Lock(offset, size, &host_locked, flags);
+            result = static_cast<std::uint32_t>(lock_result);
+            if (SUCCEEDED(lock_result) && host_locked != nullptr) {
+                object->second.locked_offset = offset;
+                object->second.locked_size = size;
+                object->second.host_locked = host_locked;
+                const auto *bytes = static_cast<const std::uint8_t *>(host_locked);
+                cpu.memory().write(object->second.staging + offset,
+                                   std::span<const std::uint8_t>(bytes, size));
+                write_guest_pointer(output, object->second.staging + offset);
+            }
+            break;
+        }
+        case 12:
+            if (object->second.host_locked == nullptr) {
+                result = invalid_argument;
+            } else {
+                const auto bytes =
+                    cpu.memory().read(object->second.staging + object->second.locked_offset,
+                                      object->second.locked_size);
+                std::memcpy(object->second.host_locked, bytes.data(), bytes.size());
+                result = static_cast<std::uint32_t>(object->second.index ? host_index->Unlock()
+                                                                         : host_vertex->Unlock());
+                object->second.locked_offset = 0;
+                object->second.locked_size = 0;
+                object->second.host_locked = nullptr;
+            }
+            break;
+        case 13: {
+            const auto output = argument(1);
+            const auto description_size =
+                object->second.index ? sizeof(D3DINDEXBUFFER_DESC) : sizeof(D3DVERTEXBUFFER_DESC);
+            if (output == 0 || !cpu.memory().contains(output, description_size)) {
+                result = invalid_argument;
+                break;
+            }
+            if (object->second.index) {
+                D3DINDEXBUFFER_DESC description{};
+                result = static_cast<std::uint32_t>(host_index->GetDesc(&description));
+                if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                    const auto *bytes = reinterpret_cast<const std::uint8_t *>(&description);
+                    cpu.memory().write(output, {bytes, sizeof(description)});
+                }
+            } else {
+                D3DVERTEXBUFFER_DESC description{};
+                result = static_cast<std::uint32_t>(host_vertex->GetDesc(&description));
+                if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                    const auto *bytes = reinterpret_cast<const std::uint8_t *>(&description);
+                    cpu.memory().write(output, {bytes, sizeof(description)});
+                }
+            }
             break;
         }
         default:

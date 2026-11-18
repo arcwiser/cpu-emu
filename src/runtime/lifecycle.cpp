@@ -21,6 +21,20 @@ Runtime::Runtime(std::ostream &output) : output_(output) {
 }
 
 Runtime::~Runtime() {
+    for (const auto &[guest_object, object] : direct3d_buffer9_objects_) {
+        static_cast<void>(guest_object);
+        auto *host = static_cast<IDirect3DResource9 *>(object.host);
+        if (object.host_locked != nullptr) {
+            if (object.index) {
+                static_cast<IDirect3DIndexBuffer9 *>(object.host)->Unlock();
+            } else {
+                static_cast<IDirect3DVertexBuffer9 *>(object.host)->Unlock();
+            }
+        }
+        for (std::uint32_t reference = 0; reference < object.references; ++reference) {
+            host->Release();
+        }
+    }
     for (const auto &[guest_object, object] : direct3d_texture9_objects_) {
         static_cast<void>(guest_object);
         auto *host = static_cast<IDirect3DTexture9 *>(object.host);

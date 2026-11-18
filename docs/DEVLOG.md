@@ -691,6 +691,18 @@ development.
 - Undertale advances 37,251 instructions to two `CreateVertexBuffer` calls; those still fail closed,
   and later renderer state is null at 15,261,788 instructions.
 
+## 2026-11-18 — guest-owned Direct3D buffers
+
+- Added guest-owned `IDirect3DVertexBuffer9` and `IDirect3DIndexBuffer9` proxies with checked
+  creation limits, parent-device retention, COM/resource lifetime methods, descriptions, and
+  device stream/index binding.
+- Buffer `Lock` returns a guest allocation and `Unlock` copies its bounded range into the retained
+  native lock. Native pointers never enter guest state, overlapping locks and invalid ranges fail
+  closed, and teardown unlocks live resources before releasing them.
+- Expanded the Paint synchronization fixture across creation, lock/upload/unlock, metadata,
+  parent lifetime, `QueryInterface`, binding, invalid output, and teardown. Undertale passes both
+  observed vertex-buffer creations and reaches x87 `FCOMIP` after 15,252,462 instructions.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

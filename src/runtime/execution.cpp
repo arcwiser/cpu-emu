@@ -141,6 +141,24 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     pending_window_enumerations_.clear();
     pending_font_enumerations_.clear();
     pending_line_dda_.clear();
+    for (const auto &[guest_object, object] : direct3d_buffer9_objects_) {
+        static_cast<void>(guest_object);
+        auto *host = static_cast<IDirect3DResource9 *>(object.host);
+        if (object.host_locked != nullptr) {
+            if (object.index) {
+                static_cast<IDirect3DIndexBuffer9 *>(object.host)->Unlock();
+            } else {
+                static_cast<IDirect3DVertexBuffer9 *>(object.host)->Unlock();
+            }
+        }
+        for (std::uint32_t reference = 0; reference < object.references; ++reference) {
+            host->Release();
+        }
+    }
+    direct3d_buffer9_objects_.clear();
+    direct3d_vertex_buffer9_vtable_ = 0;
+    direct3d_index_buffer9_vtable_ = 0;
+    direct3d_buffer9_methods_.clear();
     for (const auto &[guest_object, object] : direct3d_texture9_objects_) {
         static_cast<void>(guest_object);
         auto *host = static_cast<IDirect3DTexture9 *>(object.host);
