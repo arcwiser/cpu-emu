@@ -360,6 +360,10 @@ this file is the companion log of development decisions.
 - Added `SHLD` and `SHRD` immediate/`CL` forms across 16/32/64-bit register and memory operands,
   including zero-count state preservation and defined carry/overflow behavior. Undertale advances
   through device render/sampler-state initialization to x87 `FADDP` after 15,211,857 instructions.
+- Added the x87 arithmetic-and-pop register family (`FADDP`, `FMULP`, both subtract orders, and
+  both divide orders) with explicit stack-depth checks and result/pop regressions. Undertale
+  advances through its transform calculations and viewport setup to packed `CVTPS2PD` after
+  15,222,460 instructions.
 
 ## 2026-11-08 — Undertale PE32 window creation
 

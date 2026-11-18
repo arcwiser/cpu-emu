@@ -721,10 +721,29 @@ void Cpu::step() {
     }
     case 0xde: {
         const auto decoded = decode_rm(rex);
-        if (decoded.rm.is_register && (decoded.reg & 7) == 5 && x87_depth_ >= 2) { // FSUBP
-            x87_[1] -= x87_[0];
-            x87_pop();
-            return;
+        if (decoded.rm.is_register) {
+            const auto operation = decoded.reg & 7;
+            const auto target = static_cast<std::size_t>(decoded.rm.register_index & 7);
+            if ((operation == 0 || operation == 1 || operation == 4 || operation == 5 ||
+                 operation == 6 || operation == 7) &&
+                target < x87_depth_) {
+                const auto top = x87_[0];
+                if (operation == 0) { // FADDP ST(i), ST(0)
+                    x87_[target] += top;
+                } else if (operation == 1) { // FMULP ST(i), ST(0)
+                    x87_[target] *= top;
+                } else if (operation == 4) { // FSUBRP ST(i), ST(0)
+                    x87_[target] = top - x87_[target];
+                } else if (operation == 5) { // FSUBP ST(i), ST(0)
+                    x87_[target] -= top;
+                } else if (operation == 6) { // FDIVRP ST(i), ST(0)
+                    x87_[target] = top / x87_[target];
+                } else { // FDIVP ST(i), ST(0)
+                    x87_[target] /= top;
+                }
+                x87_pop();
+                return;
+            }
         }
         throw Error("unsupported x87 DE instruction");
     }

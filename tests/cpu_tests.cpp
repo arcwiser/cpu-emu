@@ -227,6 +227,40 @@ void test_double_shifts() {
             "zero-count SHLD preserves destination and flags");
 }
 
+void test_x87_pop_arithmetic() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    winemu::Cpu cpu(memory);
+    memory.write64(data_address, std::bit_cast<std::uint64_t>(2.0));
+    memory.write64(data_address + 8, std::bit_cast<std::uint64_t>(3.0));
+
+    const auto run = [&](std::uint8_t operation, std::uint64_t offset) {
+        const std::uint8_t code[] = {
+            0xdd, 0x07,                                         // fld qword ptr [rdi]
+            0xdd, 0x47,      0x08,                              // fld qword ptr [rdi+8]
+            0xde, operation,                                    // arithmetic-and-pop ST(1), ST(0)
+            0xdd, 0x5f,      static_cast<std::uint8_t>(offset), // fstp qword ptr [rdi+offset]
+        };
+        memory.write(code_address, code);
+        cpu.reset(code_address, data_address + 0xff8);
+        cpu.set_reg(winemu::Rdi, data_address);
+        for (unsigned instruction = 0; instruction < 4; ++instruction) {
+            cpu.step();
+        }
+        return std::bit_cast<double>(memory.read64(data_address + offset));
+    };
+
+    require(run(0xc1, 0x20) == 5.0, "x87 FADDP result and pop");
+    require(run(0xc9, 0x28) == 6.0, "x87 FMULP result and pop");
+    require(run(0xe1, 0x30) == 1.0, "x87 FSUBRP result and pop");
+    require(run(0xe9, 0x38) == -1.0, "x87 FSUBP result and pop");
+    require(run(0xf1, 0x40) == 1.5, "x87 FDIVRP result and pop");
+    require(run(0xf9, 0x48) == 2.0 / 3.0, "x87 FDIVP result and pop");
+}
+
 void test_pshufd() {
     winemu::Memory memory;
     memory.map(0x200000000ULL, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");

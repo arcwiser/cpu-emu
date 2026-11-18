@@ -10,6 +10,7 @@ int main() {
         test_cpu_loop();
         test_cpu_32bit_mode();
         test_double_shifts();
+        test_x87_pop_arithmetic();
         test_pshufd();
         test_pshufb();
         test_packed_absolute_values();
