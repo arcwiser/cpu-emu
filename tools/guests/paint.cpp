@@ -629,6 +629,19 @@ int run_sync_selftest() {
 
     check(IsDebuggerPresent() == FALSE,
           "sync selftest: guest process has no attached guest debugger");
+    check(GetUserDefaultLCID() != 0, "sync selftest: query user default locale identifier");
+    wchar_t language_name[16]{};
+    check(GetLocaleInfoW(GetUserDefaultLCID(), LOCALE_SISO639LANGNAME, language_name,
+                         static_cast<int>(std::size(language_name))) > 1 &&
+              language_name[0] != L'\0',
+          "sync selftest: marshal user locale information");
+    SetLastError(ERROR_SUCCESS);
+    check(GetLocaleInfoW(GetUserDefaultLCID(), LOCALE_SISO639LANGNAME, nullptr, 2) == 0 &&
+              GetLastError() == ERROR_INVALID_PARAMETER,
+          "sync selftest: reject invalid locale output");
+    check(IsValidLocale(GetUserDefaultLCID(), LCID_INSTALLED) != FALSE &&
+              IsValidLocale(static_cast<LCID>(0xffffffffU), LCID_INSTALLED) == FALSE,
+          "sync selftest: validate locale identifiers");
     DWORD rejected_thread_id = 0;
     SetLastError(ERROR_SUCCESS);
     check(CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(1), nullptr, 0,

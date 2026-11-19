@@ -824,6 +824,17 @@ development.
 - A longer probe advanced to 897,619,440 instructions and stopped at unsupported
   `GetUserDefaultLCID`, establishing the next general startup/runtime adapter gap.
 
+## 2026-11-19 — bounded locale discovery
+
+- Added exact scalar adapters for `GetUserDefaultLCID` and `IsValidLocale`, plus shared ANSI and
+  Unicode `GetLocaleInfo` marshaling. Size-only queries are preserved, output ranges and signed
+  counts are validated, and only the host-defined returned extent is copied into guest memory.
+- The Paint synchronization fixture covers a real ISO language result, invalid output rejection,
+  and valid/invalid LCID classification.
+- Undertale clears the former 897-million-instruction locale sequence and reaches the full
+  1,000,000,000-instruction limit without an unsupported import or CPU/memory fault. Visible title
+  rendering remains verified; responsive input and working audio remain unproven.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

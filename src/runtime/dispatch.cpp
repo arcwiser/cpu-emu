@@ -432,6 +432,58 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         cpu.set_reg(Rax, thunk_name.ends_with("GetOEMCP") ? ::GetOEMCP() : ::GetACP());
         finish_call();
         break;
+    case Api::UserDefaultLocale:
+        cpu.set_reg(Rax, ::GetUserDefaultLCID());
+        finish_call(0);
+        break;
+    case Api::GuestLocaleInfo: {
+        const auto wide = thunk_name.ends_with("GetLocaleInfoW");
+        const auto locale = static_cast<LCID>(argument(0));
+        const auto type = static_cast<LCTYPE>(argument(1));
+        const auto output = argument(2);
+        const auto count = static_cast<std::int32_t>(argument(3));
+        const auto unit_size = wide ? sizeof(wchar_t) : sizeof(char);
+        if (count < 0 ||
+            (count != 0 &&
+             (output == 0 ||
+              !cpu.memory().contains(output, static_cast<std::uint64_t>(count) * unit_size)))) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, 0);
+            finish_call(4);
+            break;
+        }
+        int result = 0;
+        if (wide) {
+            std::vector<wchar_t> storage(static_cast<std::size_t>(count));
+            ::SetLastError(ERROR_SUCCESS);
+            result = ::GetLocaleInfoW(locale, type, count == 0 ? nullptr : storage.data(), count);
+            if (result != 0 && count != 0) {
+                const auto *bytes = reinterpret_cast<const std::uint8_t *>(storage.data());
+                cpu.memory().write(output, {bytes, static_cast<std::size_t>(result) * unit_size});
+            }
+        } else {
+            std::vector<char> storage(static_cast<std::size_t>(count));
+            ::SetLastError(ERROR_SUCCESS);
+            result = ::GetLocaleInfoA(locale, type, count == 0 ? nullptr : storage.data(), count);
+            if (result != 0 && count != 0) {
+                const auto *bytes = reinterpret_cast<const std::uint8_t *>(storage.data());
+                cpu.memory().write(output, {bytes, static_cast<std::size_t>(result)});
+            }
+        }
+        if (result == 0) {
+            last_error_ = ::GetLastError();
+        }
+        cpu.set_reg(Rax, static_cast<std::uint32_t>(result));
+        finish_call(4);
+        break;
+    }
+    case Api::ValidateLocale:
+        cpu.set_reg(Rax, ::IsValidLocale(static_cast<LCID>(argument(0)),
+                                         static_cast<DWORD>(argument(1))) != FALSE
+                             ? 1
+                             : 0);
+        finish_call(2);
+        break;
     case Api::GuestCodePageInfo: {
         CPINFO information{};
         const auto result = ::GetCPInfo(static_cast<UINT>(argument(0)), &information) != FALSE;

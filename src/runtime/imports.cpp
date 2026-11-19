@@ -100,6 +100,12 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
     } else if (kernel_module && (name == "GetConsoleCP" || name == "GetConsoleOutputCP" ||
                                  name == "GetACP" || name == "GetOEMCP")) {
         api = Api::ConsoleCodePage;
+    } else if (kernel_module && name == "GetUserDefaultLCID") {
+        api = Api::UserDefaultLocale;
+    } else if (kernel_module && (name == "GetLocaleInfoA" || name == "GetLocaleInfoW")) {
+        api = Api::GuestLocaleInfo;
+    } else if (kernel_module && name == "IsValidLocale") {
+        api = Api::ValidateLocale;
     } else if (kernel_module && name == "GetCPInfo") {
         api = Api::GuestCodePageInfo;
     } else if (kernel_module && name == "IsValidCodePage") {
