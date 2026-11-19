@@ -665,6 +665,55 @@ void test_x87_register_arithmetic() {
     require((cpu.reg(winemu::Rax) & 0x3800) == 0, "x87 memory FCOMP pops the final value");
 }
 
+void test_x87_integer_arithmetic() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    memory.write32(data_address, 8);
+    memory.write32(data_address + 4, 2);
+    winemu::Cpu cpu(memory);
+    const auto run = [&](std::uint8_t operation, std::uint8_t output_offset) {
+        const std::uint8_t code[] = {
+            0xdb, 0x07,                     // fild dword ptr [rdi]
+            0xda, operation, 0x04,          // integer arithmetic [rdi+4]
+            0xdd, 0x5f,      output_offset, // fstp qword ptr [rdi+offset]
+        };
+        memory.write(code_address, code);
+        cpu.reset(code_address, data_address + 0xff8);
+        cpu.set_reg(winemu::Rdi, data_address);
+        cpu.step();
+        cpu.step();
+        cpu.step();
+        return std::bit_cast<double>(memory.read64(data_address + output_offset));
+    };
+    require(run(0x47, 0x20) == 10.0, "x87 FIADD m32int");
+    require(run(0x4f, 0x28) == 16.0, "x87 FIMUL m32int");
+    require(run(0x67, 0x30) == 6.0, "x87 FISUB m32int");
+    require(run(0x6f, 0x38) == -6.0, "x87 FISUBR m32int");
+    require(run(0x77, 0x40) == 4.0, "x87 FIDIV m32int");
+    require(run(0x7f, 0x48) == 0.25, "x87 FIDIVR m32int");
+
+    memory.write32(data_address + 4, 8);
+    const auto compare = [&](std::uint8_t operation) {
+        const std::uint8_t code[] = {
+            0xdb, 0x07,            // fild dword ptr [rdi]
+            0xda, operation, 0x04, // ficom/ficomp dword ptr [rdi+4]
+            0xdf, 0xe0,            // fnstsw ax
+        };
+        memory.write(code_address, code);
+        cpu.reset(code_address, data_address + 0xff8);
+        cpu.set_reg(winemu::Rdi, data_address);
+        cpu.step();
+        cpu.step();
+        cpu.step();
+        return static_cast<std::uint16_t>(cpu.reg(winemu::Rax));
+    };
+    require((compare(0x57) & 0x4500) == 0x4000, "x87 FICOM m32int equal status");
+    require((compare(0x5f) & 0x7800) == 0x4000, "x87 FICOMP m32int status and pop");
+}
+
 void test_packed_float_conversions() {
     constexpr std::uint64_t code_address = 0x200000000ULL;
     constexpr std::uint64_t data_address = 0x300000000ULL;

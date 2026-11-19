@@ -769,6 +769,46 @@ void Cpu::step() {
             throw Error("unsupported x87 D9 memory instruction");
         }
     }
+    case 0xda: {
+        const auto decoded = decode_rm(rex);
+        if (decoded.rm.is_register) {
+            throw Error("unsupported x87 DA register instruction");
+        }
+        if (x87_depth_ == 0) {
+            throw Error("x87 stack underflow");
+        }
+        const auto operation = decoded.reg & 7;
+        const auto operand =
+            static_cast<long double>(static_cast<std::int32_t>(memory_.read32(decoded.rm.address)));
+        switch (operation) {
+        case 0: // FIADD m32int
+            x87_[0] += operand;
+            return;
+        case 1: // FIMUL m32int
+            x87_[0] *= operand;
+            return;
+        case 2: // FICOM m32int
+        case 3: // FICOMP m32int
+            x87_compare(x87_[0], operand);
+            if (operation == 3) {
+                x87_pop();
+            }
+            return;
+        case 4: // FISUB m32int
+            x87_[0] -= operand;
+            return;
+        case 5: // FISUBR m32int
+            x87_[0] = operand - x87_[0];
+            return;
+        case 6: // FIDIV m32int
+            x87_[0] /= operand;
+            return;
+        case 7: // FIDIVR m32int
+            x87_[0] = operand / x87_[0];
+            return;
+        }
+        throw Error("invalid x87 DA operation");
+    }
     case 0xdb: {
         const auto decoded = decode_rm(rex);
         if (decoded.rm.is_register &&

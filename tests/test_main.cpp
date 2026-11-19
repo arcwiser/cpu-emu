@@ -18,6 +18,7 @@ int main() {
         test_x87_comparison_status();
         test_x87_rounding();
         test_x87_register_arithmetic();
+        test_x87_integer_arithmetic();
         test_packed_float_conversions();
         test_sse_square_roots();
         test_packed_logical_operations();

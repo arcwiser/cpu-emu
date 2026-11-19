@@ -4,6 +4,14 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-19 — Complete x87 signed-m32 integer arithmetic family
+
+- Implemented all `DA /0`–`/7` memory forms: `FIADD`, `FIMUL`, `FICOM`, `FICOMP`, `FISUB`,
+  `FISUBR`, `FIDIV`, and `FIDIVR` with signed 32-bit integer operands.
+- Added exact arithmetic, comparison-condition, and pop/TOP regressions. Undertale's OpenAL worker
+  passed the observed `FIDIV m32int`, continued polling the DirectSound buffer, and exposed the
+  general missing `FPATAN` form next. Audible output remains unverified.
+
 ## 2026-11-19 — First independent cooperative guest threads
 
 - Added independent interpreted CPU and stack contexts for `CreateThread`, `_beginthreadex`, and

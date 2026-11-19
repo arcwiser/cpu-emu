@@ -17,6 +17,7 @@ void test_x87_square_root();
 void test_x87_comparison_status();
 void test_x87_rounding();
 void test_x87_register_arithmetic();
+void test_x87_integer_arithmetic();
 void test_packed_float_conversions();
 void test_sse_square_roots();
 void test_packed_logical_operations();

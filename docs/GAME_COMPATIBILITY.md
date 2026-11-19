@@ -50,7 +50,7 @@ reproducible blocker.
 | Visible window | ✅ | Live inspection on 2026-11-19 verified the real UNDERTALE title logo rendered in the CPUEmu-owned window |
 | Input discovery | ✅ | Guest-owned inert DirectInput proxy completes optional discovery |
 | Direct3D 9Ex | 🚧 | Adapter/device creation, PE32-safe structure marshaling, texture/surface and vertex/index-buffer proxies, checked staging locks, D3DX decoding, cross-pool uploads, `DrawPrimitive`, and `Present` render the title; broader surface, shader, indexed-draw, reset, and swap-chain paths remain |
-| Audio | 🚧 | Guest-owned DirectSound device/buffer proxies create, format, lock, upload, and start buffers; Undertale's OpenAL worker now runs cooperatively and repeatedly queries buffer positions, but its next path needs x87 `FIDIV m32int` and audible output remains unverified |
+| Audio | 🚧 | Guest-owned DirectSound device/buffer proxies create, format, lock, upload, and start buffers; Undertale's OpenAL worker now runs cooperatively and repeatedly queries buffer positions, passes x87 signed-integer division, and next needs `FPATAN`; audible output remains unverified |
 | Playable | ○ | Requires rendering, input, audio, persistence, and sustained loop |
 
 ## Audio status
