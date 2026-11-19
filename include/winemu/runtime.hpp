@@ -180,6 +180,14 @@ class Runtime {
     std::uint64_t direct3d_texture9_vtable_ = 0;
     std::unordered_map<std::uint64_t, Direct3DTexture9Object> direct3d_texture9_objects_;
     std::unordered_map<std::uint64_t, std::uint32_t> direct3d_texture9_methods_;
+    struct Direct3DSurface9Object {
+        void *host;
+        std::uint32_t references;
+        std::uint64_t texture;
+    };
+    std::uint64_t direct3d_surface9_vtable_ = 0;
+    std::unordered_map<std::uint64_t, Direct3DSurface9Object> direct3d_surface9_objects_;
+    std::unordered_map<std::uint64_t, std::uint32_t> direct3d_surface9_methods_;
     struct Direct3DBuffer9Object {
         void *host;
         std::uint32_t references;

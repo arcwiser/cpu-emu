@@ -35,7 +35,7 @@ reproducible blocker.
 | Classic Notepad (`System32\notepad.exe` 10.0.26100.8457) | 🟡 Starts | CPUEmu-owned editor window renders; typing and menus work; file open, Save, and Save As work for tested paths; UTF-8 Unicode text and a 52,138-character document save and reopen exactly | Edited-content Save As, UTF-16/legacy encodings, long interactive sessions, and broader editor behavior remain unverified |
 | Modern packaged Notepad 11.2607.14.0 | 🔴 Blocked | Creates and uses a guest-owned WinRT application instance | XAML resource lookup reaches an unimplemented interface method, then requires guest exception unwinding; no window |
 | About Windows (`winver.exe`) | 🟡 Starts | Creates and displays the genuine Microsoft version dialog through CPUEmu | Modal dialog probe only; does not exercise a sustained app loop |
-| Undertale (Windows, PE32) | 🟠 Graphics/audio bring-up | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates and shows the `YYGameMakerYY` native window, initializes safe DirectInput and Direct3D proxies, creates a real host-backed device, applies initial render/sampler state, completes startup math, decodes textures, creates/locks/binds guest-owned graphics buffers, discovers its application-data folder, and creates/starts primary and secondary DirectSound buffers | The 2026-11-18 probe sustains execution to the 100,000,000-instruction limit. OpenAL initialization reports error 40964 because its persistent worker thread cannot yet run; a verified rendered game frame, draw/presentation, active input/audio, persistence, and full Steamworks interfaces remain |
+| Undertale (Windows, PE32) | 🟡 Title renders | Fixed-base image loads, all 313 imports resolve, parses `data.win`, creates the `YYGameMakerYY` window, initializes guest-owned DirectInput/Direct3D/DirectSound proxies, decodes and uploads textures, draws/presents frames, and visibly renders the UNDERTALE title logo | The 2026-11-19 live probe verified the title frame, then a longer run reached unsupported `GetUserDefaultLCID` after 897,619,440 instructions. The window still reports “Not Responding”; title input could not be verified; OpenAL worker-thread audio, sustained interaction, persistence, and full Steamworks interfaces remain |
 | Discord / Chromium | 🔴 Blocked | Loads the installed x64 image and advances through more than 2.6 million V8 startup instructions | Blocked by guest threads/processes, DLL loading, exceptions, mapped sections, and broader SIMD support |
 
 ## Undertale subsystem board
@@ -47,9 +47,9 @@ reproducible blocker.
 | Files and game data | ✅ | Opens and parses adjacent `data.win`; probes config/save paths |
 | Steam startup | ⚠️ | Safe offline failure path; not the current startup blocker |
 | Window class/callback | ✅ | Registers `YYGameMakerYY`; interpreted `WM_NCCREATE`/`WM_CREATE` run |
-| Visible window | 🚧 | GameMaker calls `ShowWindow` and `UpdateWindow` on its native HWND; a visible rendered game frame has not yet been verified |
+| Visible window | ✅ | Live inspection on 2026-11-19 verified the real UNDERTALE title logo rendered in the CPUEmu-owned window |
 | Input discovery | ✅ | Guest-owned inert DirectInput proxy completes optional discovery |
-| Direct3D 9Ex | 🚧 | Adapter/device creation, PE32-safe structure marshaling, texture and vertex/index-buffer creation/binding, checked buffer/texture staging locks, D3DX decoding, `DrawPrimitive`, and `Present` are adapted; Undertale's window is still blank and repeated `GetSurfaceLevel` calls remain unsupported |
+| Direct3D 9Ex | 🚧 | Adapter/device creation, PE32-safe structure marshaling, texture/surface and vertex/index-buffer proxies, checked staging locks, D3DX decoding, cross-pool uploads, `DrawPrimitive`, and `Present` render the title; broader surface, shader, indexed-draw, reset, and swap-chain paths remain |
 | Audio | 🚧 | Guest-owned DirectSound device/buffer proxies create, format, lock, upload, and start buffers; Undertale's OpenAL context/source initialization still fails because persistent guest worker threads are not scheduled |
 | Playable | ○ | Requires rendering, input, audio, persistence, and sustained loop |
 

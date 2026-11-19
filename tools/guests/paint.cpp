@@ -835,6 +835,43 @@ int run_sync_selftest() {
                 }
                 check(FAILED(texture->LockRect(0, nullptr, nullptr, 0)),
                       "sync selftest: reject null Direct3D texture lock output");
+                IDirect3DSurface9 *surface = nullptr;
+                check(SUCCEEDED(texture->GetSurfaceLevel(0, &surface)) && surface != nullptr,
+                      "sync selftest: create guest-owned Direct3D surface proxy");
+                if (surface != nullptr) {
+                    D3DSURFACE_DESC surface_description{};
+                    check(SUCCEEDED(surface->GetDesc(&surface_description)) &&
+                              surface_description.Width == 4 && surface_description.Height == 4,
+                          "sync selftest: query Direct3D surface description");
+                    IDirect3DDevice9 *surface_device = nullptr;
+                    check(SUCCEEDED(surface->GetDevice(&surface_device)) &&
+                              surface_device == base_device,
+                          "sync selftest: retain Direct3D surface device owner");
+                    if (surface_device != nullptr) {
+                        surface_device->Release();
+                    }
+                    IDirect3DTexture9 *surface_texture = nullptr;
+                    check(SUCCEEDED(
+                              surface->GetContainer(__uuidof(IDirect3DTexture9),
+                                                    reinterpret_cast<void **>(&surface_texture))) &&
+                              surface_texture == texture,
+                          "sync selftest: retain Direct3D surface texture owner");
+                    if (surface_texture != nullptr) {
+                        surface_texture->Release();
+                    }
+                    IDirect3DSurface9 *queried_surface = nullptr;
+                    check(SUCCEEDED(surface->QueryInterface(
+                              __uuidof(IDirect3DSurface9),
+                              reinterpret_cast<void **>(&queried_surface))) &&
+                              queried_surface == surface,
+                          "sync selftest: Direct3D surface QueryInterface lifetime");
+                    if (queried_surface != nullptr) {
+                        queried_surface->Release();
+                    }
+                    surface->Release();
+                }
+                check(FAILED(texture->GetSurfaceLevel(0, nullptr)),
+                      "sync selftest: reject null Direct3D surface output");
                 IDirect3DDevice9 *texture_device = nullptr;
                 check(SUCCEEDED(texture->GetDevice(&texture_device)) &&
                           texture_device == base_device,
@@ -859,6 +896,37 @@ int run_sync_selftest() {
             check(FAILED(base_device->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
                                                     nullptr, nullptr)),
                   "sync selftest: reject null Direct3D texture output");
+            IDirect3DTexture9 *upload_source = nullptr;
+            IDirect3DTexture9 *upload_destination = nullptr;
+            check(SUCCEEDED(base_device->CreateTexture(
+                      4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &upload_source, nullptr)) &&
+                      SUCCEEDED(base_device->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8,
+                                                           D3DPOOL_DEFAULT, &upload_destination,
+                                                           nullptr)) &&
+                      upload_source != nullptr && upload_destination != nullptr,
+                  "sync selftest: create Direct3D texture upload pair");
+            if (upload_source != nullptr && upload_destination != nullptr) {
+                D3DLOCKED_RECT upload_lock{};
+                check(SUCCEEDED(upload_source->LockRect(0, &upload_lock, nullptr, 0)) &&
+                          upload_lock.pBits != nullptr,
+                      "sync selftest: stage Direct3D texture update source");
+                if (upload_lock.pBits != nullptr) {
+                    auto *pixels = static_cast<std::uint8_t *>(upload_lock.pBits);
+                    for (UINT row = 0; row < 4; ++row) {
+                        std::memset(pixels + upload_lock.Pitch * row, 0x3c, 16);
+                    }
+                    check(SUCCEEDED(upload_source->UnlockRect(0)) &&
+                              SUCCEEDED(
+                                  base_device->UpdateTexture(upload_source, upload_destination)),
+                          "sync selftest: upload Direct3D texture between pools");
+                }
+            }
+            if (upload_source != nullptr) {
+                upload_source->Release();
+            }
+            if (upload_destination != nullptr) {
+                upload_destination->Release();
+            }
             IDirect3DVertexBuffer9 *vertex_buffer = nullptr;
             check(SUCCEEDED(base_device->CreateVertexBuffer(64, 0, D3DFVF_XYZ, D3DPOOL_DEFAULT,
                                                             &vertex_buffer, nullptr)) &&

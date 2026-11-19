@@ -235,6 +235,33 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             Direct3DTexture9Object{host_texture, 1, guest_device, 0, 0, nullptr, 0, 0, 0, 0, 0});
         return guest_texture;
     };
+    const auto wrap_direct3d_surface = [&](IDirect3DSurface9 *host_surface,
+                                           std::uint64_t guest_texture) {
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        if (direct3d_surface9_vtable_ == 0) {
+            constexpr std::uint32_t method_count = 17;
+            direct3d_surface9_vtable_ = allocate(method_count * pointer_size);
+            for (std::uint32_t method = 0; method < method_count; ++method) {
+                const auto thunk = next_thunk_;
+                next_thunk_ += 0x100;
+                thunks_.emplace(thunk, Api::Direct3DSurface9Method);
+                thunk_names_.emplace(thunk, "IDirect3DSurface9#" + std::to_string(method));
+                direct3d_surface9_methods_.emplace(thunk, method);
+                write_guest_pointer(direct3d_surface9_vtable_ + method * pointer_size, thunk);
+            }
+        }
+        auto texture = direct3d_texture9_objects_.find(guest_texture);
+        if (texture == direct3d_texture9_objects_.end()) {
+            throw Error("Direct3D surface has no guest texture owner");
+        }
+        const auto guest_surface = allocate(pointer_size);
+        write_guest_pointer(guest_surface, direct3d_surface9_vtable_);
+        static_cast<IDirect3DTexture9 *>(texture->second.host)->AddRef();
+        ++texture->second.references;
+        direct3d_surface9_objects_.emplace(guest_surface,
+                                           Direct3DSurface9Object{host_surface, 1, guest_texture});
+        return guest_surface;
+    };
     const auto wrap_direct3d_buffer = [&](void *host_buffer, std::uint64_t guest_device,
                                           std::uint32_t length, bool index) {
         const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
@@ -4876,6 +4903,21 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 destination_pointer == 0 ? nullptr : &destination, window, nullptr));
             break;
         }
+        case 19: {
+            const auto output = argument(2);
+            if (output == 0 || !cpu.memory().contains(output, sizeof(D3DRASTER_STATUS))) {
+                result = invalid_argument;
+                break;
+            }
+            D3DRASTER_STATUS status{};
+            result = static_cast<std::uint32_t>(
+                host_device->GetRasterStatus(static_cast<UINT>(argument(1)), &status));
+            if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                const auto *bytes = reinterpret_cast<const std::uint8_t *>(&status);
+                cpu.memory().write(output, {bytes, sizeof(status)});
+            }
+            break;
+        }
         case 20:
             result = static_cast<std::uint32_t>(
                 host_device->SetDialogBoxMode(static_cast<BOOL>(argument(1))));
@@ -4934,6 +4976,19 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                     host_buffer->Release();
                 }
             }
+            break;
+        }
+        case 31: {
+            const auto source = direct3d_texture9_objects_.find(argument(1));
+            const auto destination = direct3d_texture9_objects_.find(argument(2));
+            if (source == direct3d_texture9_objects_.end() ||
+                destination == direct3d_texture9_objects_.end()) {
+                result = invalid_argument;
+                break;
+            }
+            result = static_cast<std::uint32_t>(host_device->UpdateTexture(
+                static_cast<IDirect3DTexture9 *>(source->second.host),
+                static_cast<IDirect3DTexture9 *>(destination->second.host)));
             break;
         }
         case 41:
@@ -5237,6 +5292,14 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 result = invalid_argument;
             } else {
                 write_guest_pointer(output, 0);
+                IDirect3DSurface9 *host_surface = nullptr;
+                result = static_cast<std::uint32_t>(
+                    host_texture->GetSurfaceLevel(static_cast<UINT>(argument(1)), &host_surface));
+                if (SUCCEEDED(static_cast<HRESULT>(result)) && host_surface != nullptr) {
+                    write_guest_pointer(output, wrap_direct3d_surface(host_surface, guest_texture));
+                } else if (host_surface != nullptr) {
+                    host_surface->Release();
+                }
             }
             break;
         }
@@ -5424,6 +5487,151 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 rectangle_pointer = &rectangle;
             }
             result = static_cast<std::uint32_t>(host_texture->AddDirtyRect(rectangle_pointer));
+            break;
+        }
+        default:
+            break;
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(argument_counts[method]);
+        break;
+    }
+    case Api::Direct3DSurface9Method: {
+        constexpr std::uint32_t invalid_argument = 0x80070057U;
+        constexpr std::uint32_t no_interface = 0x80004002U;
+        constexpr std::uint32_t not_available = 0x8876086aU;
+        static constexpr unsigned argument_counts[] = {3, 1, 1, 2, 5, 4, 2, 2, 1,
+                                                       1, 1, 3, 2, 4, 1, 2, 2};
+        static_assert(std::size(argument_counts) == 17);
+        const auto method = direct3d_surface9_methods_.at(cpu.rip());
+        const auto pointer_size = guest_is_64_bit_ ? 8U : 4U;
+        const auto guest_surface = argument(0);
+        auto object = direct3d_surface9_objects_.find(guest_surface);
+        if (object == direct3d_surface9_objects_.end()) {
+            cpu.set_reg(Rax, invalid_argument);
+            finish_call(argument_counts[method]);
+            break;
+        }
+        auto *host_surface = static_cast<IDirect3DSurface9 *>(object->second.host);
+        std::uint64_t result = not_available;
+        switch (method) {
+        case 0: {
+            const auto iid_address = argument(1);
+            const auto output = argument(2);
+            if (iid_address == 0 || output == 0 ||
+                !cpu.memory().contains(iid_address, sizeof(GUID)) ||
+                !cpu.memory().contains(output, pointer_size)) {
+                result = invalid_argument;
+                break;
+            }
+            write_guest_pointer(output, 0);
+            GUID iid{};
+            const auto bytes = cpu.memory().read(iid_address, sizeof(iid));
+            std::memcpy(&iid, bytes.data(), bytes.size());
+            if (!IsEqualGUID(iid, IID_IUnknown) && !IsEqualGUID(iid, IID_IDirect3DResource9) &&
+                !IsEqualGUID(iid, IID_IDirect3DSurface9)) {
+                result = no_interface;
+                break;
+            }
+            host_surface->AddRef();
+            ++object->second.references;
+            write_guest_pointer(output, guest_surface);
+            result = 0;
+            break;
+        }
+        case 1:
+            host_surface->AddRef();
+            result = ++object->second.references;
+            break;
+        case 2: {
+            result = host_surface->Release();
+            if (--object->second.references == 0) {
+                if (auto texture = direct3d_texture9_objects_.find(object->second.texture);
+                    texture != direct3d_texture9_objects_.end()) {
+                    auto *host_texture = static_cast<IDirect3DTexture9 *>(texture->second.host);
+                    if (texture->second.references == 1 && texture->second.host_locked != nullptr) {
+                        host_texture->UnlockRect(texture->second.locked_level);
+                        texture->second.host_locked = nullptr;
+                    }
+                    host_texture->Release();
+                    if (--texture->second.references == 0) {
+                        direct3d_texture9_objects_.erase(texture);
+                    }
+                }
+                direct3d_surface9_objects_.erase(object);
+            }
+            break;
+        }
+        case 3: {
+            const auto output = argument(1);
+            auto texture = direct3d_texture9_objects_.find(object->second.texture);
+            auto device = texture == direct3d_texture9_objects_.end()
+                              ? direct3d_device9_objects_.end()
+                              : direct3d_device9_objects_.find(texture->second.device);
+            if (output == 0 || !cpu.memory().contains(output, pointer_size) ||
+                device == direct3d_device9_objects_.end()) {
+                result = invalid_argument;
+                break;
+            }
+            auto *host_device = static_cast<IDirect3DDevice9 *>(device->second.host);
+            host_device->AddRef();
+            ++device->second.references;
+            write_guest_pointer(output, device->first);
+            result = 0;
+            break;
+        }
+        case 7:
+            result = host_surface->SetPriority(static_cast<DWORD>(argument(1)));
+            break;
+        case 8:
+            result = host_surface->GetPriority();
+            break;
+        case 9:
+            host_surface->PreLoad();
+            result = 0;
+            break;
+        case 10:
+            result = host_surface->GetType();
+            break;
+        case 11: {
+            const auto iid_address = argument(1);
+            const auto output = argument(2);
+            auto texture = direct3d_texture9_objects_.find(object->second.texture);
+            if (iid_address == 0 || output == 0 ||
+                !cpu.memory().contains(iid_address, sizeof(GUID)) ||
+                !cpu.memory().contains(output, pointer_size) ||
+                texture == direct3d_texture9_objects_.end()) {
+                result = invalid_argument;
+                break;
+            }
+            write_guest_pointer(output, 0);
+            GUID iid{};
+            const auto bytes = cpu.memory().read(iid_address, sizeof(iid));
+            std::memcpy(&iid, bytes.data(), bytes.size());
+            if (!IsEqualGUID(iid, IID_IUnknown) && !IsEqualGUID(iid, IID_IDirect3DResource9) &&
+                !IsEqualGUID(iid, IID_IDirect3DBaseTexture9) &&
+                !IsEqualGUID(iid, IID_IDirect3DTexture9)) {
+                result = no_interface;
+                break;
+            }
+            static_cast<IDirect3DTexture9 *>(texture->second.host)->AddRef();
+            ++texture->second.references;
+            write_guest_pointer(output, texture->first);
+            result = 0;
+            break;
+        }
+        case 12: {
+            const auto output = argument(1);
+            if (output == 0 || !cpu.memory().contains(output, sizeof(D3DSURFACE_DESC))) {
+                result = invalid_argument;
+                break;
+            }
+            D3DSURFACE_DESC description{};
+            result = static_cast<std::uint32_t>(host_surface->GetDesc(&description));
+            if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                const auto *bytes = reinterpret_cast<const std::uint8_t *>(&description);
+                cpu.memory().write(output, {bytes, sizeof(description)});
+            }
             break;
         }
         default:

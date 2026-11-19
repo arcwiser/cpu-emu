@@ -42,6 +42,13 @@ Runtime::~Runtime() {
             host->Release();
         }
     }
+    for (const auto &[guest_object, object] : direct3d_surface9_objects_) {
+        static_cast<void>(guest_object);
+        auto *host = static_cast<IDirect3DSurface9 *>(object.host);
+        for (std::uint32_t reference = 0; reference < object.references; ++reference) {
+            host->Release();
+        }
+    }
     for (const auto &[guest_object, object] : direct3d_buffer9_objects_) {
         static_cast<void>(guest_object);
         auto *host = static_cast<IDirect3DResource9 *>(object.host);

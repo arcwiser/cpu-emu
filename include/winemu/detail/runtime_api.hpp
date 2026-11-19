@@ -168,6 +168,7 @@ enum class RuntimeApi {
     Direct3D9ExMethod,
     Direct3DDevice9Method,
     Direct3DTexture9Method,
+    Direct3DSurface9Method,
     Direct3DBuffer9Method,
     DirectInputCreate,
     DirectInputMethod,

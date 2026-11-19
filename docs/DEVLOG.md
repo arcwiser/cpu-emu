@@ -808,6 +808,22 @@ development.
   real texture upload now succeeds; repeated `GetSurfaceLevel` calls remain the next observed
   graphics gap, and visible rendering is not yet verified.
 
+## 2026-11-19 — first verified Undertale frame
+
+- Added a guest-owned 17-slot `IDirect3DSurface9` proxy returned by `GetSurfaceLevel`, including
+  COM/resource identity, parent texture/device retention, descriptions, and deterministic teardown.
+  Native surface pointers and vtables never enter guest memory.
+- Added `IDirect3DDevice9::UpdateTexture` between validated guest texture proxies and bounded
+  `GetRasterStatus` output marshaling. The Paint fixture covers surface metadata/container/device
+  identity, COM lifetime, invalid output, a staged system-memory texture, and upload into a
+  default-pool texture.
+- Live inspection verified the real UNDERTALE title logo rendered in the CPUEmu-owned window. This
+  is the first verified game frame, not a playability claim: the window still reports “Not
+  Responding,” a `Z` input attempt was inconclusive, and audio still lacks a persistent guest
+  worker thread.
+- A longer probe advanced to 897,619,440 instructions and stopped at unsupported
+  `GetUserDefaultLCID`, establishing the next general startup/runtime adapter gap.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,
