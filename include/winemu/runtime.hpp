@@ -114,7 +114,11 @@ class Runtime {
         std::uint64_t handle;
         std::uint32_t id;
         std::uint32_t exit_code = 0;
+        std::int32_t priority = 0;
         bool completed = false;
+        bool waiting = false;
+        void *wait_handle = nullptr;
+        std::uint64_t wait_deadline = 0;
     };
     std::deque<GuestThread> guest_threads_;
     std::unordered_map<std::uint64_t, std::size_t> guest_thread_handles_;
@@ -123,6 +127,10 @@ class Runtime {
     std::uint32_t active_guest_thread_id_ = 1;
     std::uint64_t next_thread_stack_top_ = 0;
     std::uint64_t thread_return_thunk_ = 0;
+    std::int32_t main_thread_priority_ = 0;
+    bool main_thread_waiting_ = false;
+    void *main_thread_wait_handle_ = nullptr;
+    std::uint64_t main_thread_wait_deadline_ = 0;
     std::uint64_t host_gdiplus_token_ = 0;
     std::filesystem::path guest_executable_;
     void *resource_module_ = nullptr;

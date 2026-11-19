@@ -850,15 +850,30 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                                  : 0);
         } else if (thunk_name.ends_with("!WaitForSingleObject") ||
                    thunk_name.ends_with("!WaitForSingleObjectEx")) {
-            const auto result =
-                thunk_name.ends_with("Ex")
-                    ? ::WaitForSingleObjectEx(host_handle, static_cast<DWORD>(argument(1)),
-                                              argument(2) != 0)
-                    : ::WaitForSingleObject(host_handle, static_cast<DWORD>(argument(1)));
+            const auto timeout = static_cast<DWORD>(argument(1));
+            const auto result = ::WaitForSingleObject(host_handle, 0);
             if (result == WAIT_FAILED) {
                 last_error_ = ::GetLastError();
             }
             cpu.set_reg(Rax, result);
+            if (result == WAIT_TIMEOUT && timeout != 0) {
+                const auto deadline =
+                    timeout == INFINITE ? UINT64_MAX : ::GetTickCount64() + timeout;
+                if (active_guest_thread_id_ == 1) {
+                    main_thread_waiting_ = true;
+                    main_thread_wait_handle_ = host_handle;
+                    main_thread_wait_deadline_ = deadline;
+                } else {
+                    for (auto &thread : guest_threads_) {
+                        if (thread.id == active_guest_thread_id_) {
+                            thread.waiting = true;
+                            thread.wait_handle = host_handle;
+                            thread.wait_deadline = deadline;
+                            break;
+                        }
+                    }
+                }
+            }
         } else if (thunk_name.ends_with("!ReleaseSemaphore")) {
             LONG previous = 0;
             const auto result = ::ReleaseSemaphore(host_handle, static_cast<LONG>(argument(1)),
@@ -1029,6 +1044,45 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         cpu.set_reg(Rax, active_guest_thread_id_);
         finish_call();
         break;
+    case Api::GuestThreadPriority: {
+        const auto handle = argument(0);
+        const auto current_thread = static_cast<std::uint32_t>(handle) == 0xfffffffeU;
+        GuestThread *thread = nullptr;
+        if (!current_thread) {
+            const auto found_thread = guest_thread_handles_.find(handle);
+            if (found_thread != guest_thread_handles_.end()) {
+                thread = &guest_threads_[found_thread->second];
+            }
+        }
+        if (!current_thread && thread == nullptr) {
+            last_error_ = ERROR_INVALID_HANDLE;
+            cpu.set_reg(
+                Rax, thunk_name.ends_with("!GetThreadPriority") ? THREAD_PRIORITY_ERROR_RETURN : 0);
+        } else if (thunk_name.ends_with("!GetThreadPriority")) {
+            cpu.set_reg(Rax, static_cast<std::uint32_t>(current_thread ? main_thread_priority_
+                                                                       : thread->priority));
+        } else {
+            const auto priority = static_cast<std::int32_t>(argument(1));
+            const auto valid =
+                priority == THREAD_PRIORITY_IDLE || priority == THREAD_PRIORITY_LOWEST ||
+                priority == THREAD_PRIORITY_BELOW_NORMAL || priority == THREAD_PRIORITY_NORMAL ||
+                priority == THREAD_PRIORITY_ABOVE_NORMAL || priority == THREAD_PRIORITY_HIGHEST ||
+                priority == THREAD_PRIORITY_TIME_CRITICAL;
+            if (!valid) {
+                last_error_ = ERROR_INVALID_PARAMETER;
+                cpu.set_reg(Rax, 0);
+            } else {
+                if (current_thread) {
+                    main_thread_priority_ = priority;
+                } else {
+                    thread->priority = priority;
+                }
+                cpu.set_reg(Rax, 1);
+            }
+        }
+        finish_call(thunk_name.ends_with("!GetThreadPriority") ? 1 : 2);
+        break;
+    }
     case Api::StartupInfo: {
         const auto destination = argument(0);
         STARTUPINFOW native{};
@@ -3214,7 +3268,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         const auto handle = next_guest_thread_handle_++;
         const auto thread_id = next_guest_thread_id_++;
         guest_thread_handles_.emplace(handle, guest_threads_.size());
-        guest_threads_.push_back({std::move(thread_cpu), handle, thread_id, 0, false});
+        guest_threads_.push_back({std::move(thread_cpu), handle, thread_id});
         if (id_output != 0) {
             cpu.memory().write32(id_output, thread_id);
         }

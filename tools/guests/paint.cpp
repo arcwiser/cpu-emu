@@ -653,6 +653,13 @@ int run_sync_selftest() {
                        &rejected_thread_id) == nullptr &&
               GetLastError() == ERROR_INVALID_PARAMETER,
           "sync selftest: reject invalid guest thread entry");
+    check(SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL) != FALSE &&
+              GetThreadPriority(GetCurrentThread()) == THREAD_PRIORITY_ABOVE_NORMAL,
+          "sync selftest: retain guest current-thread priority");
+    SetLastError(ERROR_SUCCESS);
+    check(SetThreadPriority(reinterpret_cast<HANDLE>(0x1234), THREAD_PRIORITY_NORMAL) == FALSE &&
+              GetLastError() == ERROR_INVALID_HANDLE,
+          "sync selftest: reject unknown guest thread handle");
 
     IDirect3D9Ex *direct3d = nullptr;
     const HRESULT direct3d_result = Direct3DCreate9Ex(D3D_SDK_VERSION, &direct3d);

@@ -39,6 +39,7 @@ enum class RuntimeApi {
     IsDebuggerPresent,
     GetCurrentProcessId,
     GetCurrentThreadId,
+    GuestThreadPriority,
     StartupInfo,
     CriticalSectionInitialize,
     CriticalSectionOperation,

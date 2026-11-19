@@ -151,6 +151,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GetCurrentProcessId;
     } else if (kernel_module && name == "GetCurrentThreadId") {
         api = Api::GetCurrentThreadId;
+    } else if (kernel_module && (name == "SetThreadPriority" || name == "GetThreadPriority")) {
+        api = Api::GuestThreadPriority;
     } else if (kernel_module && (name == "GetStartupInfoA" || name == "GetStartupInfoW")) {
         api = Api::StartupInfo;
     } else if (kernel_module && (name == "InitializeCriticalSection" ||

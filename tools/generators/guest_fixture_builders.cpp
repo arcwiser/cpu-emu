@@ -3,6 +3,7 @@
 #include "pe_fixture_writer.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -212,17 +213,18 @@ void make_schedule_chore(const std::filesystem::path &path) {
     write_pe(path, section, imports_rva, 40, iat_rva, 16);
 }
 
-// Builds a guest whose main thread spins while an independently scheduled CreateThread worker
-// writes shared memory. A synchronous callback adapter cannot pass this regression.
+// Builds a guest whose independently scheduled worker suspends on an event while the main thread
+// continues, signals it, and observes the worker's shared-memory write.
 void make_guest_thread(const std::filesystem::path &path) {
     constexpr std::uint32_t worker_rva = 0x1100;
     constexpr std::uint32_t shared_rva = 0x1120;
     constexpr std::uint32_t thread_id_rva = 0x1124;
+    constexpr std::uint32_t event_rva = 0x1128;
     constexpr std::uint32_t imports_rva = 0x1180;
     constexpr std::uint32_t dll_rva = 0x11c0;
     constexpr std::uint32_t int_rva = 0x11e0;
-    constexpr std::uint32_t iat_rva = 0x11f0;
-    constexpr std::uint32_t name_rva = 0x1200;
+    constexpr std::uint32_t iat_rva = 0x1210;
+    constexpr std::array<std::uint32_t, 4> name_rvas{0x1240, 0x1260, 0x1280, 0x1290};
 
     std::vector<std::uint8_t> section(0x400);
     std::vector<std::uint8_t> code;
@@ -247,16 +249,30 @@ void make_guest_thread(const std::filesystem::path &path) {
         put32(code, displacement, static_cast<std::uint32_t>(relative));
     };
 
-    emit({0x48, 0x83, 0xec, 0x38});                       // sub rsp,0x38
+    emit({0x48, 0x83, 0xec, 0x38});                   // sub rsp,0x38
+    emit({0x31, 0xc9, 0x31, 0xd2, 0x45, 0x31, 0xc0}); // null attrs/name, flags=0
+    emit({0x41, 0xb9, 0x03, 0x00, 0x1f, 0x00});       // EVENT_ALL_ACCESS
+    emit_rip_relative({0xff, 0x15}, iat_rva);         // call CreateEventExW
+    emit({0x48, 0x85, 0xc0});                         // test rax,rax
+    const auto event_failed = emit_near_jump({0x0f, 0x84});
+    emit_rip_relative({0x48, 0x89, 0x05}, event_rva);     // mov [event],rax
     emit({0x31, 0xc9, 0x31, 0xd2});                       // xor ecx,ecx; xor edx,edx
     emit_rip_relative({0x4c, 0x8d, 0x05}, worker_rva);    // lea r8,[worker]
     emit_rip_relative({0x4c, 0x8d, 0x0d}, shared_rva);    // lea r9,[shared]
     emit({0xc7, 0x44, 0x24, 0x20, 0, 0, 0, 0});           // flags = 0
     emit_rip_relative({0x48, 0x8d, 0x05}, thread_id_rva); // lea rax,[thread id]
     emit({0x48, 0x89, 0x44, 0x24, 0x28});                 // thread-id output
-    emit_rip_relative({0xff, 0x15}, iat_rva);             // call CreateThread
+    emit_rip_relative({0xff, 0x15}, iat_rva + 8);         // call CreateThread
     emit({0x48, 0x85, 0xc0});                             // test rax,rax
     const auto create_failed = emit_near_jump({0x0f, 0x84});
+    emit({0xb9, 0x00, 0x08, 0x00, 0x00}); // mov ecx,2048
+    const auto pre_signal_spin = code.size();
+    emit({0xff, 0xc9}); // dec ecx
+    const auto keep_pre_signal_spinning = emit_near_jump({0x0f, 0x85});
+    emit_rip_relative({0x48, 0x8b, 0x0d}, event_rva); // mov rcx,[event]
+    emit_rip_relative({0xff, 0x15}, iat_rva + 16);    // call SetEvent
+    emit({0x85, 0xc0});                               // test eax,eax
+    const auto signal_failed = emit_near_jump({0x0f, 0x84});
     emit({0xb9, 0x00, 0x00, 0x01, 0x00}); // mov ecx,65536
     const auto spin = code.size();
     emit({0x81, 0x3d}); // cmp [shared],0x1234
@@ -277,6 +293,9 @@ void make_guest_thread(const std::filesystem::path &path) {
     const auto epilogue = code.size();
     emit({0x48, 0x83, 0xc4, 0x38, 0xc3}); // add rsp,0x38; ret
     patch_jump(create_failed, fail);
+    patch_jump(event_failed, fail);
+    patch_jump(keep_pre_signal_spinning, pre_signal_spin);
+    patch_jump(signal_failed, fail);
     patch_jump(shared_written, success);
     patch_jump(keep_spinning, spin);
     patch_jump(finish, epilogue);
@@ -284,22 +303,34 @@ void make_guest_thread(const std::filesystem::path &path) {
     std::copy(code.begin(), code.end(), section.begin());
 
     const auto offset = [](std::uint32_t rva) { return rva - section_rva; };
-    const std::initializer_list<std::uint8_t> worker{
-        0xc7, 0x01, 0x34, 0x12, 0x00, 0x00, // mov dword ptr [rcx],0x1234
-        0xb8, 0x07, 0x00, 0x00, 0x00,       // mov eax,7
-        0xc3,                               // ret
-    };
+    std::vector<std::uint8_t> worker;
+    worker.insert(worker.end(), {0x53});                   // push rbx
+    worker.insert(worker.end(), {0x48, 0x83, 0xec, 0x20}); // sub rsp,0x20
+    worker.insert(worker.end(), {0x48, 0x89, 0xcb});       // mov rbx,rcx
+    worker.insert(worker.end(), {0x48, 0x8b, 0x0d});       // mov rcx,[event]
+    append32(worker, event_rva - (worker_rva + static_cast<std::uint32_t>(worker.size()) + 4));
+    worker.insert(worker.end(), {0xba, 0xff, 0xff, 0xff, 0xff}); // mov edx,INFINITE
+    worker.insert(worker.end(), {0xff, 0x15});                   // call WaitForSingleObject
+    append32(worker, iat_rva + 24 - (worker_rva + static_cast<std::uint32_t>(worker.size()) + 4));
+    worker.insert(worker.end(), {0x85, 0xc0, 0x75, 0x0b});             // test eax,eax; jne return
+    worker.insert(worker.end(), {0xc7, 0x03, 0x34, 0x12, 0, 0});       // mov [rbx],0x1234
+    worker.insert(worker.end(), {0xb8, 0x07, 0x00, 0x00, 0x00});       // mov eax,7
+    worker.insert(worker.end(), {0x48, 0x83, 0xc4, 0x20, 0x5b, 0xc3}); // epilogue
     std::copy(worker.begin(), worker.end(), section.begin() + offset(worker_rva));
     put32(section, offset(imports_rva), int_rva);
     put32(section, offset(imports_rva) + 12, dll_rva);
     put32(section, offset(imports_rva) + 16, iat_rva);
     const std::string dll = "KERNEL32.dll";
     std::copy(dll.begin(), dll.end(), section.begin() + offset(dll_rva));
-    const std::string import = "CreateThread";
-    put64(section, offset(int_rva), name_rva);
-    put64(section, offset(iat_rva), name_rva);
-    std::copy(import.begin(), import.end(), section.begin() + offset(name_rva) + 2);
-    write_pe(path, section, imports_rva, 40, iat_rva, 16);
+    const std::array<std::string, 4> imports{"CreateEventExW", "CreateThread", "SetEvent",
+                                             "WaitForSingleObject"};
+    for (std::size_t index = 0; index < imports.size(); ++index) {
+        put64(section, offset(int_rva) + index * 8, name_rvas[index]);
+        put64(section, offset(iat_rva) + index * 8, name_rvas[index]);
+        std::copy(imports[index].begin(), imports[index].end(),
+                  section.begin() + offset(name_rvas[index]) + 2);
+    }
+    write_pe(path, section, imports_rva, 40, iat_rva, 40);
 }
 
 // Imports GetErrorInfo by its documented OLEAUT32 ordinal and verifies that the no-error result

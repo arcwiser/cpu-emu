@@ -40,14 +40,14 @@ explicit adapter.
 | Errors and diagnostics | `GetLastError`, `SetLastError`, `OutputDebugStringA` | Per-runtime error state |
 | Virtual memory | `VirtualAlloc`, `VirtualFree`, `VirtualProtect`, `VirtualQuery` | No placeholders, write-watch, or full mapped-section semantics |
 | Heap and local/global memory | `malloc`, `free`, `realloc`, `HeapAlloc`, `HeapFree`, `HeapReAlloc`, `LocalAlloc`, `GlobalAlloc`, related size/lock calls | Checked 16-byte-aligned allocations come from bounded guest arenas; freed spans become inaccessible, reject double-free, and can be reused without exposing host pointers; heap handles remain simplified guest tokens |
-| Guest threads | `CreateThread`, `_beginthreadex`, `_beginthread`, independent interpreted CPU/stack contexts, guest IDs and opaque handles | Cooperative round-robin scheduling; suspended creation, per-thread TEB/TLS, nonblocking waits, termination, priorities, and thread-pool work remain |
+| Guest threads | `CreateThread`, `_beginthreadex`, `_beginthread`, independent interpreted CPU/stack contexts, guest IDs and opaque handles, guest-local `SetThreadPriority`/`GetThreadPriority` | Cooperative round-robin scheduling; suspended creation, per-thread TEB/TLS, termination, priority-weighted scheduling, and thread-pool work remain |
 | TLS/FLS | `TlsAlloc`, `TlsFree`, `TlsGetValue`, `TlsSetValue`, FLS equivalents | Values remain process-local until each scheduled thread has a distinct TEB/TLS block; FLS cleanup callbacks are not invoked |
 | Startup and environment | command line, environment blocks, CRT on-exit tables, static TLS initialization | Main thread only |
 | Locale discovery | `GetUserDefaultLCID`, `IsValidLocale`, and bounded `GetLocaleInfoA/W` size/output queries | Host user locale is exposed; callback enumeration and locale mutation are not adapted |
 | Module queries | module handles, module filename, selected `GetProcAddress`, delay imports | Loaded main image and emulated thunks; no general guest DLL loader |
 | Basic audio | `Beep`, `MessageBeep`, synchronous `PlaySoundA/W`, `sndPlaySoundA/W` | No retained guest buffers, asynchronous playback, loops, resource audio, or streaming APIs |
 | DirectSound | `DirectSoundCreate`, base `IDirectSound` lifetime/configuration, sound-buffer creation, capabilities, position/format/state queries, staged lock/unlock, playback controls, and lifetime | Interfaces and lock storage are guest-owned proxies; formats and audio bytes are bounded and copied, so native COM and lock pointers never cross the boundary. Persistent audio worker threads and notifications are not implemented yet |
-| Game-loop timing | `GetTickCount`, `GetTickCount64`, performance counter/frequency, `Sleep`, waitable-timer create/set/cancel/wait, `timeGetTime`, timer period begin/end | Host-clock backed; no virtual or deterministic clock; guest waitable-timer APC callbacks fail closed rather than running on a native timer thread |
+| Game-loop timing | `GetTickCount`, `GetTickCount64`, performance counter/frequency, `Sleep`, scheduler-aware `WaitForSingleObject`/`Ex`, waitable-timer create/set/cancel/wait, `timeGetTime`, timer period begin/end | Host-clock backed; single-handle waits suspend only the calling guest context; no virtual or deterministic clock, wait-all/any, or APC delivery |
 | Direct3D 9/9Ex | `Direct3DCreate9Ex`, adapter enumeration, display modes, format checks, capabilities, monitor/LUID queries, base `CreateDevice`, device texture/surface and vertex/index-buffer creation/binding, resource metadata/lifetime methods, buffer and texture lock/unlock, cross-pool `UpdateTexture`, scene begin/end, clear, `DrawPrimitive`, `Present`, and scalar render-state setters; `D3DXCreateTextureFromFileW` and `D3DXCreateTextureFromFileInMemoryEx` | Guest-owned parent/device/resource COM objects marshal PE32/PE32+ structures and retain their parent mappings; surface-level objects retain guest texture/device identity; buffer and texture locks use checked guest staging allocations and row-bounded copies, so native object and lock pointers never cross into guest memory; successful presentation touches the host queue with `PM_NOREMOVE` so slow interpreted frames do not trigger window ghosting while every message remains guest-owned; indexed/UP draws, shaders, surface locks, and explicit swap-chain methods still require adapters |
 | PE32 startup | stack-based stdcall arguments, low thunk/module handles, startup info, process/thread IDs, security cookie helpers, heap, TLS, and critical-section adapters | Adapter-by-adapter ABI audit remains in progress |
 
@@ -64,8 +64,7 @@ through `Runtime::invoke_guest`; they never cast a guest procedure to a native f
 The following families currently report failure or remain inert because native forwarding would
 escape emulation or retain unsafe guest state:
 
-- Remote-thread creation, work items, thread-pool callback objects, and scheduler-aware blocking
-  waits.
+- Remote-thread creation, work items, thread-pool callback objects, and multiple-object waits.
 - `CreateProcess*` and child-process creation.
 - Vectored exception handlers and native language exception callbacks.
 - General COM objects whose interface pointers and vtables have not been proxied into guest
@@ -95,9 +94,10 @@ Position queries construct the complete 24-byte MSVC `streampos` value, and seek
 `fpos_t` offset field. Short input reads update the associated guest `basic_ios` EOF/fail state.
 MSVC PPL chores re-enter the interpreter cooperatively; they are never handed to the native thread
 pool. `CreateThread` and CRT thread entry points receive independent interpreted register and stack
-state under a round-robin scheduler. This is concurrency, not host-parallel execution, and blocking
-waits still need scheduler suspension rather than blocking the interpreter. Unimplemented C++
-object methods must fail closed rather than invoking host STL code against a guest object layout.
+state under a round-robin scheduler. Single-object waits suspend only their calling guest context
+and are polled by the scheduler. This is concurrency, not host-parallel execution. Unimplemented
+C++ object methods must fail closed rather than invoking host STL code against a guest object
+layout.
 
 OLEAUT error-info outputs and WinRT `PropertyValue` scalars are guest-owned. Native COM interface
 pointers must never be written to a guest output parameter.

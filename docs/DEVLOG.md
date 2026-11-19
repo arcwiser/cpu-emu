@@ -12,9 +12,14 @@ this file is the companion log of development decisions.
 - Added opaque guest thread handles and stable guest thread IDs. A dedicated thread-return thunk
   completes only the worker; returning from a worker no longer terminates the guest process.
 - Added a generated regression whose main thread spins until a separately scheduled worker writes
-  shared guest memory, then verifies the assigned thread ID. The remaining audio-critical work is
-  scheduler-aware event waiting plus per-thread TEB/TLS state; working Undertale audio is not yet
-  claimed.
+  shared guest memory, then verifies the assigned thread ID.
+- Made `WaitForSingleObject`/`Ex` suspend only the calling guest context. The regression now has a
+  worker wait indefinitely while the main thread continues and signals its event. Added guest-local
+  thread priorities without changing CPUEmu's native host thread priority.
+- A recorded Undertale probe reached OpenAL worker creation at 66,382,450 instructions, accepted
+  its priority request, and executed repeated DirectSound buffer-position calls on the worker. It
+  then exposed the general missing x87 `DA /6` `FIDIV m32int` form at `0x5ee70a`; audible output is
+  still unverified and not claimed.
 
 ## 2026-11-18 — MOVBE load/store matrix
 
