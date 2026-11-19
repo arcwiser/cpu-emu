@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <numbers>
 
 namespace winemu::tests {
 
@@ -712,6 +713,50 @@ void test_x87_integer_arithmetic() {
     };
     require((compare(0x57) & 0x4500) == 0x4000, "x87 FICOM m32int equal status");
     require((compare(0x5f) & 0x7800) == 0x4000, "x87 FICOMP m32int status and pop");
+}
+
+void test_x87_fpatan() {
+    constexpr std::uint64_t code_address = 0x200000000ULL;
+    constexpr std::uint64_t data_address = 0x300000000ULL;
+    winemu::Memory memory;
+    memory.map(code_address, 0x1000, winemu::Read | winemu::Write | winemu::Execute, "code");
+    memory.map(data_address, 0x1000, winemu::Read | winemu::Write, "data");
+    const std::uint8_t code[] = {
+        0xdd, 0x07,       // fld qword ptr [rdi] (y)
+        0xdd, 0x47, 0x08, // fld qword ptr [rdi+8] (x)
+        0xd9, 0xf3,       // fpatan
+        0xdf, 0xe0,       // fnstsw ax
+        0xdd, 0x5f, 0x10, // fstp qword ptr [rdi+10h]
+    };
+    memory.write(code_address, code);
+    winemu::Cpu cpu(memory);
+    const auto run = [&](double y, double x) {
+        memory.write64(data_address, std::bit_cast<std::uint64_t>(y));
+        memory.write64(data_address + 8, std::bit_cast<std::uint64_t>(x));
+        cpu.reset(code_address, data_address + 0xff8);
+        cpu.set_reg(winemu::Rdi, data_address);
+        for (unsigned instruction = 0; instruction < 5; ++instruction) {
+            cpu.step();
+        }
+        require((cpu.reg(winemu::Rax) & 0x3800) == 0x3800, "x87 FPATAN pops one stack entry");
+        return std::bit_cast<double>(memory.read64(data_address + 0x10));
+    };
+    require(std::abs(run(1.0, 1.0) - std::numbers::pi / 4.0) < 1e-12, "x87 FPATAN first quadrant");
+    require(std::abs(run(1.0, -1.0) - 3.0 * std::numbers::pi / 4.0) < 1e-12,
+            "x87 FPATAN second quadrant");
+
+    const std::uint8_t underflow_code[] = {0xdd, 0x07, 0xd9, 0xf3};
+    memory.write(code_address, underflow_code);
+    cpu.reset(code_address, data_address + 0xff8);
+    cpu.set_reg(winemu::Rdi, data_address);
+    cpu.step();
+    bool rejected = false;
+    try {
+        cpu.step();
+    } catch (const winemu::Error &) {
+        rejected = true;
+    }
+    require(rejected, "x87 FPATAN rejects stack underflow");
 }
 
 void test_packed_float_conversions() {

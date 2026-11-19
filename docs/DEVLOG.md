@@ -4,6 +4,13 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-19 — x87 FPATAN stack semantics
+
+- Implemented `D9 F3` `FPATAN` as `atan2(ST(1), ST(0))` with the architectural single stack pop.
+- Added first- and second-quadrant results, TOP transition, and stack-underflow regressions.
+- Undertale's OpenAL path passed `FPATAN`, performed additional worker/TLS initialization, and
+  reached `IsBadWritePtr` at 66,508,527 instructions. Audible output remains unverified.
+
 ## 2026-11-19 — Complete x87 signed-m32 integer arithmetic family
 
 - Implemented all `DA /0`–`/7` memory forms: `FIADD`, `FIMUL`, `FICOM`, `FICOMP`, `FISUB`,

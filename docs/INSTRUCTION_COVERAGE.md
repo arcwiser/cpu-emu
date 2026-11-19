@@ -107,7 +107,7 @@ The x87 stack and control word are independent state; they are not aliases of XM
 | 🟧 | `FST`/`FSTP` for `m32real`, `m64real`, and `ST(i)`; `FUCOM`/`FUCOMP` with C0/C2/C3 and TOP status reporting; `FUCOMI`/`FCOMI`/`FUCOMIP`/`FCOMIP` with integer condition flags |
 | 🟧 | `FADD`, `FMUL`, `FSUB`, reverse subtract, `FDIV`, reverse divide in D8 ST(0)/single-memory and DC ST(i)/double-memory forms; D8/DC `FCOM`/`FCOMP` register and memory forms |
 | 🟧 | `FIADD`, `FIMUL`, `FICOM`, `FICOMP`, `FISUB`, `FISUBR`, `FIDIV`, `FIDIVR` for signed `m32int` operands (`DA /0`–`/7`) |
-| 🟧 | `FADDP`, `FMULP`, `FSUBP`, `FSUBRP`, `FDIVP`, `FDIVRP`, `FCHS`, `FABS`, `FSQRT`, `FRNDINT`, `FSIN`, `FCOS` |
+| 🟧 | `FADDP`, `FMULP`, `FSUBP`, `FSUBRP`, `FDIVP`, `FDIVRP`, `FCHS`, `FABS`, `FSQRT`, `FRNDINT`, `FSIN`, `FCOS`, `FPATAN` |
 | 🟧 | `FILD m32int`, `FILD m64int`, `FISTP m64int` with control-word rounding |
 | 🟧 | `FLDCW`, `FNSTCW`, `FNSTSW AX`, `FNCLEX`, `FNINIT`, `WAIT` |
 | ⬜ | Remaining comparison and integer-conversion encodings, 80-bit memory values, BCD, remainder, remaining transcendental and exception semantics |

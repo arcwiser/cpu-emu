@@ -742,6 +742,14 @@ void Cpu::step() {
                 x87_[0] = x87_round(x87_[0]);
                 return;
             }
+            if ((decoded.reg & 7) == 6 && decoded.rm.register_index == Rbx) { // FPATAN
+                if (x87_depth_ < 2) {
+                    throw Error("x87 stack underflow");
+                }
+                x87_[1] = std::atan2(x87_[1], x87_[0]);
+                x87_pop();
+                return;
+            }
             throw Error("unsupported x87 D9 register instruction");
         }
         switch (decoded.reg & 7) {
