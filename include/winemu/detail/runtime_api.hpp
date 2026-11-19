@@ -40,6 +40,7 @@ enum class RuntimeApi {
     GetCurrentProcessId,
     GetCurrentThreadId,
     GuestThreadPriority,
+    GuestPointerProbe,
     StartupInfo,
     CriticalSectionInitialize,
     CriticalSectionOperation,

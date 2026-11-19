@@ -660,6 +660,16 @@ int run_sync_selftest() {
     check(SetThreadPriority(reinterpret_cast<HANDLE>(0x1234), THREAD_PRIORITY_NORMAL) == FALSE &&
               GetLastError() == ERROR_INVALID_HANDLE,
           "sync selftest: reject unknown guest thread handle");
+    auto *read_only = VirtualAlloc(nullptr, 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_READONLY);
+    check(read_only != nullptr && IsBadReadPtr(read_only, 0x1000) == FALSE &&
+              IsBadWritePtr(read_only, 0x1000) != FALSE,
+          "sync selftest: distinguish readable and writable guest ranges");
+    check(read_only != nullptr && IsBadReadPtr(read_only, 0x1001) != FALSE &&
+              IsBadReadPtr(nullptr, 1) != FALSE && IsBadWritePtr(nullptr, 0) == FALSE,
+          "sync selftest: reject invalid and crossing guest ranges");
+    if (read_only != nullptr) {
+        VirtualFree(read_only, 0, MEM_RELEASE);
+    }
 
     IDirect3D9Ex *direct3d = nullptr;
     const HRESULT direct3d_result = Direct3DCreate9Ex(D3D_SDK_VERSION, &direct3d);

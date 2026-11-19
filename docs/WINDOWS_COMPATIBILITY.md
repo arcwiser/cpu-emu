@@ -39,6 +39,7 @@ explicit adapter.
 | Console output | `GetStdHandle`, `WriteFile` | Focused on standard output/error handles |
 | Errors and diagnostics | `GetLastError`, `SetLastError`, `OutputDebugStringA` | Per-runtime error state |
 | Virtual memory | `VirtualAlloc`, `VirtualFree`, `VirtualProtect`, `VirtualQuery` | No placeholders, write-watch, or full mapped-section semantics |
+| Pointer probes | `IsBadReadPtr`, `IsBadWritePtr` | Checks guest mapping commitment and permissions across the complete requested range; deprecated host probing is never used |
 | Heap and local/global memory | `malloc`, `free`, `realloc`, `HeapAlloc`, `HeapFree`, `HeapReAlloc`, `LocalAlloc`, `GlobalAlloc`, related size/lock calls | Checked 16-byte-aligned allocations come from bounded guest arenas; freed spans become inaccessible, reject double-free, and can be reused without exposing host pointers; heap handles remain simplified guest tokens |
 | Guest threads | `CreateThread`, `_beginthreadex`, `_beginthread`, independent interpreted CPU/stack contexts, guest IDs and opaque handles, guest-local `SetThreadPriority`/`GetThreadPriority` | Cooperative round-robin scheduling; suspended creation, per-thread TEB/TLS, termination, priority-weighted scheduling, and thread-pool work remain |
 | TLS/FLS | `TlsAlloc`, `TlsFree`, `TlsGetValue`, `TlsSetValue`, FLS equivalents | Values remain process-local until each scheduled thread has a distinct TEB/TLS block; FLS cleanup callbacks are not invoked |

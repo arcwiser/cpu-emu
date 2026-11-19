@@ -1083,6 +1083,38 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(thunk_name.ends_with("!GetThreadPriority") ? 1 : 2);
         break;
     }
+    case Api::GuestPointerProbe: {
+        const auto address = argument(0);
+        const auto size = argument(1);
+        const auto required_permission = thunk_name.ends_with("!IsBadWritePtr") ? Write : Read;
+        auto bad = false;
+        if (size != 0) {
+            if (address == 0 || size > UINT64_MAX - address) {
+                bad = true;
+            } else {
+                const auto end = address + size;
+                auto cursor = address;
+                while (cursor < end) {
+                    VirtualMemoryInfo information{};
+                    if (!cpu.memory().query(cursor, information) || !information.committed ||
+                        (information.permissions & required_permission) == 0 ||
+                        information.size > UINT64_MAX - information.base) {
+                        bad = true;
+                        break;
+                    }
+                    const auto region_end = information.base + information.size;
+                    if (region_end <= cursor) {
+                        bad = true;
+                        break;
+                    }
+                    cursor = std::min(end, region_end);
+                }
+            }
+        }
+        cpu.set_reg(Rax, bad ? 1 : 0);
+        finish_call(2);
+        break;
+    }
     case Api::StartupInfo: {
         const auto destination = argument(0);
         STARTUPINFOW native{};

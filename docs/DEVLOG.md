@@ -4,6 +4,17 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-19 — Guest permission-aware pointer probes
+
+- Added `IsBadReadPtr` and `IsBadWritePtr` adapters that walk the complete guest range and validate
+  committed read/write permissions without ever forwarding a guest address to native Windows.
+- Added readable, nonwritable, cross-mapping, null, and zero-length regressions in the Paint
+  synchronization fixture.
+- Undertale's OpenAL worker cleared its pointer probe and continued DirectSound playback/position
+  activity until the 100,000,000 aggregate instruction limit (83,190,673 on the main context plus
+  worker execution), with no new unsupported API/instruction or memory fault. Audible sound is not
+  yet verified.
+
 ## 2026-11-19 — x87 FPATAN stack semantics
 
 - Implemented `D9 F3` `FPATAN` as `atan2(ST(1), ST(0))` with the architectural single stack pop.
