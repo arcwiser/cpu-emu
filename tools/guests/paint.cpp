@@ -75,6 +75,7 @@ UINT_PTR callback_timer_id = 0;
 UINT_PTR retained_timer_id = 0;
 HWND retained_modeless_dialog = nullptr;
 bool legacy_window_callback_seen = false;
+bool legacy_key_message_seen = false;
 bool dialog_callback_seen = false;
 bool nested_dialog_callback_seen = false;
 bool modeless_dialog_init_seen = false;
@@ -250,6 +251,10 @@ LRESULT CALLBACK legacy_window_procedure(HWND window, UINT message, WPARAM word_
     if (message == WM_APP + 2) {
         legacy_window_callback_seen = true;
         return 0x1234;
+    }
+    if (message == WM_KEYDOWN && word_parameter == 'Z') {
+        legacy_key_message_seen = true;
+        return 0;
     }
     return DefWindowProcW(window, message, word_parameter, long_parameter);
 }
@@ -1142,6 +1147,15 @@ int run_sync_selftest() {
         check(SendMessageW(legacy_window, WM_APP + 2, 0, 0) == 0x1234 &&
                   legacy_window_callback_seen,
               "sync selftest: dispatch legacy registered window callback");
+        check(PostMessageW(legacy_window, WM_KEYDOWN, 'Z', 1) != FALSE,
+              "sync selftest: queue guest keyboard message");
+        MSG keyboard_message{};
+        check(PeekMessageW(&keyboard_message, legacy_window, WM_KEYDOWN, WM_KEYDOWN, PM_REMOVE) !=
+                      FALSE &&
+                  keyboard_message.hwnd == legacy_window && keyboard_message.wParam == 'Z',
+              "sync selftest: marshal guest keyboard message");
+        DispatchMessageW(&keyboard_message);
+        check(legacy_key_message_seen, "sync selftest: dispatch guest keyboard message callback");
         DestroyWindow(legacy_window);
     }
     check(RegisterClassW(nullptr) == 0 && GetLastError() == ERROR_INVALID_PARAMETER,
