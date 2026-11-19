@@ -192,6 +192,9 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     for (const auto &[guest_object, object] : direct3d_texture9_objects_) {
         static_cast<void>(guest_object);
         auto *host = static_cast<IDirect3DTexture9 *>(object.host);
+        if (object.host_locked != nullptr) {
+            host->UnlockRect(object.locked_level);
+        }
         for (std::uint32_t reference = 0; reference < object.references; ++reference) {
             host->Release();
         }

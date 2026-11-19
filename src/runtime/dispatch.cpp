@@ -230,8 +230,9 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         static_cast<IDirect3DDevice9 *>(device->second.host)->AddRef();
         ++device->second.references;
-        direct3d_texture9_objects_.emplace(guest_texture,
-                                           Direct3DTexture9Object{host_texture, 1, guest_device});
+        direct3d_texture9_objects_.emplace(
+            guest_texture,
+            Direct3DTexture9Object{host_texture, 1, guest_device, 0, 0, nullptr, 0, 0, 0, 0, 0});
         return guest_texture;
     };
     const auto wrap_direct3d_buffer = [&](void *host_buffer, std::uint64_t guest_device,
@@ -5147,6 +5148,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             result = ++object_iterator->second.references;
             break;
         case 2: {
+            if (object_iterator->second.references == 1 &&
+                object_iterator->second.host_locked != nullptr) {
+                host_texture->UnlockRect(object_iterator->second.locked_level);
+                object_iterator->second.host_locked = nullptr;
+            }
             result = host_texture->Release();
             if (--object_iterator->second.references == 0) {
                 auto device = direct3d_device9_objects_.find(object_iterator->second.device);
@@ -5237,11 +5243,171 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         case 19: {
             const auto output = argument(2);
             const auto locked_size = guest_is_64_bit_ ? 16U : 8U;
-            if (output == 0 || !cpu.memory().contains(output, locked_size)) {
+            const auto level = static_cast<UINT>(argument(1));
+            if (output == 0 || !cpu.memory().contains(output, locked_size) ||
+                object_iterator->second.host_locked != nullptr) {
                 result = invalid_argument;
+                break;
+            }
+            D3DSURFACE_DESC description{};
+            result = static_cast<std::uint32_t>(host_texture->GetLevelDesc(level, &description));
+            if (FAILED(static_cast<HRESULT>(result))) {
+                break;
+            }
+            RECT rectangle{};
+            const RECT *rectangle_pointer = nullptr;
+            if (argument(3) != 0) {
+                if (!cpu.memory().contains(argument(3), sizeof(rectangle))) {
+                    result = invalid_argument;
+                    break;
+                }
+                const auto rectangle_bytes = cpu.memory().read(argument(3), sizeof(rectangle));
+                std::memcpy(&rectangle, rectangle_bytes.data(), rectangle_bytes.size());
+                if (rectangle.left < 0 || rectangle.top < 0 || rectangle.right <= rectangle.left ||
+                    rectangle.bottom <= rectangle.top ||
+                    static_cast<UINT>(rectangle.right) > description.Width ||
+                    static_cast<UINT>(rectangle.bottom) > description.Height) {
+                    result = invalid_argument;
+                    break;
+                }
+                rectangle_pointer = &rectangle;
             } else {
-                cpu.memory().write32(output, 0);
-                write_guest_pointer(output + (guest_is_64_bit_ ? 8 : 4), 0);
+                rectangle.right = static_cast<LONG>(description.Width);
+                rectangle.bottom = static_cast<LONG>(description.Height);
+            }
+            const auto width = static_cast<std::uint32_t>(rectangle.right - rectangle.left);
+            const auto height = static_cast<std::uint32_t>(rectangle.bottom - rectangle.top);
+            std::uint32_t rows = height;
+            std::uint32_t row_bytes = 0;
+            switch (description.Format) {
+            case D3DFMT_DXT1:
+                rows = (height + 3) / 4;
+                row_bytes = ((width + 3) / 4) * 8;
+                break;
+            case D3DFMT_DXT2:
+            case D3DFMT_DXT3:
+            case D3DFMT_DXT4:
+            case D3DFMT_DXT5:
+                rows = (height + 3) / 4;
+                row_bytes = ((width + 3) / 4) * 16;
+                break;
+            case D3DFMT_R8G8B8:
+                row_bytes = width * 3;
+                break;
+            case D3DFMT_R5G6B5:
+            case D3DFMT_X1R5G5B5:
+            case D3DFMT_A1R5G5B5:
+            case D3DFMT_A4R4G4B4:
+            case D3DFMT_X4R4G4B4:
+            case D3DFMT_A8R3G3B2:
+            case D3DFMT_A8P8:
+            case D3DFMT_L16:
+            case D3DFMT_R16F:
+            case D3DFMT_UYVY:
+            case D3DFMT_YUY2:
+                row_bytes = width * 2;
+                break;
+            case D3DFMT_A8R8G8B8:
+            case D3DFMT_X8R8G8B8:
+            case D3DFMT_A8B8G8R8:
+            case D3DFMT_X8B8G8R8:
+            case D3DFMT_G16R16:
+            case D3DFMT_A2R10G10B10:
+            case D3DFMT_A2B10G10R10:
+            case D3DFMT_R32F:
+            case D3DFMT_G16R16F:
+                row_bytes = width * 4;
+                break;
+            case D3DFMT_A16B16G16R16:
+            case D3DFMT_A16B16G16R16F:
+            case D3DFMT_G32R32F:
+                row_bytes = width * 8;
+                break;
+            case D3DFMT_A32B32G32R32F:
+                row_bytes = width * 16;
+                break;
+            case D3DFMT_R3G3B2:
+            case D3DFMT_A8:
+            case D3DFMT_P8:
+            case D3DFMT_L8:
+            case D3DFMT_A4L4:
+                row_bytes = width;
+                break;
+            default:
+                result = not_available;
+                break;
+            }
+            if (result == not_available) {
+                break;
+            }
+            D3DLOCKED_RECT locked{};
+            const auto flags = static_cast<DWORD>(argument(4));
+            result = static_cast<std::uint32_t>(
+                host_texture->LockRect(level, &locked, rectangle_pointer, flags));
+            if (FAILED(static_cast<HRESULT>(result))) {
+                break;
+            }
+            const auto pitch = locked.Pitch;
+            const auto pitch_magnitude =
+                static_cast<std::uint64_t>(pitch < 0 ? -static_cast<std::int64_t>(pitch) : pitch);
+            constexpr std::uint64_t maximum_lock_size = 256ULL * 1024ULL * 1024ULL;
+            const auto staging_size = pitch_magnitude * rows;
+            if (locked.pBits == nullptr || row_bytes > pitch_magnitude || staging_size == 0 ||
+                staging_size > maximum_lock_size) {
+                host_texture->UnlockRect(level);
+                result = invalid_argument;
+                break;
+            }
+            if (object_iterator->second.staging_capacity < staging_size) {
+                object_iterator->second.staging = allocate(staging_size);
+                object_iterator->second.staging_capacity = static_cast<std::uint32_t>(staging_size);
+            }
+            if ((flags & D3DLOCK_DISCARD) == 0) {
+                const auto *source = static_cast<const std::uint8_t *>(locked.pBits);
+                for (std::uint32_t row = 0; row < rows; ++row) {
+                    cpu.memory().write(
+                        object_iterator->second.staging + pitch_magnitude * row,
+                        {source + static_cast<std::int64_t>(pitch) * row, row_bytes});
+                }
+            }
+            object_iterator->second.host_locked = locked.pBits;
+            object_iterator->second.host_pitch = pitch;
+            object_iterator->second.locked_level = level;
+            object_iterator->second.locked_rows = rows;
+            object_iterator->second.locked_row_bytes = row_bytes;
+            object_iterator->second.locked_flags = flags;
+            cpu.memory().write32(output, static_cast<std::uint32_t>(pitch));
+            write_guest_pointer(output + (guest_is_64_bit_ ? 8 : 4),
+                                object_iterator->second.staging);
+            break;
+        }
+        case 20: {
+            if (object_iterator->second.host_locked == nullptr ||
+                argument(1) != object_iterator->second.locked_level) {
+                result = invalid_argument;
+                break;
+            }
+            if ((object_iterator->second.locked_flags & D3DLOCK_READONLY) == 0) {
+                auto *destination =
+                    static_cast<std::uint8_t *>(object_iterator->second.host_locked);
+                const auto pitch = object_iterator->second.host_pitch;
+                const auto pitch_magnitude = static_cast<std::uint64_t>(
+                    pitch < 0 ? -static_cast<std::int64_t>(pitch) : pitch);
+                for (std::uint32_t row = 0; row < object_iterator->second.locked_rows; ++row) {
+                    const auto bytes =
+                        cpu.memory().read(object_iterator->second.staging + pitch_magnitude * row,
+                                          object_iterator->second.locked_row_bytes);
+                    std::memcpy(destination + static_cast<std::int64_t>(pitch) * row, bytes.data(),
+                                bytes.size());
+                }
+            }
+            result = static_cast<std::uint32_t>(
+                host_texture->UnlockRect(object_iterator->second.locked_level));
+            if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                object_iterator->second.host_locked = nullptr;
+                object_iterator->second.locked_rows = 0;
+                object_iterator->second.locked_row_bytes = 0;
+                object_iterator->second.locked_flags = 0;
             }
             break;
         }

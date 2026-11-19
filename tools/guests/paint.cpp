@@ -811,8 +811,8 @@ int run_sync_selftest() {
                 queried_device->Release();
             }
             IDirect3DTexture9 *texture = nullptr;
-            check(SUCCEEDED(base_device->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT,
-                                                       &texture, nullptr)) &&
+            check(SUCCEEDED(base_device->CreateTexture(4, 4, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8,
+                                                       D3DPOOL_DEFAULT, &texture, nullptr)) &&
                       texture != nullptr,
                   "sync selftest: create Direct3D texture proxy");
             if (texture != nullptr) {
@@ -821,6 +821,20 @@ int run_sync_selftest() {
                           SUCCEEDED(texture->GetLevelDesc(0, &description)) &&
                           description.Width == 4 && description.Height == 4,
                       "sync selftest: query Direct3D texture description");
+                D3DLOCKED_RECT locked_texture{};
+                check(SUCCEEDED(texture->LockRect(0, &locked_texture, nullptr, D3DLOCK_DISCARD)) &&
+                          locked_texture.pBits != nullptr && locked_texture.Pitch >= 16,
+                      "sync selftest: lock Direct3D texture staging");
+                if (locked_texture.pBits != nullptr) {
+                    auto *pixels = static_cast<std::uint8_t *>(locked_texture.pBits);
+                    for (UINT row = 0; row < 4; ++row) {
+                        std::memset(pixels + locked_texture.Pitch * row, 0x7f, 16);
+                    }
+                    check(SUCCEEDED(texture->UnlockRect(0)),
+                          "sync selftest: upload Direct3D texture staging");
+                }
+                check(FAILED(texture->LockRect(0, nullptr, nullptr, 0)),
+                      "sync selftest: reject null Direct3D texture lock output");
                 IDirect3DDevice9 *texture_device = nullptr;
                 check(SUCCEEDED(texture->GetDevice(&texture_device)) &&
                           texture_device == base_device,

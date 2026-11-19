@@ -796,6 +796,18 @@ development.
   inspection still shows a blank/non-responsive surface. Its repeated texture `LockRect` calls
   currently return `D3DERR_NOTAVAILABLE`; visible rendering is not claimed.
 
+## 2026-11-19 — staged texture locking
+
+- Added checked `IDirect3DTexture9::LockRect`/`UnlockRect` adapters for common packed, floating,
+  YUV, palette/luminance, and DXT formats. Guest-visible storage preserves the native pitch while
+  copying only defined row bytes, validates rectangles and size arithmetic, and caps each lock at
+  256 MiB.
+- Writable locks copy staged rows back before native unlock; read-only and discard behavior avoids
+  unnecessary transfers. Live locks are released safely on final COM release and runtime teardown.
+- The Paint fixture covers a dynamic ARGB texture lock/upload and null-output rejection. Undertale's
+  real texture upload now succeeds; repeated `GetSurfaceLevel` calls remain the next observed
+  graphics gap, and visible rendering is not yet verified.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

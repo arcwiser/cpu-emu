@@ -168,6 +168,14 @@ class Runtime {
         void *host;
         std::uint32_t references;
         std::uint64_t device;
+        std::uint64_t staging;
+        std::uint32_t staging_capacity;
+        void *host_locked;
+        std::int32_t host_pitch;
+        std::uint32_t locked_level;
+        std::uint32_t locked_rows;
+        std::uint32_t locked_row_bytes;
+        std::uint32_t locked_flags;
     };
     std::uint64_t direct3d_texture9_vtable_ = 0;
     std::unordered_map<std::uint64_t, Direct3DTexture9Object> direct3d_texture9_objects_;
