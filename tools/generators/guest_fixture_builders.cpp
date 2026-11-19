@@ -212,6 +212,96 @@ void make_schedule_chore(const std::filesystem::path &path) {
     write_pe(path, section, imports_rva, 40, iat_rva, 16);
 }
 
+// Builds a guest whose main thread spins while an independently scheduled CreateThread worker
+// writes shared memory. A synchronous callback adapter cannot pass this regression.
+void make_guest_thread(const std::filesystem::path &path) {
+    constexpr std::uint32_t worker_rva = 0x1100;
+    constexpr std::uint32_t shared_rva = 0x1120;
+    constexpr std::uint32_t thread_id_rva = 0x1124;
+    constexpr std::uint32_t imports_rva = 0x1180;
+    constexpr std::uint32_t dll_rva = 0x11c0;
+    constexpr std::uint32_t int_rva = 0x11e0;
+    constexpr std::uint32_t iat_rva = 0x11f0;
+    constexpr std::uint32_t name_rva = 0x1200;
+
+    std::vector<std::uint8_t> section(0x400);
+    std::vector<std::uint8_t> code;
+    const auto emit = [&](std::initializer_list<std::uint8_t> values) {
+        code.insert(code.end(), values.begin(), values.end());
+    };
+    const auto emit_rip_relative = [&](std::initializer_list<std::uint8_t> prefix,
+                                       std::uint32_t target) {
+        code.insert(code.end(), prefix.begin(), prefix.end());
+        const auto next = section_rva + static_cast<std::uint32_t>(code.size()) + 4;
+        append32(code, target - next);
+    };
+    const auto emit_near_jump = [&](std::initializer_list<std::uint8_t> opcode) {
+        code.insert(code.end(), opcode.begin(), opcode.end());
+        const auto displacement = code.size();
+        append32(code, 0);
+        return displacement;
+    };
+    const auto patch_jump = [&](std::size_t displacement, std::size_t target) {
+        const auto relative =
+            static_cast<std::int32_t>(target) - static_cast<std::int32_t>(displacement + 4);
+        put32(code, displacement, static_cast<std::uint32_t>(relative));
+    };
+
+    emit({0x48, 0x83, 0xec, 0x38});                       // sub rsp,0x38
+    emit({0x31, 0xc9, 0x31, 0xd2});                       // xor ecx,ecx; xor edx,edx
+    emit_rip_relative({0x4c, 0x8d, 0x05}, worker_rva);    // lea r8,[worker]
+    emit_rip_relative({0x4c, 0x8d, 0x0d}, shared_rva);    // lea r9,[shared]
+    emit({0xc7, 0x44, 0x24, 0x20, 0, 0, 0, 0});           // flags = 0
+    emit_rip_relative({0x48, 0x8d, 0x05}, thread_id_rva); // lea rax,[thread id]
+    emit({0x48, 0x89, 0x44, 0x24, 0x28});                 // thread-id output
+    emit_rip_relative({0xff, 0x15}, iat_rva);             // call CreateThread
+    emit({0x48, 0x85, 0xc0});                             // test rax,rax
+    const auto create_failed = emit_near_jump({0x0f, 0x84});
+    emit({0xb9, 0x00, 0x00, 0x01, 0x00}); // mov ecx,65536
+    const auto spin = code.size();
+    emit({0x81, 0x3d}); // cmp [shared],0x1234
+    append32(code, shared_rva - (section_rva + static_cast<std::uint32_t>(code.size()) + 4 + 4));
+    emit({0x34, 0x12, 0x00, 0x00});
+    const auto shared_written = emit_near_jump({0x0f, 0x84});
+    emit({0xff, 0xc9}); // dec ecx
+    const auto keep_spinning = emit_near_jump({0x0f, 0x85});
+    const auto fail = code.size();
+    emit({0xb8, 0x01, 0x00, 0x00, 0x00}); // mov eax,1
+    const auto finish = emit_near_jump({0xe9});
+    const auto success = code.size();
+    emit({0x83, 0x3d}); // cmp [thread id],2
+    append32(code, thread_id_rva - (section_rva + static_cast<std::uint32_t>(code.size()) + 4 + 1));
+    emit({0x02});
+    const auto wrong_id = emit_near_jump({0x0f, 0x85});
+    emit({0x31, 0xc0}); // xor eax,eax
+    const auto epilogue = code.size();
+    emit({0x48, 0x83, 0xc4, 0x38, 0xc3}); // add rsp,0x38; ret
+    patch_jump(create_failed, fail);
+    patch_jump(shared_written, success);
+    patch_jump(keep_spinning, spin);
+    patch_jump(finish, epilogue);
+    patch_jump(wrong_id, fail);
+    std::copy(code.begin(), code.end(), section.begin());
+
+    const auto offset = [](std::uint32_t rva) { return rva - section_rva; };
+    const std::initializer_list<std::uint8_t> worker{
+        0xc7, 0x01, 0x34, 0x12, 0x00, 0x00, // mov dword ptr [rcx],0x1234
+        0xb8, 0x07, 0x00, 0x00, 0x00,       // mov eax,7
+        0xc3,                               // ret
+    };
+    std::copy(worker.begin(), worker.end(), section.begin() + offset(worker_rva));
+    put32(section, offset(imports_rva), int_rva);
+    put32(section, offset(imports_rva) + 12, dll_rva);
+    put32(section, offset(imports_rva) + 16, iat_rva);
+    const std::string dll = "KERNEL32.dll";
+    std::copy(dll.begin(), dll.end(), section.begin() + offset(dll_rva));
+    const std::string import = "CreateThread";
+    put64(section, offset(int_rva), name_rva);
+    put64(section, offset(iat_rva), name_rva);
+    std::copy(import.begin(), import.end(), section.begin() + offset(name_rva) + 2);
+    write_pe(path, section, imports_rva, 40, iat_rva, 16);
+}
+
 // Imports GetErrorInfo by its documented OLEAUT32 ordinal and verifies that the no-error result
 // clears the guest output pointer instead of exposing a native COM object.
 void make_get_error_info(const std::filesystem::path &path) {

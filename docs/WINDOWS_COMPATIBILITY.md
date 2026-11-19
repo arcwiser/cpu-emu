@@ -40,7 +40,8 @@ explicit adapter.
 | Errors and diagnostics | `GetLastError`, `SetLastError`, `OutputDebugStringA` | Per-runtime error state |
 | Virtual memory | `VirtualAlloc`, `VirtualFree`, `VirtualProtect`, `VirtualQuery` | No placeholders, write-watch, or full mapped-section semantics |
 | Heap and local/global memory | `malloc`, `free`, `realloc`, `HeapAlloc`, `HeapFree`, `HeapReAlloc`, `LocalAlloc`, `GlobalAlloc`, related size/lock calls | Checked 16-byte-aligned allocations come from bounded guest arenas; freed spans become inaccessible, reject double-free, and can be reused without exposing host pointers; heap handles remain simplified guest tokens |
-| TLS/FLS | `TlsAlloc`, `TlsFree`, `TlsGetValue`, `TlsSetValue`, FLS equivalents | No guest thread scheduler; FLS cleanup callbacks are not invoked |
+| Guest threads | `CreateThread`, `_beginthreadex`, `_beginthread`, independent interpreted CPU/stack contexts, guest IDs and opaque handles | Cooperative round-robin scheduling; suspended creation, per-thread TEB/TLS, nonblocking waits, termination, priorities, and thread-pool work remain |
+| TLS/FLS | `TlsAlloc`, `TlsFree`, `TlsGetValue`, `TlsSetValue`, FLS equivalents | Values remain process-local until each scheduled thread has a distinct TEB/TLS block; FLS cleanup callbacks are not invoked |
 | Startup and environment | command line, environment blocks, CRT on-exit tables, static TLS initialization | Main thread only |
 | Locale discovery | `GetUserDefaultLCID`, `IsValidLocale`, and bounded `GetLocaleInfoA/W` size/output queries | Host user locale is exposed; callback enumeration and locale mutation are not adapted |
 | Module queries | module handles, module filename, selected `GetProcAddress`, delay imports | Loaded main image and emulated thunks; no general guest DLL loader |
@@ -63,8 +64,8 @@ through `Runtime::invoke_guest`; they never cast a guest procedure to a native f
 The following families currently report failure or remain inert because native forwarding would
 escape emulation or retain unsafe guest state:
 
-- `CreateThread`, `_beginthreadex`, remote-thread creation, work items, waits, and thread-pool
-  callback objects.
+- Remote-thread creation, work items, thread-pool callback objects, and scheduler-aware blocking
+  waits.
 - `CreateProcess*` and child-process creation.
 - Vectored exception handlers and native language exception callbacks.
 - General COM objects whose interface pointers and vtables have not been proxied into guest
@@ -93,8 +94,10 @@ seek, position queries, read, swap, `basic_ios` state, and destruction are marsh
 Position queries construct the complete 24-byte MSVC `streampos` value, and seeks honor its legacy
 `fpos_t` offset field. Short input reads update the associated guest `basic_ios` EOF/fail state.
 MSVC PPL chores re-enter the interpreter cooperatively; they are never handed to the native thread
-pool. Unimplemented C++ object methods must fail closed rather than invoking host STL code against
-a guest object layout.
+pool. `CreateThread` and CRT thread entry points receive independent interpreted register and stack
+state under a round-robin scheduler. This is concurrency, not host-parallel execution, and blocking
+waits still need scheduler suspension rather than blocking the interpreter. Unimplemented C++
+object methods must fail closed rather than invoking host STL code against a guest object layout.
 
 OLEAUT error-info outputs and WinRT `PropertyValue` scalars are guest-owned. Native COM interface
 pointers must never be written to a guest output parameter.

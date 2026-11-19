@@ -11,5 +11,6 @@ void make_get_error_info(const std::filesystem::path &path);
 void make_property_value(const std::filesystem::path &path);
 void make_fail_fast(const std::filesystem::path &path);
 void make_mime_type(const std::filesystem::path &path);
+void make_guest_thread(const std::filesystem::path &path);
 
 } // namespace cpuemu::fixtures

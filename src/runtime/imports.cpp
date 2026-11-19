@@ -608,13 +608,14 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
     } else if (name == "_beginthread" || name == "_o__beginthread") {
         api = Api::GuestThreadCreate;
     } else if (name == "_Thrd_detach") {
-        // Guest threads are currently cooperative and have completed before the handle is
-        // returned. Never pass the guest-owned _Thrd_t descriptor to the host MSVC runtime.
+        // Never pass a guest-owned _Thrd_t descriptor to the host MSVC runtime.
         api = Api::ReturnZero;
-    } else if (name == "CreateThread" || name == "CreateRemoteThread" ||
-               name == "CreateRemoteThreadEx" || name == "QueueUserWorkItem" ||
-               name == "RegisterWaitForSingleObject" || name == "CreateThreadpoolWork" ||
-               name == "CreateThreadpoolWait" || name == "CreateThreadpoolIo") {
+    } else if (kernel_module && name == "CreateThread") {
+        api = Api::GuestThreadCreate;
+    } else if (name == "CreateRemoteThread" || name == "CreateRemoteThreadEx" ||
+               name == "QueueUserWorkItem" || name == "RegisterWaitForSingleObject" ||
+               name == "CreateThreadpoolWork" || name == "CreateThreadpoolWait" ||
+               name == "CreateThreadpoolIo") {
         // These APIs retain a callback address and may invoke it on another native thread.
         // Passing guest code to the host would bypass the interpreter and fault (or worse).
         api = Api::ReturnZero;

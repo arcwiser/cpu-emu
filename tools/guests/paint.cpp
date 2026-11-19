@@ -651,8 +651,8 @@ int run_sync_selftest() {
     SetLastError(ERROR_SUCCESS);
     check(CreateThread(nullptr, 0, reinterpret_cast<LPTHREAD_START_ROUTINE>(1), nullptr, 0,
                        &rejected_thread_id) == nullptr &&
-              GetLastError() == ERROR_NOT_SUPPORTED,
-          "sync selftest: fail closed for retained guest thread callback");
+              GetLastError() == ERROR_INVALID_PARAMETER,
+          "sync selftest: reject invalid guest thread entry");
 
     IDirect3D9Ex *direct3d = nullptr;
     const HRESULT direct3d_result = Direct3DCreate9Ex(D3D_SDK_VERSION, &direct3d);

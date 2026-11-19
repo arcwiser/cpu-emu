@@ -39,5 +39,6 @@ void test_get_error_info();
 void test_property_value();
 void test_fail_fast_isolation();
 void test_mime_type_marshaling();
+void test_guest_thread_scheduling();
 
 } // namespace winemu::tests

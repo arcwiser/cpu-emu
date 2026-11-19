@@ -133,6 +133,12 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     }
     sync_handles_.clear();
     next_sync_handle_ = 0x600;
+    guest_threads_.clear();
+    guest_thread_handles_.clear();
+    next_guest_thread_handle_ = 0x700;
+    next_guest_thread_id_ = 2;
+    active_guest_thread_id_ = 1;
+    thread_return_thunk_ = 0;
     class_window_procedures_.clear();
     atom_window_procedures_.clear();
     window_procedures_.clear();
@@ -369,6 +375,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     }
     const auto stack_base = stack_top - stack_size;
     memory.map(stack_base, stack_size, Read | Write, "main stack");
+    next_thread_stack_top_ = stack_base - 0x10000;
     memory.map(environment_base, environment_size, Read | Write, "process environment");
     // KUSER_SHARED_DATA is mapped read-only into every Windows process; alias the host's own
     // page so guest code reading tick counts and system time sees real values.
@@ -378,6 +385,10 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     const auto stack_entry_size = image.is_64_bit ? 8U : 4U;
     const auto initial_rsp = stack_base + stack_size - 0x1000 - stack_entry_size;
     const auto return_thunk = image.is_64_bit ? return_thunk64 : return_thunk32;
+    thread_return_thunk_ = next_thunk_;
+    next_thunk_ += 0x100;
+    thunks_.emplace(thread_return_thunk_, Api::ThreadReturn);
+    thunk_names_.emplace(thread_return_thunk_, "CPUEmu!ThreadReturn");
     if (image.is_64_bit) {
         memory.write64(initial_rsp, return_thunk);
     } else {
@@ -569,12 +580,41 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
                 break;
             }
         }
+        constexpr std::uint64_t scheduler_quantum = 1024;
         while (!exited) {
-            if (cpu.instructions() >= instruction_limit) {
+            const auto total_instructions = [&] {
+                auto total = cpu.instructions();
+                for (const auto &thread : guest_threads_) {
+                    total += thread.cpu->instructions();
+                }
+                return total;
+            };
+            if (total_instructions() >= instruction_limit) {
                 throw Error("instruction limit exceeded");
             }
-            if (!dispatch(cpu, exit_code, exited)) {
-                cpu.step();
+
+            active_guest_thread_id_ = 1;
+            detail::set_callback_context(*this, cpu, exit_code, exited);
+            const auto main_quantum_end = cpu.instructions() + scheduler_quantum;
+            while (!exited && cpu.instructions() < main_quantum_end) {
+                if (!dispatch(cpu, exit_code, exited)) {
+                    cpu.step();
+                }
+            }
+
+            for (auto &thread : guest_threads_) {
+                if (exited || thread.completed) {
+                    continue;
+                }
+                active_guest_thread_id_ = thread.id;
+                detail::set_callback_context(*this, *thread.cpu, exit_code, exited);
+                const auto thread_quantum_end = thread.cpu->instructions() + scheduler_quantum;
+                while (!exited && !thread.completed &&
+                       thread.cpu->instructions() < thread_quantum_end) {
+                    if (!dispatch(*thread.cpu, exit_code, exited)) {
+                        thread.cpu->step();
+                    }
+                }
             }
         }
     } catch (const std::exception &) {
@@ -586,7 +626,11 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     }
     detail::clear_callback_context();
     log::info("runtime", "guest finished cleanly");
-    return {exit_code, cpu.instructions()};
+    auto total_instructions = cpu.instructions();
+    for (const auto &thread : guest_threads_) {
+        total_instructions += thread.cpu->instructions();
+    }
+    return {exit_code, total_instructions};
 }
 
 } // namespace winemu

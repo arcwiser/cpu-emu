@@ -7,6 +7,7 @@ namespace winemu::detail {
 // without making them part of CPUEmu's public API.
 enum class RuntimeApi {
     ProcessReturn,
+    ThreadReturn,
     ExitProcess,
     AbortProcess,
     TerminateProcess,

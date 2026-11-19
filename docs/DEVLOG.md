@@ -4,6 +4,18 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-19 — First independent cooperative guest threads
+
+- Added independent interpreted CPU and stack contexts for `CreateThread`, `_beginthreadex`, and
+  `_beginthread`, scheduled in bounded round-robin quanta without executing guest entry points as
+  native callbacks.
+- Added opaque guest thread handles and stable guest thread IDs. A dedicated thread-return thunk
+  completes only the worker; returning from a worker no longer terminates the guest process.
+- Added a generated regression whose main thread spins until a separately scheduled worker writes
+  shared guest memory, then verifies the assigned thread ID. The remaining audio-critical work is
+  scheduler-aware event waiting plus per-thread TEB/TLS state; working Undertale audio is not yet
+  claimed.
+
 ## 2026-11-18 — MOVBE load/store matrix
 
 - Implemented unprefixed `0F 38 F0/F1` `MOVBE` loads and stores for 16-, 32-, and 64-bit operands,

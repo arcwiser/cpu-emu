@@ -368,6 +368,15 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         exit_code = static_cast<std::uint32_t>(cpu.reg(Rax));
         exited = true;
         break;
+    case Api::ThreadReturn:
+        for (auto &thread : guest_threads_) {
+            if (thread.id == active_guest_thread_id_) {
+                thread.exit_code = static_cast<std::uint32_t>(cpu.reg(Rax));
+                thread.completed = true;
+                break;
+            }
+        }
+        break;
     case Api::ExitProcess:
         exit_code = static_cast<std::uint32_t>(argument(0));
         exited = true;
@@ -691,6 +700,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             result = ::CloseHandle(static_cast<HANDLE>(sync->second)) != FALSE;
             sync_handles_.erase(sync);
         }
+        if (const auto thread = guest_thread_handles_.find(argument(0));
+            thread != guest_thread_handles_.end()) {
+            result = true;
+            guest_thread_handles_.erase(thread);
+        }
         if (!result) {
             last_error_ = ERROR_INVALID_HANDLE;
         }
@@ -1012,7 +1026,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call();
         break;
     case Api::GetCurrentThreadId:
-        cpu.set_reg(Rax, ::GetCurrentThreadId());
+        cpu.set_reg(Rax, active_guest_thread_id_);
         finish_call();
         break;
     case Api::StartupInfo: {
@@ -3149,25 +3163,63 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call();
         break;
     case Api::GuestThreadCreate: {
-        const auto entry = cpu.reg(R8);
-        const auto parameter = cpu.reg(R9);
-        if (entry == 0) {
+        const auto begin_thread = thunk_name.find("_beginthread") != std::string::npos &&
+                                  thunk_name.find("_beginthreadex") == std::string::npos;
+        const auto argument_count = begin_thread ? 3U : 6U;
+        const auto entry = argument(begin_thread ? 0 : 2);
+        const auto parameter = argument(begin_thread ? 2 : 3);
+        const auto stack_request = argument(1);
+        const auto creation_flags = begin_thread ? 0 : argument(4);
+        const auto id_output = begin_thread ? 0 : argument(5);
+        if (entry == 0 || !cpu.memory().contains(entry, 1)) {
+            last_error_ = ERROR_INVALID_PARAMETER;
             cpu.set_reg(Rax, 0);
-            finish_call();
+            finish_call(argument_count);
             break;
         }
-        // Run cooperatively on the current interpreted CPU. This preserves guest/host isolation;
-        // a scheduler can later provide independent CPU state without changing the ABI adapter.
-        const auto result = invoke_guest(cpu, entry, {parameter, 0, 0, 0}, exit_code, exited);
-        if (argument(5) != 0) {
-            if (guest_is_64_bit_) {
-                cpu.memory().write32(argument(5), GetCurrentThreadId());
-            } else {
-                cpu.memory().write32(argument(5), GetCurrentThreadId());
-            }
+        if (creation_flags != 0) {
+            last_error_ = ERROR_NOT_SUPPORTED;
+            cpu.set_reg(Rax, 0);
+            finish_call(argument_count);
+            break;
         }
-        cpu.set_reg(Rax, result == 0 ? 1 : result);
-        finish_call();
+        constexpr std::uint64_t maximum_stack_size = 64ULL * 1024 * 1024;
+        auto stack_size = std::max<std::uint64_t>(stack_request, detail::minimum_stack_size);
+        if (stack_size > maximum_stack_size || stack_size > next_thread_stack_top_) {
+            last_error_ = ERROR_NOT_ENOUGH_MEMORY;
+            cpu.set_reg(Rax, 0);
+            finish_call(argument_count);
+            break;
+        }
+        stack_size = (stack_size + 0xffff) & ~0xffffULL;
+        next_thread_stack_top_ = (next_thread_stack_top_ - stack_size) & ~0xffffULL;
+        const auto stack_base = next_thread_stack_top_;
+        cpu.memory().map(stack_base, stack_size, Read | Write, "guest thread stack");
+        const auto stack_top_address = stack_base + stack_size;
+        const auto initial_rsp = stack_top_address - (guest_is_64_bit_ ? 0x28 : 8);
+        if (guest_is_64_bit_) {
+            cpu.memory().write64(initial_rsp, thread_return_thunk_);
+        } else {
+            cpu.memory().write32(initial_rsp, static_cast<std::uint32_t>(thread_return_thunk_));
+            cpu.memory().write32(initial_rsp + 4, static_cast<std::uint32_t>(parameter));
+        }
+        auto thread_cpu = std::make_unique<Cpu>(cpu.memory());
+        thread_cpu->reset(entry, initial_rsp, guest_is_64_bit_);
+        if (guest_is_64_bit_) {
+            thread_cpu->set_reg(Rcx, parameter);
+            thread_cpu->set_gs_base(detail::teb_base);
+        } else {
+            thread_cpu->set_fs_base(detail::teb_base);
+        }
+        const auto handle = next_guest_thread_handle_++;
+        const auto thread_id = next_guest_thread_id_++;
+        guest_thread_handles_.emplace(handle, guest_threads_.size());
+        guest_threads_.push_back({std::move(thread_cpu), handle, thread_id, 0, false});
+        if (id_output != 0) {
+            cpu.memory().write32(id_output, thread_id);
+        }
+        cpu.set_reg(Rax, handle);
+        finish_call(argument_count);
         break;
     }
     case Api::GuestAtomicWait: {
@@ -8882,6 +8934,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     case Api::TerminateProcess:
         log::info("api",
                   "guest exit via " + thunk_name + " exit code " + std::to_string(exit_code));
+        break;
+    case Api::ThreadReturn:
+        log::info("api", "guest thread " + std::to_string(active_guest_thread_id_) +
+                             " returned code " +
+                             std::to_string(static_cast<std::uint32_t>(cpu.reg(Rax))));
         break;
     default:
         if (log::enabled(log::Level::Api)) {

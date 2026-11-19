@@ -33,6 +33,7 @@ int main(int argc, char **argv) {
         make_property_value(output / "propertyvalue.exe");
         make_fail_fast(output / "failfast.exe");
         make_mime_type(output / "mimetype.exe");
+        make_guest_thread(output / "thread.exe");
         return 0;
     } catch (const std::exception &error) {
         std::cerr << "make_test_apps: " << error.what() << '\n';

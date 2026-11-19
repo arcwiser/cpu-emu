@@ -145,4 +145,11 @@ void test_mime_type_marshaling() {
     require(result.exit_code == 0, "guest-owned FindMimeFromData output and failures");
 }
 
+void test_guest_thread_scheduling() {
+    std::ostringstream output;
+    winemu::Runtime runtime(output);
+    const auto result = runtime.run(WINEMU_TEST_APPS_DIR "/thread.exe");
+    require(result.exit_code == 0, "independent CreateThread execution context");
+}
+
 } // namespace winemu::tests

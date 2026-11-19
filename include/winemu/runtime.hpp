@@ -6,8 +6,10 @@
 
 #include <array>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <iosfwd>
+#include <memory>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -107,6 +109,20 @@ class Runtime {
     std::uint64_t next_sync_handle_ = 0x600;
     std::unordered_map<std::uint64_t, void *> sync_handles_;
     std::wstring synchronization_namespace_;
+    struct GuestThread {
+        std::unique_ptr<Cpu> cpu;
+        std::uint64_t handle;
+        std::uint32_t id;
+        std::uint32_t exit_code = 0;
+        bool completed = false;
+    };
+    std::deque<GuestThread> guest_threads_;
+    std::unordered_map<std::uint64_t, std::size_t> guest_thread_handles_;
+    std::uint64_t next_guest_thread_handle_ = 0x700;
+    std::uint32_t next_guest_thread_id_ = 2;
+    std::uint32_t active_guest_thread_id_ = 1;
+    std::uint64_t next_thread_stack_top_ = 0;
+    std::uint64_t thread_return_thunk_ = 0;
     std::uint64_t host_gdiplus_token_ = 0;
     std::filesystem::path guest_executable_;
     void *resource_module_ = nullptr;
