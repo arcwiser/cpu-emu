@@ -799,7 +799,8 @@ int run_sync_selftest() {
             check(SUCCEEDED(base_device->BeginScene()) &&
                       SUCCEEDED(
                           base_device->Clear(0, nullptr, D3DCLEAR_TARGET, 0xff102030, 1.0f, 0)) &&
-                      SUCCEEDED(base_device->EndScene()),
+                      SUCCEEDED(base_device->EndScene()) &&
+                      SUCCEEDED(base_device->Present(nullptr, nullptr, device_window, nullptr)),
                   "sync selftest: execute Direct3D scene methods");
             IDirect3DDevice9 *queried_device = nullptr;
             check(SUCCEEDED(base_device->QueryInterface(
@@ -879,8 +880,12 @@ int run_sync_selftest() {
                     queried_buffer->Release();
                 }
                 check(SUCCEEDED(base_device->SetStreamSource(0, vertex_buffer, 0, 12)) &&
+                          SUCCEEDED(base_device->SetFVF(D3DFVF_XYZ)) &&
+                          SUCCEEDED(base_device->BeginScene()) &&
+                          SUCCEEDED(base_device->DrawPrimitive(D3DPT_TRIANGLELIST, 0, 1)) &&
+                          SUCCEEDED(base_device->EndScene()) &&
                           SUCCEEDED(base_device->SetStreamSource(0, nullptr, 0, 0)),
-                      "sync selftest: bind and unbind Direct3D vertex buffer proxy");
+                      "sync selftest: draw from Direct3D vertex buffer proxy");
                 check(FAILED(vertex_buffer->Lock(0, 0, nullptr, 0)),
                       "sync selftest: reject null Direct3D vertex buffer lock output");
                 vertex_buffer->Release();

@@ -4848,6 +4848,33 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         case 15:
             result = host_device->GetNumberOfSwapChains();
             break;
+        case 17: {
+            RECT source{};
+            RECT destination{};
+            const auto source_pointer = argument(1);
+            const auto destination_pointer = argument(2);
+            const auto override_window = argument(3);
+            if ((source_pointer != 0 && !read_value(source_pointer, source)) ||
+                (destination_pointer != 0 && !read_value(destination_pointer, destination)) ||
+                argument(4) != 0) {
+                result = invalid_argument;
+                break;
+            }
+            HWND window = nullptr;
+            if (override_window != 0) {
+                window = reinterpret_cast<HWND>(static_cast<std::uintptr_t>(override_window));
+                DWORD process_id = 0;
+                ::GetWindowThreadProcessId(window, &process_id);
+                if (process_id != ::GetCurrentProcessId()) {
+                    result = invalid_argument;
+                    break;
+                }
+            }
+            result = static_cast<std::uint32_t>(host_device->Present(
+                source_pointer == 0 ? nullptr : &source,
+                destination_pointer == 0 ? nullptr : &destination, window, nullptr));
+            break;
+        }
         case 20:
             result = static_cast<std::uint32_t>(
                 host_device->SetDialogBoxMode(static_cast<BOOL>(argument(1))));
@@ -5024,6 +5051,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         case 79:
             result = static_cast<std::uint32_t>(host_device->SetNPatchMode(
                 std::bit_cast<float>(static_cast<std::uint32_t>(argument(1)))));
+            break;
+        case 81:
+            result = static_cast<std::uint32_t>(host_device->DrawPrimitive(
+                static_cast<D3DPRIMITIVETYPE>(argument(1)), static_cast<UINT>(argument(2)),
+                static_cast<UINT>(argument(3))));
             break;
         case 89:
             result =

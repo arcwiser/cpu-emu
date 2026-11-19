@@ -49,7 +49,7 @@ reproducible blocker.
 | Window class/callback | ✅ | Registers `YYGameMakerYY`; interpreted `WM_NCCREATE`/`WM_CREATE` run |
 | Visible window | 🚧 | GameMaker calls `ShowWindow` and `UpdateWindow` on its native HWND; a visible rendered game frame has not yet been verified |
 | Input discovery | ✅ | Guest-owned inert DirectInput proxy completes optional discovery |
-| Direct3D 9Ex | 🚧 | Adapter/device creation, PE32-safe structure marshaling, device texture and vertex/index-buffer creation/binding, checked buffer staging locks, and D3DX file/in-memory texture paths are adapted; surface/shader/swap-chain/draw/presentation paths remain |
+| Direct3D 9Ex | 🚧 | Adapter/device creation, PE32-safe structure marshaling, texture and vertex/index-buffer creation/binding, checked buffer staging locks, D3DX decoding, `DrawPrimitive`, and `Present` are adapted; Undertale's window is still blank because texture lock/upload paths remain incomplete |
 | Audio | 🚧 | Guest-owned DirectSound device/buffer proxies create, format, lock, upload, and start buffers; Undertale's OpenAL context/source initialization still fails because persistent guest worker threads are not scheduled |
 | Playable | ○ | Requires rendering, input, audio, persistence, and sustained loop |
 

@@ -785,6 +785,17 @@ development.
   layer still reports error 40964 because CPUEmu has no persistent cooperative guest-thread
   scheduler; working audio is not claimed.
 
+## 2026-11-19 — primitive draw and presentation
+
+- Added host-backed `IDirect3DDevice9::DrawPrimitive` forwarding and bounded `Present` marshaling.
+  Optional source/destination rectangles are copied from checked guest memory, dirty regions fail
+  closed, and an override HWND is accepted only when it belongs to the CPUEmu host process.
+- Extended the Paint synchronization fixture to bind an uploaded guest-owned vertex buffer, set
+  its FVF, draw a triangle inside a scene, and present the resulting back buffer.
+- Undertale repeatedly reaches both methods and creates a native `UNDERTALE` window, but live
+  inspection still shows a blank/non-responsive surface. Its repeated texture `LockRect` calls
+  currently return `D3DERR_NOTAVAILABLE`; visible rendering is not claimed.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,
