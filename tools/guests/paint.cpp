@@ -809,6 +809,8 @@ int run_sync_selftest() {
             check(SUCCEEDED(base_device->GetCreationParameters(&creation)) &&
                       creation.hFocusWindow == device_window,
                   "sync selftest: marshal Direct3D creation parameters");
+            check(PostMessageW(nullptr, WM_APP + 77, 0x12, 0x34) != FALSE,
+                  "sync selftest: queue message across Direct3D presentation");
             check(SUCCEEDED(base_device->BeginScene()) &&
                       SUCCEEDED(
                           base_device->Clear(0, nullptr, D3DCLEAR_TARGET, 0xff102030, 1.0f, 0)) &&
@@ -1126,6 +1128,13 @@ int run_sync_selftest() {
                               0, 100, 100, nullptr, nullptr, nullptr, nullptr);
     check(legacy_window != nullptr, "sync selftest: create legacy registered window");
     if (legacy_window != nullptr) {
+        MSG presentation_queue_message{};
+        check(PeekMessageW(&presentation_queue_message, nullptr, WM_APP + 77, WM_APP + 77,
+                           PM_REMOVE) != FALSE &&
+                  presentation_queue_message.message == WM_APP + 77 &&
+                  presentation_queue_message.wParam == 0x12 &&
+                  presentation_queue_message.lParam == 0x34,
+              "sync selftest: preserve guest message across presentation heartbeat");
         ShowWindow(legacy_window, SW_SHOW);
         SetForegroundWindow(legacy_window);
         check(GetForegroundWindow() == legacy_window,

@@ -835,6 +835,18 @@ development.
   1,000,000,000-instruction limit without an unsupported import or CPU/memory fault. Visible title
   rendering remains verified; responsive input and working audio remain unproven.
 
+## 2026-11-19 — non-removing presentation heartbeat
+
+- Successful Direct3D presentation now performs a native `PeekMessageW(PM_NOREMOVE)` heartbeat.
+  This lets Windows observe queue progress when an interpreted frame exceeds the hung-window
+  timeout without consuming, translating, reordering, or dispatching any message on the guest's
+  behalf. Synchronous callback faults are still propagated through the normal bridge.
+- The Paint fixture posts a thread message before presentation and verifies the guest retrieves
+  the exact HWND/message/parameter tuple afterward, proving the heartbeat does not consume it.
+- Live inspection showed the rendered window remain titled `UNDERTALE` rather than Windows'
+  ghosted `UNDERTALE (Not Responding)`. UI automation still timed out injecting `Z`, so working
+  title input is not claimed.
+
 ## 2026-10-30 — Earlier sessions (pre-devlog)
 
 Baseline reconstructed from the tree: PE32+ loader, x86-64 interpreter with selected SSE2,

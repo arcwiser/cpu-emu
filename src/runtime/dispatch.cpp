@@ -4953,6 +4953,16 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             result = static_cast<std::uint32_t>(host_device->Present(
                 source_pointer == 0 ? nullptr : &source,
                 destination_pointer == 0 ? nullptr : &destination, window, nullptr));
+            if (SUCCEEDED(static_cast<HRESULT>(result))) {
+                // Interpreted frames can exceed Windows' hung-window timeout. Touch the native
+                // queue without removing anything so Windows sees progress while the guest keeps
+                // exclusive ownership of message translation and dispatch order.
+                MSG pending{};
+                ::PeekMessageW(&pending, nullptr, 0, 0, PM_NOREMOVE);
+                if (auto exception = detail::take_callback_exception(); exception != nullptr) {
+                    std::rethrow_exception(exception);
+                }
+            }
             break;
         }
         case 19: {
