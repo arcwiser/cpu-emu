@@ -13,6 +13,7 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace winemu {
@@ -118,7 +119,10 @@ class Runtime {
         bool completed = false;
         bool waiting = false;
         void *wait_handle = nullptr;
+        std::uint64_t wait_thread_handle = 0;
         std::uint64_t wait_deadline = 0;
+        std::unordered_map<std::uint32_t, std::uint64_t> tls_values;
+        std::unordered_map<std::uint32_t, std::uint64_t> fls_values;
     };
     std::deque<GuestThread> guest_threads_;
     std::unordered_map<std::uint64_t, std::size_t> guest_thread_handles_;
@@ -130,6 +134,7 @@ class Runtime {
     std::int32_t main_thread_priority_ = 0;
     bool main_thread_waiting_ = false;
     void *main_thread_wait_handle_ = nullptr;
+    std::uint64_t main_thread_wait_thread_handle_ = 0;
     std::uint64_t main_thread_wait_deadline_ = 0;
     std::uint64_t host_gdiplus_token_ = 0;
     std::filesystem::path guest_executable_;
@@ -363,12 +368,12 @@ class Runtime {
     std::unordered_map<std::uint64_t, void *> guest_file_streams_;
     std::uint64_t pending_guest_file_stream_ = 0;
 
-    // CPUEmu currently schedules one guest thread cooperatively, so TLS/FLS values are process-
-    // local until the scheduler gains distinct per-thread execution contexts.
     std::uint32_t next_tls_index_ = 1;
     std::uint32_t next_fls_index_ = 1;
-    std::unordered_map<std::uint32_t, std::uint64_t> tls_values_;
-    std::unordered_map<std::uint32_t, std::uint64_t> fls_values_;
+    std::unordered_set<std::uint32_t> tls_indices_;
+    std::unordered_set<std::uint32_t> fls_indices_;
+    std::unordered_map<std::uint32_t, std::uint64_t> main_tls_values_;
+    std::unordered_map<std::uint32_t, std::uint64_t> main_fls_values_;
 };
 
 } // namespace winemu

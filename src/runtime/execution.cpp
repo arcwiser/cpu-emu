@@ -142,6 +142,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     main_thread_priority_ = 0;
     main_thread_waiting_ = false;
     main_thread_wait_handle_ = nullptr;
+    main_thread_wait_thread_handle_ = 0;
     main_thread_wait_deadline_ = 0;
     class_window_procedures_.clear();
     atom_window_procedures_.clear();
@@ -349,8 +350,10 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     guest_file_streams_.clear();
     next_tls_index_ = 1;
     next_fls_index_ = 1;
-    tls_values_.clear();
-    fls_values_.clear();
+    tls_indices_.clear();
+    fls_indices_.clear();
+    main_tls_values_.clear();
+    main_fls_values_.clear();
     guest_executable_ = std::filesystem::absolute(executable);
     // Import resolution happens inside PeLoader::load, so the guest activation context must be
     // available before the loader walks the import table.
@@ -586,8 +589,25 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
         }
         constexpr std::uint64_t scheduler_quantum = 1024;
         const auto poll_wait = [&](Cpu &waiting_cpu, bool &waiting, void *&wait_handle,
-                                   std::uint64_t wait_deadline) {
+                                   std::uint64_t &wait_thread_handle, std::uint64_t wait_deadline) {
             if (!waiting) {
+                return;
+            }
+            if (wait_thread_handle != 0) {
+                const auto found_handle = guest_thread_handles_.find(wait_thread_handle);
+                auto result = DWORD{WAIT_FAILED};
+                if (found_handle == guest_thread_handles_.end()) {
+                    last_error_ = ERROR_INVALID_HANDLE;
+                } else if (guest_threads_[found_handle->second].completed) {
+                    result = WAIT_OBJECT_0;
+                } else if (wait_deadline != UINT64_MAX && ::GetTickCount64() >= wait_deadline) {
+                    result = WAIT_TIMEOUT;
+                } else {
+                    return;
+                }
+                waiting_cpu.set_reg(Rax, result);
+                waiting = false;
+                wait_thread_handle = 0;
                 return;
             }
             if (wait_handle == nullptr) {
@@ -627,7 +647,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
             active_guest_thread_id_ = 1;
             detail::set_callback_context(*this, cpu, exit_code, exited);
             poll_wait(cpu, main_thread_waiting_, main_thread_wait_handle_,
-                      main_thread_wait_deadline_);
+                      main_thread_wait_thread_handle_, main_thread_wait_deadline_);
             const auto main_quantum_end = cpu.instructions() + scheduler_quantum;
             while (!exited && !main_thread_waiting_ && cpu.instructions() < main_quantum_end) {
                 if (!dispatch(cpu, exit_code, exited)) {
@@ -641,7 +661,8 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
                 }
                 active_guest_thread_id_ = thread.id;
                 detail::set_callback_context(*this, *thread.cpu, exit_code, exited);
-                poll_wait(*thread.cpu, thread.waiting, thread.wait_handle, thread.wait_deadline);
+                poll_wait(*thread.cpu, thread.waiting, thread.wait_handle,
+                          thread.wait_thread_handle, thread.wait_deadline);
                 const auto thread_quantum_end = thread.cpu->instructions() + scheduler_quantum;
                 while (!exited && !thread.completed && !thread.waiting &&
                        thread.cpu->instructions() < thread_quantum_end) {

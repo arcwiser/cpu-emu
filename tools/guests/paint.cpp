@@ -96,6 +96,22 @@ bool process_enum_callback_seen = false;
 
 void write_stdout(const char *text);
 
+struct TlsIsolationState {
+    DWORD index;
+    std::uintptr_t initial_value;
+    std::uintptr_t worker_value;
+};
+
+DWORD WINAPI tls_isolation_worker(void *parameter) {
+    auto &state = *static_cast<TlsIsolationState *>(parameter);
+    state.initial_value = reinterpret_cast<std::uintptr_t>(TlsGetValue(state.index));
+    if (TlsSetValue(state.index, reinterpret_cast<void *>(0x2222)) == FALSE) {
+        return 1;
+    }
+    state.worker_value = reinterpret_cast<std::uintptr_t>(TlsGetValue(state.index));
+    return 7;
+}
+
 INT_PTR CALLBACK test_dialog_procedure(HWND dialog, UINT message, WPARAM, LPARAM parameter) {
     if (message != WM_INITDIALOG) {
         return FALSE;
@@ -669,6 +685,25 @@ int run_sync_selftest() {
           "sync selftest: reject invalid and crossing guest ranges");
     if (read_only != nullptr) {
         VirtualFree(read_only, 0, MEM_RELEASE);
+    }
+    TlsIsolationState tls_state{TlsAlloc(), 0xffff, 0};
+    check(tls_state.index != TLS_OUT_OF_INDEXES &&
+              TlsSetValue(tls_state.index, reinterpret_cast<void *>(0x1111)) != FALSE,
+          "sync selftest: allocate main-thread TLS value");
+    DWORD tls_thread_id = 0;
+    const auto tls_thread =
+        CreateThread(nullptr, 0, tls_isolation_worker, &tls_state, 0, &tls_thread_id);
+    check(tls_thread != nullptr && tls_thread_id != GetCurrentThreadId() &&
+              WaitForSingleObject(tls_thread, INFINITE) == WAIT_OBJECT_0,
+          "sync selftest: join cooperative guest thread");
+    check(tls_state.initial_value == 0 && tls_state.worker_value == 0x2222 &&
+              reinterpret_cast<std::uintptr_t>(TlsGetValue(tls_state.index)) == 0x1111,
+          "sync selftest: isolate TLS values by guest thread");
+    if (tls_thread != nullptr) {
+        CloseHandle(tls_thread);
+    }
+    if (tls_state.index != TLS_OUT_OF_INDEXES) {
+        TlsFree(tls_state.index);
     }
 
     IDirect3D9Ex *direct3d = nullptr;

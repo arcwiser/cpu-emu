@@ -842,14 +842,40 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             break;
         }
 
+        const auto wait_call = thunk_name.ends_with("!WaitForSingleObject") ||
+                               thunk_name.ends_with("!WaitForSingleObjectEx");
+        const auto guest_thread_handle = guest_thread_handles_.find(argument(0));
         const auto host_handle = find_handle(argument(0));
-        if (host_handle == nullptr) {
+        if (wait_call && guest_thread_handle != guest_thread_handles_.end()) {
+            const auto timeout = static_cast<DWORD>(argument(1));
+            const auto completed = guest_threads_[guest_thread_handle->second].completed;
+            cpu.set_reg(Rax, completed ? WAIT_OBJECT_0 : WAIT_TIMEOUT);
+            if (!completed && timeout != 0) {
+                const auto deadline =
+                    timeout == INFINITE ? UINT64_MAX : ::GetTickCount64() + timeout;
+                if (active_guest_thread_id_ == 1) {
+                    main_thread_waiting_ = true;
+                    main_thread_wait_handle_ = nullptr;
+                    main_thread_wait_thread_handle_ = argument(0);
+                    main_thread_wait_deadline_ = deadline;
+                } else {
+                    for (auto &thread : guest_threads_) {
+                        if (thread.id == active_guest_thread_id_) {
+                            thread.waiting = true;
+                            thread.wait_handle = nullptr;
+                            thread.wait_thread_handle = argument(0);
+                            thread.wait_deadline = deadline;
+                            break;
+                        }
+                    }
+                }
+            }
+        } else if (host_handle == nullptr) {
             last_error_ = ERROR_INVALID_HANDLE;
             cpu.set_reg(Rax, thunk_name.find("!WaitForSingleObject") != std::string::npos
                                  ? WAIT_FAILED
                                  : 0);
-        } else if (thunk_name.ends_with("!WaitForSingleObject") ||
-                   thunk_name.ends_with("!WaitForSingleObjectEx")) {
+        } else if (wait_call) {
             const auto timeout = static_cast<DWORD>(argument(1));
             const auto result = ::WaitForSingleObject(host_handle, 0);
             if (result == WAIT_FAILED) {
@@ -862,12 +888,14 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 if (active_guest_thread_id_ == 1) {
                     main_thread_waiting_ = true;
                     main_thread_wait_handle_ = host_handle;
+                    main_thread_wait_thread_handle_ = 0;
                     main_thread_wait_deadline_ = deadline;
                 } else {
                     for (auto &thread : guest_threads_) {
                         if (thread.id == active_guest_thread_id_) {
                             thread.waiting = true;
                             thread.wait_handle = host_handle;
+                            thread.wait_thread_handle = 0;
                             thread.wait_deadline = deadline;
                             break;
                         }
@@ -2172,12 +2200,14 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             if (active_guest_thread_id_ == 1) {
                 main_thread_waiting_ = true;
                 main_thread_wait_handle_ = nullptr;
+                main_thread_wait_thread_handle_ = 0;
                 main_thread_wait_deadline_ = deadline;
             } else {
                 for (auto &thread : guest_threads_) {
                     if (thread.id == active_guest_thread_id_) {
                         thread.waiting = true;
                         thread.wait_handle = nullptr;
+                        thread.wait_thread_handle = 0;
                         thread.wait_deadline = deadline;
                         break;
                     }
@@ -3316,7 +3346,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         const auto handle = next_guest_thread_handle_++;
         const auto thread_id = next_guest_thread_id_++;
         guest_thread_handles_.emplace(handle, guest_threads_.size());
-        guest_threads_.push_back({std::move(thread_cpu), handle, thread_id});
+        GuestThread thread;
+        thread.cpu = std::move(thread_cpu);
+        thread.handle = handle;
+        thread.id = thread_id;
+        guest_threads_.push_back(std::move(thread));
         if (id_output != 0) {
             cpu.memory().write32(id_output, thread_id);
         }
@@ -3472,7 +3506,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     }
     case Api::TlsAlloc: {
         const auto index = next_tls_index_++;
-        tls_values_.emplace(index, 0);
+        tls_indices_.insert(index);
         cpu.set_reg(Rax, index);
         finish_call();
         break;
@@ -3481,17 +3515,24 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         // The cleanup callback in RCX is a guest address. Keep the slot guest-side so the host
         // never retains or invokes it outside the interpreter.
         const auto index = next_fls_index_++;
-        fls_values_.emplace(index, 0);
+        fls_indices_.insert(index);
         cpu.set_reg(Rax, index);
         finish_call(1);
         break;
     }
     case Api::TlsFree:
     case Api::FlsFree: {
-        auto &values = found->second == Api::TlsFree ? tls_values_ : fls_values_;
-        const auto erased = values.erase(static_cast<std::uint32_t>(argument(0))) != 0;
+        const auto tls = found->second == Api::TlsFree;
+        auto &indices = tls ? tls_indices_ : fls_indices_;
+        const auto index = static_cast<std::uint32_t>(argument(0));
+        const auto erased = indices.erase(index) != 0;
         if (!erased) {
             last_error_ = ERROR_INVALID_PARAMETER;
+        } else {
+            (tls ? main_tls_values_ : main_fls_values_).erase(index);
+            for (auto &thread : guest_threads_) {
+                (tls ? thread.tls_values : thread.fls_values).erase(index);
+            }
         }
         cpu.set_reg(Rax, erased ? 1 : 0);
         finish_call(1);
@@ -3499,27 +3540,48 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     }
     case Api::TlsGetValue:
     case Api::FlsGetValue: {
-        auto &values = found->second == Api::TlsGetValue ? tls_values_ : fls_values_;
-        const auto value = values.find(static_cast<std::uint32_t>(argument(0)));
-        if (value == values.end()) {
+        const auto tls = found->second == Api::TlsGetValue;
+        const auto index = static_cast<std::uint32_t>(argument(0));
+        const auto &indices = tls ? tls_indices_ : fls_indices_;
+        if (!indices.contains(index)) {
             last_error_ = ERROR_INVALID_PARAMETER;
             cpu.set_reg(Rax, 0);
         } else {
+            auto *values = tls ? &main_tls_values_ : &main_fls_values_;
+            if (active_guest_thread_id_ != 1) {
+                for (auto &thread : guest_threads_) {
+                    if (thread.id == active_guest_thread_id_) {
+                        values = tls ? &thread.tls_values : &thread.fls_values;
+                        break;
+                    }
+                }
+            }
+            const auto value = values->find(index);
             last_error_ = ERROR_SUCCESS;
-            cpu.set_reg(Rax, value->second);
+            cpu.set_reg(Rax, value == values->end() ? 0 : value->second);
         }
         finish_call(1);
         break;
     }
     case Api::TlsSetValue:
     case Api::FlsSetValue: {
-        auto &values = found->second == Api::TlsSetValue ? tls_values_ : fls_values_;
-        const auto value = values.find(static_cast<std::uint32_t>(argument(0)));
-        if (value == values.end()) {
+        const auto tls = found->second == Api::TlsSetValue;
+        const auto index = static_cast<std::uint32_t>(argument(0));
+        const auto &indices = tls ? tls_indices_ : fls_indices_;
+        if (!indices.contains(index)) {
             last_error_ = ERROR_INVALID_PARAMETER;
             cpu.set_reg(Rax, 0);
         } else {
-            value->second = argument(1);
+            auto *values = tls ? &main_tls_values_ : &main_fls_values_;
+            if (active_guest_thread_id_ != 1) {
+                for (auto &thread : guest_threads_) {
+                    if (thread.id == active_guest_thread_id_) {
+                        values = tls ? &thread.tls_values : &thread.fls_values;
+                        break;
+                    }
+                }
+            }
+            (*values)[index] = argument(1);
             cpu.set_reg(Rax, 1);
         }
         finish_call(2);

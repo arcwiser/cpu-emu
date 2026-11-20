@@ -4,6 +4,16 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-20 — Per-thread dynamic TLS and guest joins
+
+- Isolated `TlsGetValue`/`TlsSetValue` and their FLS equivalents per interpreted execution context
+  while retaining process-wide slot allocation and freeing values from every context on release.
+- Added scheduler-aware waits on opaque guest thread handles, allowing one guest context to join a
+  worker without blocking the native interpreter thread.
+- Extended the Paint synchronization regression to create and join a worker, verify its initially
+  empty TLS slot, set a worker-only value, return code 7, and preserve the main thread's value.
+  Per-thread TEBs, static PE TLS blocks, and FLS cleanup callbacks remain unimplemented.
+
 ## 2026-11-20 — Scheduler-aware guest Sleep
 
 - Changed `Sleep` from a native host-thread block into a timed suspension of only the calling guest
