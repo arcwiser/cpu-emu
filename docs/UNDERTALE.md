@@ -45,8 +45,9 @@ DLLs into this repository.
   periods.
 - PE32 window-class registration, native window creation, callback re-entry, resource loading,
   text, geometry, cursor, and synchronous scalar/text messages are implemented.
-- A guest-owned DirectInput 8 COM proxy provides safe device creation and zeroed state polling;
-  display-mode enumeration is marshaled without exposing host structures.
+- Guest-owned DirectInput 8 COM proxies provide distinct keyboard/mouse device creation. Acquired
+  keyboard devices copy host key-down state into the 256-byte DIK layout; mouse state remains
+  zeroed. Display-mode enumeration is marshaled without exposing host structures.
 - Basic synchronous WinMM playback exists, but streaming/game audio is not complete.
 - Direct3D 9Ex creation is the current first unsupported boundary. Steam startup is validated only
   through the safe offline failure path; authenticated Steamworks interfaces are not implemented.

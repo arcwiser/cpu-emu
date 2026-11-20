@@ -6927,19 +6927,55 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             if (argument(2) == 0) {
                 result = 0x80070057U;
             } else {
-                write_pointer(argument(2), device ? direct_input_device_proxy_
+                const auto object = argument(0);
+                write_pointer(argument(2), device ? object
                                                   : (unicode ? direct_input_unicode_proxy_
                                                              : direct_input_proxy_));
+                if (device) {
+                    ++direct_input_device_references_[object];
+                }
             }
         } else if (method == 1) { // AddRef
-            result = 2;
+            result = device ? ++direct_input_device_references_[argument(0)] : 2;
         } else if (method == 2) { // Release
-            result = 1;
+            if (!device) {
+                result = 1;
+            } else {
+                const auto object = argument(0);
+                const auto found_reference = direct_input_device_references_.find(object);
+                if (found_reference != direct_input_device_references_.end() &&
+                    found_reference->second > 1) {
+                    result = --found_reference->second;
+                } else {
+                    direct_input_device_references_.erase(object);
+                    direct_input_device_kinds_.erase(object);
+                    acquired_direct_input_devices_.erase(object);
+                }
+            }
         } else if (!device && method == 3) { // IDirectInput8::CreateDevice
-            if (argument(2) == 0 || argument(3) != 0) {
+            if (argument(1) == 0 || argument(2) == 0 || argument(3) != 0) {
                 result = 0x80070057U;
             } else {
-                write_pointer(argument(2), direct_input_device_proxy_);
+                GUID requested{};
+                const auto bytes = cpu.memory().read(argument(1), sizeof(requested));
+                std::memcpy(&requested, bytes.data(), sizeof(requested));
+                std::uint8_t kind = 0;
+                if (requested == GUID_SysKeyboard) {
+                    kind = 1;
+                } else if (requested == GUID_SysMouse) {
+                    kind = 2;
+                }
+                if (kind == 0) {
+                    result = static_cast<std::uint32_t>(DIERR_DEVICENOTREG);
+                } else {
+                    const auto object = allocate(guest_is_64_bit_ ? 8 : 4);
+                    write_pointer(object, guest_is_64_bit_
+                                              ? cpu.memory().read64(direct_input_device_proxy_)
+                                              : cpu.memory().read32(direct_input_device_proxy_));
+                    direct_input_device_kinds_.emplace(object, kind);
+                    direct_input_device_references_.emplace(object, 1);
+                    write_pointer(argument(2), object);
+                }
             }
         } else if (!device && method == 4) { // IDirectInput8::EnumDevices
             const auto requested_type = static_cast<std::uint32_t>(argument(1)) & 0xffU;
@@ -7019,12 +7055,57 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                     cpu.memory().write(capabilities + 4, std::vector<std::uint8_t>(size - 4));
                 }
             }
-        } else if (device && method == 9) { // GetDeviceState
-            const auto size = static_cast<std::size_t>(argument(1));
-            if (argument(2) == 0 || size > 0x100000) {
+        } else if (device && method == 7) { // Acquire
+            const auto object = argument(0);
+            if (!direct_input_device_kinds_.contains(object)) {
                 result = 0x80070057U;
             } else {
-                cpu.memory().write(argument(2), std::vector<std::uint8_t>(size));
+                acquired_direct_input_devices_.insert(object);
+            }
+        } else if (device && method == 8) { // Unacquire
+            acquired_direct_input_devices_.erase(argument(0));
+        } else if (device && method == 9) { // GetDeviceState
+            const auto object = argument(0);
+            const auto size = static_cast<std::size_t>(argument(1));
+            const auto found_device = direct_input_device_kinds_.find(object);
+            const auto output = argument(2);
+            auto writable = output != 0 && size <= 0x100000 && output <= UINT64_MAX - size;
+            auto cursor = output;
+            const auto end = output + size;
+            while (writable && cursor < end) {
+                VirtualMemoryInfo information{};
+                if (!cpu.memory().query(cursor, information) || !information.committed ||
+                    (information.permissions & Write) == 0 ||
+                    information.size > UINT64_MAX - information.base) {
+                    writable = false;
+                    break;
+                }
+                const auto region_end = information.base + information.size;
+                if (region_end <= cursor) {
+                    writable = false;
+                    break;
+                }
+                cursor = std::min<std::uint64_t>(end, region_end);
+            }
+            if (found_device == direct_input_device_kinds_.end() || !writable) {
+                result = 0x80070057U;
+            } else if (!acquired_direct_input_devices_.contains(object)) {
+                result = static_cast<std::uint32_t>(DIERR_NOTACQUIRED);
+            } else if (found_device->second == 1 && size != 256) {
+                result = static_cast<std::uint32_t>(DIERR_INVALIDPARAM);
+            } else if (found_device->second == 1) {
+                std::vector<std::uint8_t> keyboard_state(size);
+                for (std::uint32_t dik = 0; dik < keyboard_state.size(); ++dik) {
+                    const auto scan_code = (dik & 0x80U) != 0 ? 0xe000U | (dik & 0x7fU) : dik;
+                    const auto virtual_key = ::MapVirtualKeyW(scan_code, MAPVK_VSC_TO_VK_EX);
+                    if (virtual_key != 0 &&
+                        (::GetAsyncKeyState(static_cast<int>(virtual_key)) & 0x8000) != 0) {
+                        keyboard_state[dik] = 0x80;
+                    }
+                }
+                cpu.memory().write(output, keyboard_state);
+            } else {
+                cpu.memory().write(output, std::vector<std::uint8_t>(size));
             }
         } else if (device && method == 10) { // GetDeviceData
             if (argument(3) == 0) {
@@ -7032,8 +7113,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             } else {
                 cpu.memory().write32(argument(3), 0);
             }
-        } else if (device && (method == 7 || method == 8 || method == 11 || method == 12 ||
-                              method == 13 || method == 25)) {
+        } else if (device && (method == 11 || method == 12 || method == 13 || method == 25)) {
             result = 0;
         } else if (!device && (method == 5 || method == 6 || method == 7)) {
             result = 0;

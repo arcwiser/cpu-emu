@@ -270,6 +270,9 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     direct_input_unicode_proxy_ = 0;
     direct_input_device_proxy_ = 0;
     direct_input_methods_.clear();
+    direct_input_device_kinds_.clear();
+    direct_input_device_references_.clear();
+    acquired_direct_input_devices_.clear();
     acc_prop_services_proxy_ = 0;
     acc_prop_services_methods_.clear();
     application_document_lists_proxy_ = 0;

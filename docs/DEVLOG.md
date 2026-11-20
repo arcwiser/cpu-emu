@@ -4,6 +4,17 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-20 — Active DirectInput keyboard snapshots
+
+- Replaced the shared anonymous DirectInput device placeholder with distinct guest-owned keyboard
+  and mouse objects, per-object acquisition state, reference tracking, and same-object
+  `QueryInterface` behavior.
+- Added acquired keyboard `GetDeviceState` snapshots that translate each DIK scan-code index to a
+  host virtual key and copy only the key-down bit into a fully validated 256-byte guest range.
+  Mouse state remains zeroed and controller discovery remains disconnected.
+- Extended the Paint fixture with device creation, not-acquired behavior, data-format setup,
+  acquisition, DIK `Z` state comparison, null output, unacquire, and unknown-device regressions.
+
 ## 2026-11-20 — Guest-isolated thread message queues
 
 - Added ANSI/Unicode `PostThreadMessage` routing by interpreted guest thread ID. Queued scalar

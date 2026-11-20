@@ -885,6 +885,38 @@ int run_sync_selftest() {
                                         &input_device_count, DIEDFL_ATTACHEDONLY) == DI_OK &&
                   input_device_count == 2,
               "sync selftest: enumerate guest DirectInput devices");
+        IDirectInputDevice8W *keyboard = nullptr;
+        check(direct_input->CreateDevice(GUID_SysKeyboard, &keyboard, nullptr) == DI_OK &&
+                  keyboard != nullptr,
+              "sync selftest: create guest DirectInput keyboard");
+        if (keyboard != nullptr) {
+            BYTE keyboard_device_state[256]{};
+            check(keyboard->GetDeviceState(sizeof(keyboard_device_state), keyboard_device_state) ==
+                      DIERR_NOTACQUIRED,
+                  "sync selftest: require DirectInput keyboard acquisition");
+            check(keyboard->SetDataFormat(&c_dfDIKeyboard) == DI_OK && keyboard->Acquire() == DI_OK,
+                  "sync selftest: configure and acquire DirectInput keyboard");
+            const auto expected_z =
+                (GetAsyncKeyState('Z') & 0x8000) != 0 ? static_cast<BYTE>(0x80) : BYTE{};
+            check(keyboard->GetDeviceState(sizeof(keyboard_device_state), keyboard_device_state) ==
+                          DI_OK &&
+                      keyboard_device_state[DIK_Z] == expected_z,
+                  "sync selftest: marshal DIK-indexed keyboard state");
+            check(keyboard->GetDeviceState(sizeof(keyboard_device_state), nullptr) ==
+                      DIERR_INVALIDPARAM,
+                  "sync selftest: reject null DirectInput state output");
+            check(keyboard->Unacquire() == DI_OK &&
+                      keyboard->GetDeviceState(sizeof(keyboard_device_state),
+                                               keyboard_device_state) == DIERR_NOTACQUIRED,
+                  "sync selftest: stop DirectInput state after unacquire");
+            keyboard->Release();
+        }
+        GUID unknown_device = {0x18dc4f21, 0x1187, 0x4e4f, {0x8e, 0x5b, 0x66, 0x7a, 0xe4, 0, 0, 1}};
+        keyboard = nullptr;
+        check(direct_input->CreateDevice(unknown_device, &keyboard, nullptr) ==
+                      DIERR_DEVICENOTREG &&
+                  keyboard == nullptr,
+              "sync selftest: reject unknown DirectInput device GUID");
         direct_input->Release();
     }
     IDirectInput8A *direct_input_ansi = nullptr;

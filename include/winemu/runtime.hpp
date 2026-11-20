@@ -259,6 +259,9 @@ class Runtime {
     std::uint64_t direct_input_unicode_proxy_ = 0;
     std::uint64_t direct_input_device_proxy_ = 0;
     std::unordered_map<std::uint64_t, std::uint32_t> direct_input_methods_;
+    std::unordered_map<std::uint64_t, std::uint8_t> direct_input_device_kinds_;
+    std::unordered_map<std::uint64_t, std::uint32_t> direct_input_device_references_;
+    std::unordered_set<std::uint64_t> acquired_direct_input_devices_;
     struct DirectSoundObject {
         void *host;
         std::uint32_t references;
