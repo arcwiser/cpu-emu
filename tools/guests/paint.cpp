@@ -806,6 +806,38 @@ int run_sync_selftest() {
     if (tls_state.index != TLS_OUT_OF_INDEXES) {
         TlsFree(tls_state.index);
     }
+    constexpr wchar_t persistence_source[] = L"cpuemu-paint-persistence-source.tmp";
+    constexpr wchar_t persistence_destination[] = L"cpuemu-paint-persistence-destination.tmp";
+    static_cast<void>(DeleteFileW(persistence_source));
+    static_cast<void>(DeleteFileW(persistence_destination));
+    const auto persistence_file = CreateFileW(persistence_source, GENERIC_WRITE, 0, nullptr,
+                                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    constexpr char persistence_payload[] = "CPUEmu persistence";
+    DWORD persistence_written = 0;
+    check(persistence_file != INVALID_HANDLE_VALUE &&
+              WriteFile(persistence_file, persistence_payload, sizeof(persistence_payload),
+                        &persistence_written, nullptr) != FALSE &&
+              persistence_written == sizeof(persistence_payload) &&
+              FlushFileBuffers(persistence_file) != FALSE,
+          "sync selftest: write and flush a guest persistence file");
+    if (persistence_file != INVALID_HANDLE_VALUE) {
+        CloseHandle(persistence_file);
+    }
+    check(MoveFileW(persistence_source, persistence_destination) != FALSE,
+          "sync selftest: move a guest persistence file");
+    SetLastError(ERROR_SUCCESS);
+    check(MoveFileW(persistence_source, persistence_destination) == FALSE &&
+              GetLastError() == ERROR_FILE_NOT_FOUND,
+          "sync selftest: preserve native move-file failure");
+    check(DeleteFileA("cpuemu-paint-persistence-destination.tmp") != FALSE,
+          "sync selftest: delete a guest persistence file through ANSI input");
+    SetLastError(ERROR_SUCCESS);
+    check(DeleteFileW(nullptr) == FALSE && GetLastError() == ERROR_INVALID_PARAMETER,
+          "sync selftest: reject null guest persistence paths");
+    SetLastError(ERROR_SUCCESS);
+    check(FlushFileBuffers(reinterpret_cast<HANDLE>(0x1234)) == FALSE &&
+              GetLastError() == ERROR_INVALID_HANDLE,
+          "sync selftest: reject unknown flush handles");
     IDirectInput8W *direct_input = nullptr;
     check(DirectInput8Create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8W,
                              reinterpret_cast<void **>(&direct_input), nullptr) == DI_OK &&

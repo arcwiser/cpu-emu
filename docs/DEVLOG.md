@@ -4,6 +4,15 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-20 — Mutable file persistence adapters
+
+- Added ANSI/Unicode `MoveFile` and `DeleteFile`, plus `FlushFileBuffers`, using copied guest paths
+  and the existing opaque file-handle table. Native success/failure and last-error values are
+  preserved without passing a guest pointer or handle to the host.
+- Added a deterministic persistence regression that creates and writes a file, flushes it, closes
+  it, moves it through Unicode input, and deletes it through ANSI input. It also covers a missing
+  source, a null path, and an unknown file handle, and leaves no fixture file behind.
+
 ## 2026-11-20 — Scheduler-owned thread termination and exit codes
 
 - Added guest-owned `ExitThread` termination for the main and worker scheduler contexts. The call

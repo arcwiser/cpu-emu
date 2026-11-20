@@ -685,6 +685,62 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(2);
         break;
     }
+    case Api::GuestFlushFileBuffers: {
+        const auto found = file_handles_.find(argument(0));
+        if (found == file_handles_.end()) {
+            last_error_ = ERROR_INVALID_HANDLE;
+            cpu.set_reg(Rax, FALSE);
+        } else {
+            const auto result = ::FlushFileBuffers(static_cast<HANDLE>(found->second));
+            if (result == FALSE) {
+                last_error_ = ::GetLastError();
+            }
+            cpu.set_reg(Rax, result);
+        }
+        finish_call(1);
+        break;
+    }
+    case Api::GuestPathMutation: {
+        const auto ansi = thunk_name.ends_with("A");
+        const auto move = thunk_name.find("!MoveFile") != std::string::npos;
+        const auto source_address = argument(0);
+        const auto destination_address = move ? argument(1) : 0;
+        if (source_address == 0 || (move && destination_address == 0)) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, FALSE);
+            finish_call(move ? 2 : 1);
+            break;
+        }
+
+        BOOL result = FALSE;
+        try {
+            if (ansi) {
+                const auto source = cpu.memory().read_c_string(source_address);
+                if (move) {
+                    const auto destination = cpu.memory().read_c_string(destination_address);
+                    result = ::MoveFileA(source.c_str(), destination.c_str());
+                } else {
+                    result = ::DeleteFileA(source.c_str());
+                }
+            } else {
+                const auto source = cpu.memory().read_wide_string(source_address);
+                if (move) {
+                    const auto destination = cpu.memory().read_wide_string(destination_address);
+                    result = ::MoveFileW(source.c_str(), destination.c_str());
+                } else {
+                    result = ::DeleteFileW(source.c_str());
+                }
+            }
+            if (result == FALSE) {
+                last_error_ = ::GetLastError();
+            }
+        } catch (const Error &) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+        }
+        cpu.set_reg(Rax, result);
+        finish_call(move ? 2 : 1);
+        break;
+    }
     case Api::GuestCloseHandle: {
         const auto found = file_handles_.find(argument(0));
         bool result = argument(0) >= 0x100 && argument(0) <= 0x102;
