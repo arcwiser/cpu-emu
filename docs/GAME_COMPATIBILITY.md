@@ -48,7 +48,7 @@ reproducible blocker.
 | Steam startup | ⚠️ | Safe offline failure path; not the current startup blocker |
 | Window class/callback | ✅ | Registers `YYGameMakerYY`; interpreted `WM_NCCREATE`/`WM_CREATE` run |
 | Visible window | ✅ | Live inspection on 2026-11-19 verified the real UNDERTALE title logo rendered in the CPUEmu-owned window |
-| Input discovery | ✅ | Guest-owned inert DirectInput proxy completes optional discovery |
+| Input discovery | ✅ | Guest-owned DirectInput roots enumerate keyboard/mouse descriptors through interpreted ANSI/Unicode callbacks; XInput safely reports no connected controller |
 | Direct3D 9Ex | 🚧 | Adapter/device creation, PE32-safe structure marshaling, texture/surface and vertex/index-buffer proxies, checked staging locks, D3DX decoding, cross-pool uploads, `DrawPrimitive`, and `Present` render the title; broader surface, shader, indexed-draw, reset, and swap-chain paths remain |
 | Audio | 🚧 | Guest-owned DirectSound device/buffer proxies create, format, lock, upload, and start buffers; Undertale's cooperative OpenAL worker passes its observed x87 and pointer-probe paths and sustained DirectSound playback/position activity through the 100M aggregate-instruction limit; audible output remains unverified |
 | Playable | ○ | Requires rendering, input, audio, persistence, and sustained loop |
@@ -72,6 +72,19 @@ The Undertale-specific probe and subsystem roadmap are in [`UNDERTALE.md`](UNDER
 When adding an entry, record the exact application version, Windows version, command line, last
 successful milestone, and first reproducible failure. A compatibility probe should produce a
 regression test before its workaround is considered supported behavior.
+
+Undertale `1.0.8.0` was re-probed at commit `0d8119a` on Windows build `10.0.26200` with:
+
+```powershell
+build\cpuemu.exe `
+  'C:\Program Files (x86)\Steam\steamapps\common\Undertale\UNDERTALE.exe' `
+  --limit 80000000 -v
+```
+
+The guest completed ANSI DirectInput keyboard/mouse enumeration callbacks and four disconnected
+`XInputGetState` probes, then stopped only at the 80,000,000 aggregate-instruction limit
+(74,876,516 on the main context plus worker execution). This verifies input-device discovery and
+the disconnected-controller path, not key delivery, controller input, gameplay, or persistence.
 
 The basic input/menu result was re-probed at commit `47a1640` with:
 
