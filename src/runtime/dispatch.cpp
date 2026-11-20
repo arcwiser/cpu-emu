@@ -1799,6 +1799,25 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             finish_call(1);
             break;
         }
+        if (thunk_name.find("!PostThreadMessage") != std::string::npos) {
+            const auto thread_id = static_cast<std::uint32_t>(argument(0));
+            const auto valid_thread =
+                thread_id == 1 ||
+                std::any_of(guest_threads_.begin(), guest_threads_.end(), [&](const auto &thread) {
+                    return thread.id == thread_id && !thread.completed;
+                });
+            if (!valid_thread) {
+                last_error_ = ERROR_INVALID_THREAD_ID;
+                cpu.set_reg(Rax, FALSE);
+            } else {
+                guest_thread_messages_[thread_id].push_back(
+                    {static_cast<std::uint32_t>(argument(1)), argument(2),
+                     static_cast<std::int64_t>(argument(3)), ::GetTickCount()});
+                cpu.set_reg(Rax, TRUE);
+            }
+            finish_call(4);
+            break;
+        }
         if (thunk_name.ends_with("!TranslateMessage")) {
             const auto message_address = argument(0);
             const auto message = read_message(message_address);
@@ -1840,6 +1859,32 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 quit_message_pending_ = false;
             }
             cpu.set_reg(Rax, 0);
+            finish_call(get_message ? 4 : 5);
+            break;
+        }
+        const auto accepts_thread_messages =
+            window_value == 0 || static_cast<std::uint32_t>(window_value) == UINT32_MAX;
+        auto &thread_messages = guest_thread_messages_[active_guest_thread_id_];
+        const auto queued = std::find_if(
+            thread_messages.begin(), thread_messages.end(), [&](const auto &candidate) {
+                const auto in_range =
+                    (minimum_message == 0 && maximum_message == 0) ||
+                    (candidate.message >= minimum_message && candidate.message <= maximum_message);
+                return accepts_thread_messages && in_range;
+            });
+        if (queued != thread_messages.end()) {
+            message.hwnd = nullptr;
+            message.message = queued->message;
+            message.wParam = static_cast<WPARAM>(queued->word_parameter);
+            message.lParam = static_cast<LPARAM>(queued->long_parameter);
+            message.time = queued->time;
+            write_message(message_address, message);
+            const auto get_message =
+                thunk_name.ends_with("!GetMessageA") || thunk_name.ends_with("!GetMessageW");
+            if (get_message || (remove_flags & PM_REMOVE) != 0) {
+                thread_messages.erase(queued);
+            }
+            cpu.set_reg(Rax, message.message == WM_QUIT ? 0 : TRUE);
             finish_call(get_message ? 4 : 5);
             break;
         }

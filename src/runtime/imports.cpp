@@ -227,7 +227,8 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GuestMessageBox;
     } else if (name == "PeekMessageA" || name == "PeekMessageW" || name == "GetMessageA" ||
                name == "GetMessageW" || name == "TranslateMessage" || name == "DispatchMessageA" ||
-               name == "DispatchMessageW" || name == "PostQuitMessage") {
+               name == "DispatchMessageW" || name == "PostQuitMessage" ||
+               name == "PostThreadMessageA" || name == "PostThreadMessageW") {
         api = Api::GuestMessageLoop;
     } else if (name == "GetAsyncKeyState" || name == "GetKeyState") {
         api = Api::GuestKeyState;

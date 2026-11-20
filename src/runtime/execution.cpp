@@ -135,6 +135,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     next_sync_handle_ = 0x600;
     guest_threads_.clear();
     guest_thread_handles_.clear();
+    guest_thread_messages_.clear();
     next_guest_thread_handle_ = 0x700;
     next_guest_thread_id_ = 2;
     active_guest_thread_id_ = 1;

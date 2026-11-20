@@ -131,6 +131,13 @@ class Runtime {
     };
     std::deque<GuestThread> guest_threads_;
     std::unordered_map<std::uint64_t, std::size_t> guest_thread_handles_;
+    struct GuestThreadMessage {
+        std::uint32_t message;
+        std::uint64_t word_parameter;
+        std::int64_t long_parameter;
+        std::uint32_t time;
+    };
+    std::unordered_map<std::uint32_t, std::deque<GuestThreadMessage>> guest_thread_messages_;
     std::uint64_t next_guest_thread_handle_ = 0x700;
     std::uint32_t next_guest_thread_id_ = 2;
     std::uint32_t active_guest_thread_id_ = 1;

@@ -4,6 +4,15 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-20 — Guest-isolated thread message queues
+
+- Added ANSI/Unicode `PostThreadMessage` routing by interpreted guest thread ID. Queued scalar
+  payloads remain runtime-owned and are copied into the correct PE32 or PE32+ `MSG` layout when
+  that same guest context calls `PeekMessage` or `GetMessage`.
+- Added a cooperative worker regression that receives its targeted message and validates the null
+  window, message number, `WPARAM`, and `LPARAM`; an unknown thread ID returns
+  `ERROR_INVALID_THREAD_ID`. Empty blocking message waits still need scheduler integration.
+
 ## 2026-11-20 — Mutable file persistence adapters
 
 - Added ANSI/Unicode `MoveFile` and `DeleteFile`, plus `FlushFileBuffers`, using copied guest paths

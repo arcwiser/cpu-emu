@@ -146,6 +146,24 @@ DWORD WINAPI tls_isolation_worker(void *parameter) {
 
 DWORD WINAPI explicit_exit_worker(void *) { ExitThread(9); }
 
+struct ThreadMessageState {
+    UINT message;
+    WPARAM word_parameter;
+    LPARAM long_parameter;
+    bool received;
+};
+
+DWORD WINAPI thread_message_worker(void *parameter) {
+    auto &state = *static_cast<ThreadMessageState *>(parameter);
+    MSG message{};
+    state.received = PeekMessageW(&message, reinterpret_cast<HWND>(-1), state.message,
+                                  state.message, PM_REMOVE) != FALSE &&
+                     message.hwnd == nullptr && message.message == state.message &&
+                     message.wParam == state.word_parameter &&
+                     message.lParam == state.long_parameter;
+    return state.received ? 0 : 1;
+}
+
 BOOL CALLBACK count_direct_input_device(const DIDEVICEINSTANCEW *device, void *context) {
     if (device != nullptr && device->dwSize == sizeof(*device) && device->tszInstanceName[0] != 0) {
         ++*static_cast<unsigned *>(context);
@@ -803,6 +821,24 @@ int run_sync_selftest() {
     if (explicit_exit_thread != nullptr) {
         CloseHandle(explicit_exit_thread);
     }
+    ThreadMessageState thread_message_state{WM_APP + 91, 0x1234, 0x5678, false};
+    DWORD message_thread_id = 0;
+    const auto message_thread = CreateThread(nullptr, 0, thread_message_worker,
+                                             &thread_message_state, 0, &message_thread_id);
+    check(message_thread != nullptr &&
+              PostThreadMessageW(message_thread_id, thread_message_state.message,
+                                 thread_message_state.word_parameter,
+                                 thread_message_state.long_parameter) != FALSE &&
+              WaitForSingleObject(message_thread, INFINITE) == WAIT_OBJECT_0 &&
+              thread_message_state.received,
+          "sync selftest: isolate and deliver a guest thread message");
+    if (message_thread != nullptr) {
+        CloseHandle(message_thread);
+    }
+    SetLastError(ERROR_SUCCESS);
+    check(PostThreadMessageW(0xf00d, WM_APP, 0, 0) == FALSE &&
+              GetLastError() == ERROR_INVALID_THREAD_ID,
+          "sync selftest: reject an unknown guest message thread");
     if (tls_state.index != TLS_OUT_OF_INDEXES) {
         TlsFree(tls_state.index);
     }
