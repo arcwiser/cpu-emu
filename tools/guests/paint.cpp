@@ -16,9 +16,11 @@
 // Common Dialogs also depends on the base Windows declarations.
 #include <commdlg.h>
 #include <d3d9.h>
+#include <dinput.h>
 #include <dsound.h>
 #include <mmsystem.h>
 #include <shlobj.h>
+#include <xinput.h>
 
 #include <cstdint>
 #include <cwchar>
@@ -110,6 +112,20 @@ DWORD WINAPI tls_isolation_worker(void *parameter) {
     }
     state.worker_value = reinterpret_cast<std::uintptr_t>(TlsGetValue(state.index));
     return 7;
+}
+
+BOOL CALLBACK count_direct_input_device(const DIDEVICEINSTANCEW *device, void *context) {
+    if (device != nullptr && device->dwSize == sizeof(*device) && device->tszInstanceName[0] != 0) {
+        ++*static_cast<unsigned *>(context);
+    }
+    return DIENUM_CONTINUE;
+}
+
+BOOL CALLBACK stop_after_ansi_direct_input_device(const DIDEVICEINSTANCEA *device, void *context) {
+    if (device != nullptr && device->dwSize == sizeof(*device) && device->tszInstanceName[0] != 0) {
+        ++*static_cast<unsigned *>(context);
+    }
+    return DIENUM_STOP;
 }
 
 INT_PTR CALLBACK test_dialog_procedure(HWND dialog, UINT message, WPARAM, LPARAM parameter) {
@@ -705,6 +721,39 @@ int run_sync_selftest() {
     if (tls_state.index != TLS_OUT_OF_INDEXES) {
         TlsFree(tls_state.index);
     }
+    IDirectInput8W *direct_input = nullptr;
+    check(DirectInput8Create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8W,
+                             reinterpret_cast<void **>(&direct_input), nullptr) == DI_OK &&
+              direct_input != nullptr,
+          "sync selftest: create DirectInput8 proxy");
+    if (direct_input != nullptr) {
+        unsigned input_device_count = 0;
+        check(direct_input->EnumDevices(DI8DEVCLASS_ALL, count_direct_input_device,
+                                        &input_device_count, DIEDFL_ATTACHEDONLY) == DI_OK &&
+                  input_device_count == 2,
+              "sync selftest: enumerate guest DirectInput devices");
+        direct_input->Release();
+    }
+    IDirectInput8A *direct_input_ansi = nullptr;
+    check(DirectInput8Create(GetModuleHandleW(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8A,
+                             reinterpret_cast<void **>(&direct_input_ansi), nullptr) == DI_OK &&
+              direct_input_ansi != nullptr,
+          "sync selftest: create ANSI DirectInput8 proxy");
+    if (direct_input_ansi != nullptr) {
+        unsigned input_device_count = 0;
+        check(direct_input_ansi->EnumDevices(DI8DEVCLASS_ALL, stop_after_ansi_direct_input_device,
+                                             &input_device_count, DIEDFL_ATTACHEDONLY) == DI_OK &&
+                  input_device_count == 1,
+              "sync selftest: stop ANSI DirectInput enumeration");
+        direct_input_ansi->Release();
+    }
+    XINPUT_STATE xinput_state{};
+    xinput_state.dwPacketNumber = 0x12345678;
+    check(XInputGetState(0, &xinput_state) == ERROR_DEVICE_NOT_CONNECTED &&
+              xinput_state.dwPacketNumber == 0x12345678,
+          "sync selftest: report absent XInput controller without changing output");
+    check(XInputGetState(0, nullptr) == ERROR_BAD_ARGUMENTS,
+          "sync selftest: reject null XInput state output");
 
     IDirect3D9Ex *direct3d = nullptr;
     const HRESULT direct3d_result = Direct3DCreate9Ex(D3D_SDK_VERSION, &direct3d);

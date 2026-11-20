@@ -260,6 +260,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     edit_memory_handles_.clear();
     callback_depth_ = 0;
     direct_input_proxy_ = 0;
+    direct_input_unicode_proxy_ = 0;
     direct_input_device_proxy_ = 0;
     direct_input_methods_.clear();
     acc_prop_services_proxy_ = 0;

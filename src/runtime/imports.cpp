@@ -477,6 +477,18 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::D3DXCreateTextureFromFileInMemoryEx;
     } else if (name == "DirectInput8Create") {
         api = Api::DirectInputCreate;
+    } else if (name == "XInputGetState" ||
+               (normalized_module.starts_with("xinput") && name == "#2")) {
+        api = Api::XInputGetState;
+    } else if (name == "XInputSetState" ||
+               (normalized_module.starts_with("xinput") && name == "#3")) {
+        api = Api::XInputSetState;
+    } else if (name == "XInputGetCapabilities" ||
+               (normalized_module.starts_with("xinput") && name == "#4")) {
+        api = Api::XInputGetCapabilities;
+    } else if (name == "XInputEnable" ||
+               (normalized_module.starts_with("xinput") && name == "#5")) {
+        api = Api::XInputEnable;
     } else if (normalized_module == "dsound.dll" && (name == "DirectSoundCreate" || name == "#1")) {
         // The SDK import library binds DirectSoundCreate by its stable export ordinal.
         api = Api::DirectSoundCreate;

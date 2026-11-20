@@ -4,6 +4,20 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-20 — Guest-safe DirectInput enumeration and XInput discovery
+
+- Added ANSI and Unicode `IDirectInput8::EnumDevices` adapters that marshal keyboard and mouse
+  descriptors into guest-owned memory and synchronously invoke guest callbacks through the
+  interpreter. Separate root proxies preserve each interface's string encoding.
+- Added fail-closed XInput state, vibration, capability, and enable adapters, including SDK ordinal
+  imports. With no controller backend, queries report `ERROR_DEVICE_NOT_CONNECTED`; null outputs
+  report `ERROR_BAD_ARGUMENTS`, and failed queries do not alter guest output buffers.
+- Extended the synchronization fixture with Unicode enumeration, ANSI early-stop, nested callback
+  context preservation, disconnected XInput, and invalid-output regressions.
+- Undertale now completes DirectInput enumeration and four XInput controller probes instead of
+  stopping on `XInputGetState`; an 80,000,000 aggregate-instruction probe reaches only its limit.
+  Keyboard gameplay input and physical controller state remain unverified.
+
 ## 2026-11-20 — Per-thread dynamic TLS and guest joins
 
 - Isolated `TlsGetValue`/`TlsSetValue` and their FLS equivalents per interpreted execution context

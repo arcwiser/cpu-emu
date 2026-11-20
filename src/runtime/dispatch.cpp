@@ -30,6 +30,7 @@
 #include <cderr.h>
 #include <commdlg.h>
 #include <d3d9.h>
+#include <dinput.h>
 #include <mmsystem.h>
 // DirectSound declarations use the multimedia wave-format types above.
 #include <dsound.h>
@@ -6630,7 +6631,7 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 next_thunk_ += 0x100;
                 thunks_.emplace(thunk, Api::DirectInputMethod);
                 thunk_names_.emplace(
-                    thunk, (interface_tag == 0 ? "IDirectInput8#" : "IDirectInputDevice8#") +
+                    thunk, (interface_tag == 0x100U ? "IDirectInputDevice8#" : "IDirectInput8#") +
                                std::to_string(index));
                 direct_input_methods_.emplace(thunk, interface_tag | index);
                 write_pointer(vtable + index * pointer_size, thunk);
@@ -6640,14 +6641,20 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         if (direct_input_device_proxy_ == 0) {
             direct_input_device_proxy_ = make_proxy(32, 0x100U);
         }
-        if (direct_input_proxy_ == 0) {
-            direct_input_proxy_ = make_proxy(11, 0);
-        }
+        const auto interface_id = argument(2);
         const auto output = argument(3);
-        if (output == 0 || argument(4) != 0) {
+        if (interface_id == 0 || output == 0 || argument(4) != 0) {
             cpu.set_reg(Rax, 0x80070057U); // E_INVALIDARG
         } else {
-            write_pointer(output, direct_input_proxy_);
+            GUID requested{};
+            const auto requested_bytes = cpu.memory().read(interface_id, sizeof(requested));
+            std::memcpy(&requested, requested_bytes.data(), sizeof(requested));
+            auto &proxy =
+                requested == IID_IDirectInput8W ? direct_input_unicode_proxy_ : direct_input_proxy_;
+            if (proxy == 0) {
+                proxy = make_proxy(11, requested == IID_IDirectInput8W ? 0x200U : 0);
+            }
+            write_pointer(output, proxy);
             cpu.set_reg(Rax, 0); // DI_OK
         }
         finish_call(5);
@@ -6655,9 +6662,11 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
     }
     case Api::DirectInputMethod: {
         constexpr std::uint32_t device_tag = 0x100U;
+        constexpr std::uint32_t unicode_tag = 0x200U;
         constexpr std::uint32_t not_implemented = 0x80004001U;
         const auto tagged_method = direct_input_methods_.at(cpu.rip());
         const auto device = (tagged_method & device_tag) != 0;
+        const auto unicode = (tagged_method & unicode_tag) != 0;
         const auto method = tagged_method & 0xffU;
         const auto write_pointer = [&](std::uint64_t address, std::uint64_t value) {
             if (guest_is_64_bit_) {
@@ -6680,8 +6689,9 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             if (argument(2) == 0) {
                 result = 0x80070057U;
             } else {
-                write_pointer(argument(2),
-                              device ? direct_input_device_proxy_ : direct_input_proxy_);
+                write_pointer(argument(2), device ? direct_input_device_proxy_
+                                                  : (unicode ? direct_input_unicode_proxy_
+                                                             : direct_input_proxy_));
             }
         } else if (method == 1) { // AddRef
             result = 2;
@@ -6692,6 +6702,74 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
                 result = 0x80070057U;
             } else {
                 write_pointer(argument(2), direct_input_device_proxy_);
+            }
+        } else if (!device && method == 4) { // IDirectInput8::EnumDevices
+            const auto requested_type = static_cast<std::uint32_t>(argument(1)) & 0xffU;
+            const auto callback = argument(2);
+            const auto callback_context = argument(3);
+            if (callback == 0) {
+                result = 0x80070057U;
+            } else {
+                struct EnumeratedDevice {
+                    const GUID *instance;
+                    std::uint32_t type;
+                    const char *name;
+                };
+                const EnumeratedDevice devices[] = {
+                    {&GUID_SysKeyboard, DI8DEVTYPE_KEYBOARD | (DI8DEVTYPEKEYBOARD_UNKNOWN << 8),
+                     "CPUEmu Keyboard"},
+                    {&GUID_SysMouse, DI8DEVTYPE_MOUSE | (DI8DEVTYPEMOUSE_UNKNOWN << 8),
+                     "CPUEmu Mouse"},
+                };
+                const auto structure_size =
+                    unicode ? sizeof(DIDEVICEINSTANCEW) : sizeof(DIDEVICEINSTANCEA);
+                for (const auto &enumerated : devices) {
+                    if (requested_type != DI8DEVCLASS_ALL &&
+                        requested_type != enumerated.type % 256) {
+                        continue;
+                    }
+                    const auto instance = allocate(structure_size);
+                    cpu.memory().write(instance, std::vector<std::uint8_t>(structure_size));
+                    cpu.memory().write32(instance, static_cast<std::uint32_t>(structure_size));
+                    const auto write_guid = [&](std::uint64_t address, const GUID &guid) {
+                        cpu.memory().write(
+                            address,
+                            std::span<const std::uint8_t>(
+                                reinterpret_cast<const std::uint8_t *>(&guid), sizeof(guid)));
+                    };
+                    write_guid(instance + 4, *enumerated.instance);
+                    write_guid(instance + 20, *enumerated.instance);
+                    cpu.memory().write32(instance + 36, enumerated.type);
+                    if (unicode) {
+                        const std::wstring name(enumerated.name,
+                                                enumerated.name + std::strlen(enumerated.name));
+                        cpu.memory().write(instance + 40,
+                                           std::span<const std::uint8_t>(
+                                               reinterpret_cast<const std::uint8_t *>(name.c_str()),
+                                               (name.size() + 1) * sizeof(wchar_t)));
+                        cpu.memory().write(instance + 40 + MAX_PATH * sizeof(wchar_t),
+                                           std::span<const std::uint8_t>(
+                                               reinterpret_cast<const std::uint8_t *>(name.c_str()),
+                                               (name.size() + 1) * sizeof(wchar_t)));
+                    } else {
+                        const auto name_size = std::strlen(enumerated.name) + 1;
+                        cpu.memory().write(
+                            instance + 40,
+                            std::span<const std::uint8_t>(
+                                reinterpret_cast<const std::uint8_t *>(enumerated.name),
+                                name_size));
+                        cpu.memory().write(
+                            instance + 40 + MAX_PATH,
+                            std::span<const std::uint8_t>(
+                                reinterpret_cast<const std::uint8_t *>(enumerated.name),
+                                name_size));
+                    }
+                    const auto callback_result = invoke_guest(
+                        cpu, callback, {instance, callback_context, 0, 0}, exit_code, exited);
+                    if (callback_result == DIENUM_STOP || exited) {
+                        break;
+                    }
+                }
             }
         } else if (device && method == 3) { // GetCapabilities
             const auto capabilities = argument(1);
@@ -6728,6 +6806,20 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         finish_call(device ? device_arguments[method] : input_arguments[method]);
         break;
     }
+    case Api::XInputGetState:
+    case Api::XInputSetState:
+    case Api::XInputGetCapabilities: {
+        constexpr std::uint32_t error_bad_arguments = 160;
+        constexpr std::uint32_t error_device_not_connected = 1167;
+        const auto pointer = argument(found->second == Api::XInputGetCapabilities ? 2 : 1);
+        cpu.set_reg(Rax, pointer == 0 ? error_bad_arguments : error_device_not_connected);
+        finish_call(found->second == Api::XInputGetCapabilities ? 3 : 2);
+        break;
+    }
+    case Api::XInputEnable:
+        cpu.set_reg(Rax, 0);
+        finish_call(1);
+        break;
     case Api::ResolveDelayLoadedAPI: {
         const auto descriptor = cpu.reg(Rdx);
         const auto thunk_address = cpu.memory().read64(cpu.reg(Rsp) + 0x28);

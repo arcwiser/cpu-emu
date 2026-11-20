@@ -238,6 +238,7 @@ class Runtime {
     std::unordered_map<std::uint64_t, std::uint64_t> edit_memory_handles_;
     std::uint32_t callback_depth_ = 0;
     std::uint64_t direct_input_proxy_ = 0;
+    std::uint64_t direct_input_unicode_proxy_ = 0;
     std::uint64_t direct_input_device_proxy_ = 0;
     std::unordered_map<std::uint64_t, std::uint32_t> direct_input_methods_;
     struct DirectSoundObject {
