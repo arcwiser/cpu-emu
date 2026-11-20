@@ -2167,7 +2167,23 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         break;
     }
     case Api::Sleep:
-        ::Sleep(static_cast<DWORD>(argument(0)));
+        if (const auto milliseconds = static_cast<DWORD>(argument(0)); milliseconds != 0) {
+            const auto deadline = ::GetTickCount64() + milliseconds;
+            if (active_guest_thread_id_ == 1) {
+                main_thread_waiting_ = true;
+                main_thread_wait_handle_ = nullptr;
+                main_thread_wait_deadline_ = deadline;
+            } else {
+                for (auto &thread : guest_threads_) {
+                    if (thread.id == active_guest_thread_id_) {
+                        thread.waiting = true;
+                        thread.wait_handle = nullptr;
+                        thread.wait_deadline = deadline;
+                        break;
+                    }
+                }
+            }
+        }
         cpu.set_reg(Rax, 0);
         finish_call(1);
         break;

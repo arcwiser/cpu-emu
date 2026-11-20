@@ -4,6 +4,15 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-20 — Scheduler-aware guest Sleep
+
+- Changed `Sleep` from a native host-thread block into a timed suspension of only the calling guest
+  execution context. `Sleep(0)` remains an immediate cooperative yield point.
+- Strengthened the generated thread regression: the worker signals that it entered a 50 ms sleep,
+  the main guest must change shared state during that interval, and the worker validates the change
+  after waking before returning code 7. The fixture also moved code and shared data into disjoint
+  ranges, removing accidental self-modifying overlap from the earlier layout.
+
 ## 2026-11-19 — Guest permission-aware pointer probes
 
 - Added `IsBadReadPtr` and `IsBadWritePtr` adapters that walk the complete guest range and validate

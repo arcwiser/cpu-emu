@@ -590,6 +590,14 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
             if (!waiting) {
                 return;
             }
+            if (wait_handle == nullptr) {
+                if (::GetTickCount64() < wait_deadline) {
+                    return;
+                }
+                waiting_cpu.set_reg(Rax, 0);
+                waiting = false;
+                return;
+            }
             auto result = ::WaitForSingleObject(static_cast<HANDLE>(wait_handle), 0);
             if (result == WAIT_TIMEOUT && wait_deadline != UINT64_MAX &&
                 ::GetTickCount64() >= wait_deadline) {
