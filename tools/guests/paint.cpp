@@ -702,6 +702,14 @@ int run_sync_selftest() {
     if (read_only != nullptr) {
         VirtualFree(read_only, 0, MEM_RELEASE);
     }
+    BYTE keyboard_state[256]{};
+    check(GetKeyboardState(keyboard_state) != FALSE,
+          "sync selftest: copy native keyboard state into guest memory");
+    SetLastError(ERROR_SUCCESS);
+    check(GetKeyboardState(nullptr) == FALSE && GetLastError() == ERROR_INVALID_PARAMETER,
+          "sync selftest: reject null keyboard state output");
+    static_cast<void>(GetAsyncKeyState(VK_SHIFT));
+    static_cast<void>(GetKeyState(VK_CAPITAL));
     TlsIsolationState tls_state{TlsAlloc(), 0xffff, 0};
     check(tls_state.index != TLS_OUT_OF_INDEXES &&
               TlsSetValue(tls_state.index, reinterpret_cast<void *>(0x1111)) != FALSE,

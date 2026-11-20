@@ -1762,6 +1762,50 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         }
         break;
     }
+    case Api::GuestKeyState: {
+        const auto virtual_key = static_cast<int>(argument(0));
+        const auto state = thunk_name.ends_with("!GetAsyncKeyState")
+                               ? ::GetAsyncKeyState(virtual_key)
+                               : ::GetKeyState(virtual_key);
+        cpu.set_reg(Rax, static_cast<std::uint32_t>(static_cast<std::int32_t>(state)));
+        finish_call(1);
+        break;
+    }
+    case Api::GuestKeyboardState: {
+        constexpr std::uint64_t keyboard_state_size = 256;
+        const auto output = argument(0);
+        auto writable = output != 0 && output <= UINT64_MAX - keyboard_state_size;
+        auto cursor = output;
+        const auto end = output + keyboard_state_size;
+        while (writable && cursor < end) {
+            VirtualMemoryInfo information{};
+            if (!cpu.memory().query(cursor, information) || !information.committed ||
+                (information.permissions & Write) == 0 ||
+                information.size > UINT64_MAX - information.base) {
+                writable = false;
+                break;
+            }
+            const auto region_end = information.base + information.size;
+            if (region_end <= cursor) {
+                writable = false;
+                break;
+            }
+            cursor = std::min(end, region_end);
+        }
+        std::array<std::uint8_t, keyboard_state_size> state{};
+        if (!writable) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, 0);
+        } else if (::GetKeyboardState(state.data()) == FALSE) {
+            last_error_ = ::GetLastError();
+            cpu.set_reg(Rax, 0);
+        } else {
+            cpu.memory().write(output, state);
+            cpu.set_reg(Rax, 1);
+        }
+        finish_call(1);
+        break;
+    }
     case Api::GuestFileDialog: {
         if (thunk_name.ends_with("!CommDlgExtendedError")) {
             cpu.set_reg(Rax, common_dialog_error_);

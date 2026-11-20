@@ -4,6 +4,15 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-20 — Keyboard state adapters
+
+- Added pointer-free `GetAsyncKeyState` and `GetKeyState` forwarding plus a marshaled
+  `GetKeyboardState` adapter. The latter obtains the table in host storage and copies it only after
+  walking the complete 256-byte guest output range for committed write permission.
+- Added success and null-output regressions to the Paint synchronization fixture; no guest pointer
+  is passed to native User32. This exposes host keyboard state but does not by itself verify that
+  Undertale consumes title-screen input.
+
 ## 2026-11-20 — Guest-safe DirectInput enumeration and XInput discovery
 
 - Added ANSI and Unicode `IDirectInput8::EnumDevices` adapters that marshal keyboard and mouse

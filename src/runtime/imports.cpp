@@ -220,6 +220,10 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
                name == "GetMessageW" || name == "TranslateMessage" || name == "DispatchMessageA" ||
                name == "DispatchMessageW" || name == "PostQuitMessage") {
         api = Api::GuestMessageLoop;
+    } else if (name == "GetAsyncKeyState" || name == "GetKeyState") {
+        api = Api::GuestKeyState;
+    } else if (name == "GetKeyboardState") {
+        api = Api::GuestKeyboardState;
     } else if (name == "GetOpenFileNameA" || name == "GetOpenFileNameW" ||
                name == "GetSaveFileNameA" || name == "GetSaveFileNameW" ||
                name == "CommDlgExtendedError") {

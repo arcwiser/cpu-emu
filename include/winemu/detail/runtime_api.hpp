@@ -60,6 +60,8 @@ enum class RuntimeApi {
     GuestDisplaySettings,
     GuestMessageBox,
     GuestMessageLoop,
+    GuestKeyState,
+    GuestKeyboardState,
     GuestFileDialog,
     GuestMimeType,
     CommonControlsInitialize,
