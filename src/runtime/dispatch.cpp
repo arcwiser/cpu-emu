@@ -1073,6 +1073,60 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         cpu.set_reg(Rax, active_guest_thread_id_);
         finish_call();
         break;
+    case Api::GuestExitThread: {
+        const auto requested_exit_code = static_cast<std::uint32_t>(argument(0));
+        if (active_guest_thread_id_ == 1) {
+            main_thread_exit_code_ = requested_exit_code;
+            main_thread_completed_ = true;
+        } else {
+            const auto thread = std::find_if(
+                guest_threads_.begin(), guest_threads_.end(),
+                [&](const auto &candidate) { return candidate.id == active_guest_thread_id_; });
+            if (thread != guest_threads_.end()) {
+                thread->exit_code = requested_exit_code;
+                thread->completed = true;
+            }
+        }
+        // ExitThread is noreturn. Leaving the guest context at the import thunk also ensures the
+        // cooperative scheduler, rather than an emulated return instruction, owns termination.
+        break;
+    }
+    case Api::GuestThreadExitCode: {
+        constexpr std::uint32_t still_active = 259;
+        const auto handle = argument(0);
+        const auto destination = argument(1);
+        const auto current_thread = static_cast<std::uint32_t>(handle) == 0xfffffffeU;
+        GuestThread *thread = nullptr;
+        if (!current_thread) {
+            const auto found_thread = guest_thread_handles_.find(handle);
+            if (found_thread != guest_thread_handles_.end()) {
+                thread = &guest_threads_[found_thread->second];
+            }
+        }
+
+        VirtualMemoryInfo information{};
+        const auto valid_destination =
+            destination <= UINT64_MAX - sizeof(std::uint32_t) &&
+            cpu.memory().query(destination, information) && information.committed &&
+            (information.permissions & Write) != 0 &&
+            information.size <= UINT64_MAX - information.base &&
+            destination + sizeof(std::uint32_t) <= information.base + information.size;
+        if (!current_thread && thread == nullptr) {
+            last_error_ = ERROR_INVALID_HANDLE;
+            cpu.set_reg(Rax, FALSE);
+        } else if (!valid_destination) {
+            last_error_ = ERROR_INVALID_PARAMETER;
+            cpu.set_reg(Rax, FALSE);
+        } else {
+            const auto completed = current_thread ? main_thread_completed_ : thread->completed;
+            const auto thread_exit_code =
+                current_thread ? main_thread_exit_code_ : thread->exit_code;
+            cpu.memory().write32(destination, completed ? thread_exit_code : still_active);
+            cpu.set_reg(Rax, TRUE);
+        }
+        finish_call(2);
+        break;
+    }
     case Api::GuestThreadPriority: {
         const auto handle = argument(0);
         const auto current_thread = static_cast<std::uint32_t>(handle) == 0xfffffffeU;

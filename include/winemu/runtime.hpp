@@ -139,6 +139,8 @@ class Runtime {
     bool guest_static_tls_present_ = false;
     std::vector<std::uint8_t> guest_tls_template_;
     std::vector<std::uint64_t> guest_tls_callbacks_;
+    bool main_thread_completed_ = false;
+    std::uint32_t main_thread_exit_code_ = 0;
     std::int32_t main_thread_priority_ = 0;
     std::uint32_t main_thread_last_error_ = 0;
     bool main_thread_waiting_ = false;

@@ -151,6 +151,10 @@ std::uint64_t Runtime::resolve_import(const std::string &module, const std::stri
         api = Api::GetCurrentProcessId;
     } else if (kernel_module && name == "GetCurrentThreadId") {
         api = Api::GetCurrentThreadId;
+    } else if (kernel_module && name == "ExitThread") {
+        api = Api::GuestExitThread;
+    } else if (kernel_module && name == "GetExitCodeThread") {
+        api = Api::GuestThreadExitCode;
     } else if (kernel_module && (name == "SetThreadPriority" || name == "GetThreadPriority")) {
         api = Api::GuestThreadPriority;
     } else if (kernel_module && (name == "IsBadReadPtr" || name == "IsBadWritePtr")) {

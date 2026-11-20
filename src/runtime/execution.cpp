@@ -142,6 +142,8 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     guest_static_tls_present_ = false;
     guest_tls_template_.clear();
     guest_tls_callbacks_.clear();
+    main_thread_completed_ = false;
+    main_thread_exit_code_ = 0;
     main_thread_priority_ = 0;
     main_thread_last_error_ = 0;
     main_thread_waiting_ = false;
@@ -656,18 +658,21 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
                 throw Error("instruction limit exceeded");
             }
 
-            active_guest_thread_id_ = 1;
-            last_error_ = main_thread_last_error_;
-            detail::set_callback_context(*this, cpu, exit_code, exited);
-            poll_wait(cpu, main_thread_waiting_, main_thread_wait_handle_,
-                      main_thread_wait_thread_handle_, main_thread_wait_deadline_);
-            const auto main_quantum_end = cpu.instructions() + scheduler_quantum;
-            while (!exited && !main_thread_waiting_ && cpu.instructions() < main_quantum_end) {
-                if (!dispatch(cpu, exit_code, exited)) {
-                    cpu.step();
+            if (!main_thread_completed_) {
+                active_guest_thread_id_ = 1;
+                last_error_ = main_thread_last_error_;
+                detail::set_callback_context(*this, cpu, exit_code, exited);
+                poll_wait(cpu, main_thread_waiting_, main_thread_wait_handle_,
+                          main_thread_wait_thread_handle_, main_thread_wait_deadline_);
+                const auto main_quantum_end = cpu.instructions() + scheduler_quantum;
+                while (!exited && !main_thread_completed_ && !main_thread_waiting_ &&
+                       cpu.instructions() < main_quantum_end) {
+                    if (!dispatch(cpu, exit_code, exited)) {
+                        cpu.step();
+                    }
                 }
+                main_thread_last_error_ = last_error_;
             }
-            main_thread_last_error_ = last_error_;
 
             for (auto &thread : guest_threads_) {
                 if (exited || thread.completed) {
@@ -714,6 +719,12 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
                     }
                 }
                 thread.last_error = last_error_;
+            }
+            if (!exited && main_thread_completed_ &&
+                std::all_of(guest_threads_.begin(), guest_threads_.end(),
+                            [](const auto &thread) { return thread.completed; })) {
+                exit_code = main_thread_exit_code_;
+                exited = true;
             }
         }
     } catch (const std::exception &) {

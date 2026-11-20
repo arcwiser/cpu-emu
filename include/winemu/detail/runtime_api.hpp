@@ -39,6 +39,8 @@ enum class RuntimeApi {
     IsDebuggerPresent,
     GetCurrentProcessId,
     GetCurrentThreadId,
+    GuestExitThread,
+    GuestThreadExitCode,
     GuestThreadPriority,
     GuestPointerProbe,
     StartupInfo,

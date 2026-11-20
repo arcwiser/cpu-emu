@@ -144,6 +144,8 @@ DWORD WINAPI tls_isolation_worker(void *parameter) {
     return 7;
 }
 
+DWORD WINAPI explicit_exit_worker(void *) { ExitThread(9); }
+
 BOOL CALLBACK count_direct_input_device(const DIDEVICEINSTANCEW *device, void *context) {
     if (device != nullptr && device->dwSize == sizeof(*device) && device->tszInstanceName[0] != 0) {
         ++*static_cast<unsigned *>(context);
@@ -751,10 +753,21 @@ int run_sync_selftest() {
     DWORD tls_thread_id = 0;
     const auto tls_thread =
         CreateThread(nullptr, 0, tls_isolation_worker, &tls_state, 0, &tls_thread_id);
+    DWORD tls_exit_code = 0;
+    check(tls_thread != nullptr && GetExitCodeThread(tls_thread, &tls_exit_code) != FALSE &&
+              tls_exit_code == STILL_ACTIVE,
+          "sync selftest: report a running guest thread as active");
     check(tls_thread != nullptr && tls_thread_id != GetCurrentThreadId() &&
               WaitForSingleObject(tls_thread, INFINITE) == WAIT_OBJECT_0,
           "sync selftest: join cooperative guest thread");
+    check(tls_thread != nullptr && GetExitCodeThread(tls_thread, &tls_exit_code) != FALSE &&
+              tls_exit_code == 7,
+          "sync selftest: preserve guest thread return code");
     const auto main_thread_error = GetLastError();
+    SetLastError(ERROR_SUCCESS);
+    check(tls_thread != nullptr && GetExitCodeThread(tls_thread, nullptr) == FALSE &&
+              GetLastError() == ERROR_INVALID_PARAMETER,
+          "sync selftest: reject null guest thread exit-code output");
     check(tls_state.initial_value == 0 && tls_state.worker_value == 0x2222 &&
               reinterpret_cast<std::uintptr_t>(TlsGetValue(tls_state.index)) == 0x1111,
           "sync selftest: isolate TLS values by guest thread");
@@ -773,6 +786,22 @@ int run_sync_selftest() {
           "sync selftest: invoke TLS callback after guest thread return");
     if (tls_thread != nullptr) {
         CloseHandle(tls_thread);
+    }
+    SetLastError(ERROR_SUCCESS);
+    check(GetExitCodeThread(reinterpret_cast<HANDLE>(0x1234), &tls_exit_code) == FALSE &&
+              GetLastError() == ERROR_INVALID_HANDLE,
+          "sync selftest: reject unknown guest thread exit-code handle");
+    const auto explicit_exit_thread =
+        CreateThread(nullptr, 0, explicit_exit_worker, nullptr, 0, nullptr);
+    check(explicit_exit_thread != nullptr &&
+              WaitForSingleObject(explicit_exit_thread, INFINITE) == WAIT_OBJECT_0 &&
+              GetExitCodeThread(explicit_exit_thread, &tls_exit_code) != FALSE &&
+              tls_exit_code == 9,
+          "sync selftest: terminate guest worker through ExitThread");
+    check(tls_thread_detach_count == 2,
+          "sync selftest: invoke TLS detach callback after ExitThread");
+    if (explicit_exit_thread != nullptr) {
+        CloseHandle(explicit_exit_thread);
     }
     if (tls_state.index != TLS_OUT_OF_INDEXES) {
         TlsFree(tls_state.index);

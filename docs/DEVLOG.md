@@ -4,6 +4,18 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-20 — Scheduler-owned thread termination and exit codes
+
+- Added guest-owned `ExitThread` termination for the main and worker scheduler contexts. The call
+  is treated as noreturn, and a worker still receives its interpreted `DLL_THREAD_DETACH`
+  callbacks before a join completes.
+- Added `GetExitCodeThread` for opaque guest handles and the current-thread pseudo-handle. Running
+  threads report `STILL_ACTIVE`; completed return and explicit-exit codes remain available until
+  their handle is closed. Unknown handles and invalid output ranges fail without exposing a host
+  thread handle or pointer.
+- Extended the Paint synchronization fixture to cover a running worker, normal return code 7,
+  explicit `ExitThread(9)`, TLS detach sequencing, and invalid handle/output cases.
+
 ## 2026-11-20 — Worker static TLS and loader callbacks
 
 - Copied each PE static TLS template into worker-owned storage, created a separate guest TLS vector,
