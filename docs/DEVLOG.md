@@ -4,6 +4,19 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-20 — Worker static TLS and loader callbacks
+
+- Copied each PE static TLS template into worker-owned storage, created a separate guest TLS vector,
+  and connected it through the worker TEB before executing guest code.
+- Added interpreted `DLL_THREAD_ATTACH` and `DLL_THREAD_DETACH` callback delivery. The x64 entry
+  parameter is installed after attach callbacks, matching Windows ordering and preventing legal
+  volatile-register clobbering from corrupting the worker argument.
+- Strengthened the Paint fixture with a real 16-byte PE TLS template and `.CRT$XLB` callback. It
+  verifies the worker starts from the template, cannot alter the main thread's static value, sees
+  one attach before entry, and completes one detach before the join returns.
+- Undertale's PE32 audio worker retained active DirectSound polling through an 80,000,000 aggregate
+  instruction probe with no unsupported operation or memory fault.
+
 ## 2026-11-20 — Independent guest thread environment blocks
 
 - Allocated and initialized a guest-owned TEB for every worker with its own stack bounds, self

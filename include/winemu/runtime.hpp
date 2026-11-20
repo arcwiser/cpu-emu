@@ -115,8 +115,11 @@ class Runtime {
         std::uint64_t handle;
         std::uint32_t id;
         std::uint64_t teb_base = 0;
+        std::uint64_t start_parameter = 0;
         std::uint32_t exit_code = 0;
         std::uint32_t last_error = 0;
+        bool tls_attach_pending = false;
+        bool tls_detach_pending = false;
         std::int32_t priority = 0;
         bool completed = false;
         bool waiting = false;
@@ -133,6 +136,9 @@ class Runtime {
     std::uint32_t active_guest_thread_id_ = 1;
     std::uint64_t next_thread_stack_top_ = 0;
     std::uint64_t thread_return_thunk_ = 0;
+    bool guest_static_tls_present_ = false;
+    std::vector<std::uint8_t> guest_tls_template_;
+    std::vector<std::uint64_t> guest_tls_callbacks_;
     std::int32_t main_thread_priority_ = 0;
     std::uint32_t main_thread_last_error_ = 0;
     bool main_thread_waiting_ = false;

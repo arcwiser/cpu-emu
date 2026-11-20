@@ -139,6 +139,9 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     next_guest_thread_id_ = 2;
     active_guest_thread_id_ = 1;
     thread_return_thunk_ = 0;
+    guest_static_tls_present_ = false;
+    guest_tls_template_.clear();
+    guest_tls_callbacks_.clear();
     main_thread_priority_ = 0;
     main_thread_last_error_ = 0;
     main_thread_waiting_ = false;
@@ -368,6 +371,13 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     configure_format(image.is_64_bit);
     heap_next_ = image.is_64_bit ? 0x0000'0006'0000'0000ULL : 0x1000'0000ULL;
     guest_image_base_ = image.base;
+    guest_static_tls_present_ =
+        image.tls_start != 0 || image.tls_index != 0 || !image.tls_callbacks.empty();
+    if (image.tls_end > image.tls_start) {
+        guest_tls_template_ =
+            memory.read(image.tls_start, static_cast<std::size_t>(image.tls_end - image.tls_start));
+    }
+    guest_tls_callbacks_ = image.tls_callbacks;
     if (resource_module_ != nullptr) {
         FreeLibrary(static_cast<HMODULE>(resource_module_));
     }
@@ -666,6 +676,21 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
                 active_guest_thread_id_ = thread.id;
                 last_error_ = thread.last_error;
                 detail::set_callback_context(*this, *thread.cpu, exit_code, exited);
+                if (thread.tls_attach_pending) {
+                    thread.tls_attach_pending = false;
+                    for (const auto callback : guest_tls_callbacks_) {
+                        log::trace("runtime", "calling worker TLS callback " + log::hex(callback));
+                        static_cast<void>(invoke_guest(*thread.cpu, callback,
+                                                       {guest_image_base_, DLL_THREAD_ATTACH, 0, 0},
+                                                       exit_code, exited));
+                        if (exited) {
+                            break;
+                        }
+                    }
+                    if (guest_is_64_bit_) {
+                        thread.cpu->set_reg(Rcx, thread.start_parameter);
+                    }
+                }
                 poll_wait(*thread.cpu, thread.waiting, thread.wait_handle,
                           thread.wait_thread_handle, thread.wait_deadline);
                 const auto thread_quantum_end = thread.cpu->instructions() + scheduler_quantum;
@@ -673,6 +698,19 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
                        thread.cpu->instructions() < thread_quantum_end) {
                     if (!dispatch(*thread.cpu, exit_code, exited)) {
                         thread.cpu->step();
+                    }
+                }
+                if (!exited && thread.completed && thread.tls_detach_pending) {
+                    thread.tls_detach_pending = false;
+                    for (const auto callback : guest_tls_callbacks_) {
+                        log::trace("runtime",
+                                   "calling worker TLS detach callback " + log::hex(callback));
+                        static_cast<void>(invoke_guest(*thread.cpu, callback,
+                                                       {guest_image_base_, DLL_THREAD_DETACH, 0, 0},
+                                                       exit_code, exited));
+                        if (exited) {
+                            break;
+                        }
                     }
                 }
                 thread.last_error = last_error_;

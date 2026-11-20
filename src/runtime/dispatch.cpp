@@ -3392,6 +3392,25 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
             cpu.memory().write32(thread_teb + 0x24, thread_id);
             cpu.memory().write32(thread_teb + 0x30, static_cast<std::uint32_t>(detail::peb_base));
         }
+        if (guest_static_tls_present_) {
+            const auto pointer_size = guest_is_64_bit_ ? 8ULL : 4ULL;
+            constexpr std::uint64_t tls_slot_count = 64;
+            const auto vector_size = pointer_size * tls_slot_count;
+            const auto tls_storage =
+                allocate(vector_size + std::max<std::uint64_t>(guest_tls_template_.size(), 1));
+            const auto tls_block = tls_storage + vector_size;
+            cpu.memory().write(tls_storage, std::vector<std::uint8_t>(vector_size));
+            if (guest_is_64_bit_) {
+                cpu.memory().write64(thread_teb + 0x58, tls_storage);
+                cpu.memory().write64(tls_storage, tls_block);
+            } else {
+                cpu.memory().write32(thread_teb + 0x2c, static_cast<std::uint32_t>(tls_storage));
+                cpu.memory().write32(tls_storage, static_cast<std::uint32_t>(tls_block));
+            }
+            if (!guest_tls_template_.empty()) {
+                cpu.memory().write(tls_block, guest_tls_template_);
+            }
+        }
         if (guest_is_64_bit_) {
             cpu.memory().write64(initial_rsp, thread_return_thunk_);
         } else {
@@ -3412,6 +3431,9 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         thread.handle = handle;
         thread.id = thread_id;
         thread.teb_base = thread_teb;
+        thread.start_parameter = parameter;
+        thread.tls_attach_pending = !guest_tls_callbacks_.empty();
+        thread.tls_detach_pending = !guest_tls_callbacks_.empty();
         guest_threads_.push_back(std::move(thread));
         if (id_output != 0) {
             cpu.memory().write32(id_output, thread_id);

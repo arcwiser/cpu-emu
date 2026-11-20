@@ -36,6 +36,21 @@ constexpr int palette_size = 6;
 constexpr int stamp_shape_count = 3;
 constexpr int max_segments = 5000;
 constexpr int max_stamps = 256;
+thread_local std::uintptr_t static_tls_probe = 0x1234;
+volatile LONG tls_thread_attach_count = 0;
+volatile LONG tls_thread_detach_count = 0;
+
+void NTAPI paint_tls_callback(void *, DWORD reason, void *) {
+    if (reason == DLL_THREAD_ATTACH) {
+        InterlockedIncrement(&tls_thread_attach_count);
+    } else if (reason == DLL_THREAD_DETACH) {
+        InterlockedIncrement(&tls_thread_detach_count);
+    }
+}
+
+#pragma section(".CRT$XLB", long, read)
+__declspec(allocate(".CRT$XLB")) __attribute__((used))
+const PIMAGE_TLS_CALLBACK paint_tls_callback_entry = paint_tls_callback;
 
 const COLORREF palette[palette_size] = {
     RGB(200, 30, 30), RGB(30, 120, 220), RGB(30, 160, 60),
@@ -106,11 +121,18 @@ struct TlsIsolationState {
     DWORD worker_error;
     std::uintptr_t main_teb;
     std::uintptr_t worker_teb;
+    std::uintptr_t static_initial_value;
+    std::uintptr_t static_worker_value;
+    LONG tls_callback_count;
 };
 
 DWORD WINAPI tls_isolation_worker(void *parameter) {
     auto &state = *static_cast<TlsIsolationState *>(parameter);
     state.worker_teb = reinterpret_cast<std::uintptr_t>(NtCurrentTeb());
+    state.static_initial_value = static_tls_probe;
+    state.tls_callback_count = tls_thread_attach_count;
+    static_tls_probe = 0x2222;
+    state.static_worker_value = static_tls_probe;
     state.initial_error = GetLastError();
     state.initial_value = reinterpret_cast<std::uintptr_t>(TlsGetValue(state.index));
     if (TlsSetValue(state.index, reinterpret_cast<void *>(0x2222)) == FALSE) {
@@ -719,11 +741,13 @@ int run_sync_selftest() {
     static_cast<void>(GetAsyncKeyState(VK_SHIFT));
     static_cast<void>(GetKeyState(VK_CAPITAL));
     TlsIsolationState tls_state{
-        TlsAlloc(), 0xffff, 0, 0xffff, 0, reinterpret_cast<std::uintptr_t>(NtCurrentTeb()), 0};
+        TlsAlloc(), 0xffff, 0, 0xffff, 0, reinterpret_cast<std::uintptr_t>(NtCurrentTeb()),
+        0,          0,      0, 0};
     check(tls_state.index != TLS_OUT_OF_INDEXES &&
               TlsSetValue(tls_state.index, reinterpret_cast<void *>(0x1111)) != FALSE,
           "sync selftest: allocate main-thread TLS value");
     SetLastError(0x1111);
+    static_tls_probe = 0x1111;
     DWORD tls_thread_id = 0;
     const auto tls_thread =
         CreateThread(nullptr, 0, tls_isolation_worker, &tls_state, 0, &tls_thread_id);
@@ -740,6 +764,13 @@ int run_sync_selftest() {
     check(tls_state.main_teb != 0 && tls_state.worker_teb != 0 &&
               tls_state.main_teb != tls_state.worker_teb,
           "sync selftest: isolate guest thread environment blocks");
+    check(tls_state.static_initial_value == 0x1234 && tls_state.static_worker_value == 0x2222 &&
+              static_tls_probe == 0x1111,
+          "sync selftest: initialize and isolate static PE TLS");
+    check(tls_state.tls_callback_count == 1,
+          "sync selftest: invoke TLS callback before guest thread entry");
+    check(tls_thread_detach_count == 1,
+          "sync selftest: invoke TLS callback after guest thread return");
     if (tls_thread != nullptr) {
         CloseHandle(tls_thread);
     }
