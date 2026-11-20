@@ -104,10 +104,13 @@ struct TlsIsolationState {
     std::uintptr_t worker_value;
     DWORD initial_error;
     DWORD worker_error;
+    std::uintptr_t main_teb;
+    std::uintptr_t worker_teb;
 };
 
 DWORD WINAPI tls_isolation_worker(void *parameter) {
     auto &state = *static_cast<TlsIsolationState *>(parameter);
+    state.worker_teb = reinterpret_cast<std::uintptr_t>(NtCurrentTeb());
     state.initial_error = GetLastError();
     state.initial_value = reinterpret_cast<std::uintptr_t>(TlsGetValue(state.index));
     if (TlsSetValue(state.index, reinterpret_cast<void *>(0x2222)) == FALSE) {
@@ -715,7 +718,8 @@ int run_sync_selftest() {
           "sync selftest: reject null keyboard state output");
     static_cast<void>(GetAsyncKeyState(VK_SHIFT));
     static_cast<void>(GetKeyState(VK_CAPITAL));
-    TlsIsolationState tls_state{TlsAlloc(), 0xffff, 0, 0xffff, 0};
+    TlsIsolationState tls_state{
+        TlsAlloc(), 0xffff, 0, 0xffff, 0, reinterpret_cast<std::uintptr_t>(NtCurrentTeb()), 0};
     check(tls_state.index != TLS_OUT_OF_INDEXES &&
               TlsSetValue(tls_state.index, reinterpret_cast<void *>(0x1111)) != FALSE,
           "sync selftest: allocate main-thread TLS value");
@@ -733,6 +737,9 @@ int run_sync_selftest() {
     check(tls_state.initial_error == 0 && tls_state.worker_error == 0x2222 &&
               main_thread_error == 0x1111,
           "sync selftest: isolate last-error values by guest thread");
+    check(tls_state.main_teb != 0 && tls_state.worker_teb != 0 &&
+              tls_state.main_teb != tls_state.worker_teb,
+          "sync selftest: isolate guest thread environment blocks");
     if (tls_thread != nullptr) {
         CloseHandle(tls_thread);
     }

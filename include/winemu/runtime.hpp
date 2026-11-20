@@ -114,6 +114,7 @@ class Runtime {
         std::unique_ptr<Cpu> cpu;
         std::uint64_t handle;
         std::uint32_t id;
+        std::uint64_t teb_base = 0;
         std::uint32_t exit_code = 0;
         std::uint32_t last_error = 0;
         std::int32_t priority = 0;

@@ -4,6 +4,17 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-20 — Independent guest thread environment blocks
+
+- Allocated and initialized a guest-owned TEB for every worker with its own stack bounds, self
+  pointer, client thread ID, and shared PEB pointer. Worker CPUs now use that TEB as their x64 `GS`
+  or x86 `FS` segment base instead of inheriting the main thread's block.
+- Extended the joined-worker regression to compare `NtCurrentTeb()` in the main and worker contexts.
+  Undertale's PE32 audio worker continued dynamic TLS and DirectSound activity through an
+  80,000,000 aggregate-instruction probe with no unsupported call or memory fault.
+- Static PE TLS templates and `DLL_THREAD_ATTACH` callbacks are still main-thread-only and remain
+  the next thread-startup boundary.
+
 ## 2026-11-20 — Per-thread Windows last-error state
 
 - Isolated `GetLastError`/`SetLastError` state per interpreted scheduler context. Switching between

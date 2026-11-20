@@ -3374,6 +3374,24 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         cpu.memory().map(stack_base, stack_size, Read | Write, "guest thread stack");
         const auto stack_top_address = stack_base + stack_size;
         const auto initial_rsp = stack_top_address - (guest_is_64_bit_ ? 0x28 : 8);
+        const auto handle = next_guest_thread_handle_++;
+        const auto thread_id = next_guest_thread_id_++;
+        const auto thread_teb = allocate(0x1000);
+        if (guest_is_64_bit_) {
+            cpu.memory().write64(thread_teb + 0x08, stack_top_address);
+            cpu.memory().write64(thread_teb + 0x10, stack_base);
+            cpu.memory().write64(thread_teb + 0x30, thread_teb);
+            cpu.memory().write64(thread_teb + 0x40, 1);
+            cpu.memory().write64(thread_teb + 0x48, thread_id);
+            cpu.memory().write64(thread_teb + 0x60, detail::peb_base);
+        } else {
+            cpu.memory().write32(thread_teb + 0x04, static_cast<std::uint32_t>(stack_top_address));
+            cpu.memory().write32(thread_teb + 0x08, static_cast<std::uint32_t>(stack_base));
+            cpu.memory().write32(thread_teb + 0x18, static_cast<std::uint32_t>(thread_teb));
+            cpu.memory().write32(thread_teb + 0x20, 1);
+            cpu.memory().write32(thread_teb + 0x24, thread_id);
+            cpu.memory().write32(thread_teb + 0x30, static_cast<std::uint32_t>(detail::peb_base));
+        }
         if (guest_is_64_bit_) {
             cpu.memory().write64(initial_rsp, thread_return_thunk_);
         } else {
@@ -3384,17 +3402,16 @@ bool Runtime::dispatch(Cpu &cpu, std::uint32_t &exit_code, bool &exited) {
         thread_cpu->reset(entry, initial_rsp, guest_is_64_bit_);
         if (guest_is_64_bit_) {
             thread_cpu->set_reg(Rcx, parameter);
-            thread_cpu->set_gs_base(detail::teb_base);
+            thread_cpu->set_gs_base(thread_teb);
         } else {
-            thread_cpu->set_fs_base(detail::teb_base);
+            thread_cpu->set_fs_base(thread_teb);
         }
-        const auto handle = next_guest_thread_handle_++;
-        const auto thread_id = next_guest_thread_id_++;
         guest_thread_handles_.emplace(handle, guest_threads_.size());
         GuestThread thread;
         thread.cpu = std::move(thread_cpu);
         thread.handle = handle;
         thread.id = thread_id;
+        thread.teb_base = thread_teb;
         guest_threads_.push_back(std::move(thread));
         if (id_output != 0) {
             cpu.memory().write32(id_output, thread_id);
