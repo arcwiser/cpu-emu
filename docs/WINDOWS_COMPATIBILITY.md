@@ -38,7 +38,7 @@ explicit adapter.
 | Keyboard state | `GetAsyncKeyState`, `GetKeyState`, `GetKeyboardState` | Scalar queries are pointer-free; the 256-byte state table is copied from host storage only after validating the complete writable guest range |
 | Guest fail-fast | `abort`, `_invoke_watson`, `_invalid_parameter_noinfo`, `_invalid_parameter_noinfo_noreturn`, `_wassert`, `_assert` | Noreturn paths terminate only the guest with the Windows fast-fail status; never forwarded natively |
 | Console output | `GetStdHandle`, `WriteFile` | Focused on standard output/error handles |
-| Errors and diagnostics | `GetLastError`, `SetLastError`, `OutputDebugStringA` | Per-runtime error state |
+| Errors and diagnostics | `GetLastError`, `SetLastError`, `OutputDebugStringA` | Last-error values are isolated per interpreted guest thread |
 | Virtual memory | `VirtualAlloc`, `VirtualFree`, `VirtualProtect`, `VirtualQuery` | No placeholders, write-watch, or full mapped-section semantics |
 | Pointer probes | `IsBadReadPtr`, `IsBadWritePtr` | Checks guest mapping commitment and permissions across the complete requested range; deprecated host probing is never used |
 | Heap and local/global memory | `malloc`, `free`, `realloc`, `HeapAlloc`, `HeapFree`, `HeapReAlloc`, `LocalAlloc`, `GlobalAlloc`, related size/lock calls | Checked 16-byte-aligned allocations come from bounded guest arenas; freed spans become inaccessible, reject double-free, and can be reused without exposing host pointers; heap handles remain simplified guest tokens |

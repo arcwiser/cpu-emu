@@ -102,15 +102,20 @@ struct TlsIsolationState {
     DWORD index;
     std::uintptr_t initial_value;
     std::uintptr_t worker_value;
+    DWORD initial_error;
+    DWORD worker_error;
 };
 
 DWORD WINAPI tls_isolation_worker(void *parameter) {
     auto &state = *static_cast<TlsIsolationState *>(parameter);
+    state.initial_error = GetLastError();
     state.initial_value = reinterpret_cast<std::uintptr_t>(TlsGetValue(state.index));
     if (TlsSetValue(state.index, reinterpret_cast<void *>(0x2222)) == FALSE) {
         return 1;
     }
     state.worker_value = reinterpret_cast<std::uintptr_t>(TlsGetValue(state.index));
+    SetLastError(0x2222);
+    state.worker_error = GetLastError();
     return 7;
 }
 
@@ -710,19 +715,24 @@ int run_sync_selftest() {
           "sync selftest: reject null keyboard state output");
     static_cast<void>(GetAsyncKeyState(VK_SHIFT));
     static_cast<void>(GetKeyState(VK_CAPITAL));
-    TlsIsolationState tls_state{TlsAlloc(), 0xffff, 0};
+    TlsIsolationState tls_state{TlsAlloc(), 0xffff, 0, 0xffff, 0};
     check(tls_state.index != TLS_OUT_OF_INDEXES &&
               TlsSetValue(tls_state.index, reinterpret_cast<void *>(0x1111)) != FALSE,
           "sync selftest: allocate main-thread TLS value");
+    SetLastError(0x1111);
     DWORD tls_thread_id = 0;
     const auto tls_thread =
         CreateThread(nullptr, 0, tls_isolation_worker, &tls_state, 0, &tls_thread_id);
     check(tls_thread != nullptr && tls_thread_id != GetCurrentThreadId() &&
               WaitForSingleObject(tls_thread, INFINITE) == WAIT_OBJECT_0,
           "sync selftest: join cooperative guest thread");
+    const auto main_thread_error = GetLastError();
     check(tls_state.initial_value == 0 && tls_state.worker_value == 0x2222 &&
               reinterpret_cast<std::uintptr_t>(TlsGetValue(tls_state.index)) == 0x1111,
           "sync selftest: isolate TLS values by guest thread");
+    check(tls_state.initial_error == 0 && tls_state.worker_error == 0x2222 &&
+              main_thread_error == 0x1111,
+          "sync selftest: isolate last-error values by guest thread");
     if (tls_thread != nullptr) {
         CloseHandle(tls_thread);
     }

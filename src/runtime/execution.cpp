@@ -140,6 +140,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
     active_guest_thread_id_ = 1;
     thread_return_thunk_ = 0;
     main_thread_priority_ = 0;
+    main_thread_last_error_ = 0;
     main_thread_waiting_ = false;
     main_thread_wait_handle_ = nullptr;
     main_thread_wait_thread_handle_ = 0;
@@ -646,6 +647,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
             }
 
             active_guest_thread_id_ = 1;
+            last_error_ = main_thread_last_error_;
             detail::set_callback_context(*this, cpu, exit_code, exited);
             poll_wait(cpu, main_thread_waiting_, main_thread_wait_handle_,
                       main_thread_wait_thread_handle_, main_thread_wait_deadline_);
@@ -655,12 +657,14 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
                     cpu.step();
                 }
             }
+            main_thread_last_error_ = last_error_;
 
             for (auto &thread : guest_threads_) {
                 if (exited || thread.completed) {
                     continue;
                 }
                 active_guest_thread_id_ = thread.id;
+                last_error_ = thread.last_error;
                 detail::set_callback_context(*this, *thread.cpu, exit_code, exited);
                 poll_wait(*thread.cpu, thread.waiting, thread.wait_handle,
                           thread.wait_thread_handle, thread.wait_deadline);
@@ -671,6 +675,7 @@ RunResult Runtime::run(const std::filesystem::path &executable, std::uint64_t in
                         thread.cpu->step();
                     }
                 }
+                thread.last_error = last_error_;
             }
         }
     } catch (const std::exception &) {

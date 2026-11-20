@@ -4,6 +4,14 @@ A running record of what the coding agent changed while building CPUEmu, newest 
 emulator's own activity is visible through its logging system (see `README.md` → Logging);
 this file is the companion log of development decisions.
 
+## 2026-11-20 — Per-thread Windows last-error state
+
+- Isolated `GetLastError`/`SetLastError` state per interpreted scheduler context. Switching between
+  the main guest and workers now saves and restores each thread's value instead of leaking the
+  most recently scheduled thread's API failure into another context.
+- Extended the joined-worker regression to verify a worker begins with zero, retains its own
+  `0x2222` value, and cannot overwrite the main thread's `0x1111` value.
+
 ## 2026-11-20 — Keyboard state adapters
 
 - Added pointer-free `GetAsyncKeyState` and `GetKeyState` forwarding plus a marshaled
